@@ -28,6 +28,11 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Q: What should CloudWatch alarms do when they trigger? → A: No alarm actions for MVP. Alarms exist as CloudWatch metrics only — operators poll the console. SNS/email integration deferred to post-MVP.
 - Q: How should operators access the EC2 instance for debugging? → A: AWS Systems Manager Session Manager. Adds 3 interface endpoints (`ssm`, `ssmmessages`, `ec2messages` — ~$21.90/month additional in single AZ). No SSH keys, no bastion host, no public IP. SSM agent is pre-installed on Amazon Linux 2023.
 - Q: How should the CloudWatch agent be installed and configured, and is a VPC endpoint needed for log shipping? → A: Install via `dnf install amazon-cloudwatch-agent` in user data script. Add CloudWatch Logs interface endpoint (`com.amazonaws.{region}.logs`) for log shipping. Brings total to 10 endpoints (1 gateway + 9 interface), ~$65.70/month for interface endpoints in single AZ.
+- Q: On ASG instance replacement, how does the new instance recover the CodeCommit clone and dream cycle manifest? → A: User data script clones the CodeCommit repo on boot (via the git-codecommit VPC endpoint). The dream cycle manifest is ephemeral — lost on instance replacement, which is acceptable because pending notes already processed will have `status: active` in the repo and won't be re-picked. The only re-work is for batches that were in-flight at crash time, which is correct behavior (SQS visibility timeout returns those messages to the queue). No persistent EBS volume needed.
+- Q: Does the EC2 IAM role need read access to the CLI binary S3 path, which may be in a different bucket than the KB bucket? → A: Yes. The IAM role includes `s3:GetObject` scoped to the exact object ARN derived from the `cliBinaryS3Uri` config parameter. This is in addition to the KB bucket permissions. The S3 gateway endpoint already supports cross-bucket access within the same region.
+- Q: How should the recall Lambda write the recall log to S3 asynchronously after returning results? → A: Use Lambda response streaming. The Lambda returns the API response to the caller first via the response stream, then continues execution to write the recall log to S3. This avoids adding latency to the response path while keeping the write within the same invocation. If the S3 write fails after the response is sent, the log is silently lost (acceptable — recall logs are best-effort analytics data). Note: response streaming requires the Lambda to use a function URL or the `RESPONSE_STREAM` invocation mode behind API Gateway; the CDK stack must configure the API Gateway integration accordingly.
+- Q: What is the exact JSON schema for the HTTP 400 validation error response from submitKnowledge? → A: A flat `errors` object keyed by field name, with string values describing the validation failure. Example: `{ "errors": { "title": "must be present and non-empty", "content": "must not exceed 100,000 characters" } }`. Only fields that failed validation appear in the object.
+- Q: Does the recall Lambda need S3 write permissions for recall logs, and how should they be scoped? → A: Yes. The recall Lambda's IAM role includes `s3:PutObject` scoped to `{bucket-arn}/recall-logs/*`. This follows least-privilege — the Lambda can write recall logs but cannot modify note files in the bucket.
 
 ## User Stories
 
@@ -59,7 +64,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Validates `title` is present, non-empty, and ≤ 255 characters
 - Validates `content` is present, non-empty, and ≤ 100,000 characters
 - Validates `author` is present, non-empty, and ≤ 100 characters
-- On validation failure, returns HTTP 400 with a JSON body describing which fields failed
+- On validation failure, returns HTTP 400 with a JSON body: `{ "errors": { "<field>": "<reason>", ... } }` — a flat object keyed by field name, containing only the fields that failed validation
 - On success, generates a 16-character Crockford base32 UID for the new note
 - On success, enqueues a message to SQS containing the UID, title, content, and author
 - On success, returns HTTP 202 with `{ "uid": "<UID>", "request_id": "<API Gateway request ID>" }`
@@ -81,9 +86,9 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - Instance runs Amazon Linux 2023
-- Instance has git, the CLI binary, and the CloudWatch agent pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint; installs CloudWatch agent via `dnf install amazon-cloudwatch-agent`)
+- Instance has git, the CLI binary, and the CloudWatch agent pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint; installs CloudWatch agent via `dnf install amazon-cloudwatch-agent`; clones the CodeCommit repository via the git-codecommit VPC endpoint)
 - CLI binary runs in server mode as a single long-running process managed by a systemd unit, handling SQS polling, dream cycle scheduling, and recall log processing via built-in timers (no system crontab)
-- Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket), OpenSearch Serverless (data plane access for direct queries during dream cycle), Bedrock (InvokeModel for dream cycle LLM calls, StartIngestionJob/GetIngestionJob for triggering KB data source sync), SSM (Session Manager access for operator debugging)
+- Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket + `s3:GetObject` on the `cliBinaryS3Uri` object ARN for binary download), OpenSearch Serverless (data plane access for direct queries during dream cycle), Bedrock (InvokeModel for dream cycle LLM calls, StartIngestionJob/GetIngestionJob for triggering KB data source sync), SSM (Session Manager access for operator debugging)
 - Instance polls SQS, batches ~5–10 messages, and commits them as Markdown files to CodeCommit in a single git commit per batch
 - After each commit, instance syncs changed files to S3 (incremental, not full repo)
 - Instance manages a lock file for concurrency control between ingestion batches and dream cycles
@@ -154,6 +159,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - Runtime: Node.js 22 (`nodejs22.x`) on ARM64 (Graviton), 1024 MB memory, 30-second timeout
+- IAM role has permissions for: Bedrock Knowledge Base Retrieve API, Bedrock InvokeModel (for coverage assessment LLM call), and `s3:PutObject` scoped to `{bucket-arn}/recall-logs/*` (for writing recall logs)
 - Accepts `query` (string, required) and `limit` (integer, optional, default 10) parameters
 - Calls Bedrock Knowledge Base Retrieve API with the query
 - Optionally filters results to `status: active` notes only (configurable via environment variable `EXCLUDE_PENDING`, default `true`)
@@ -163,7 +169,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
   - If a gap is detected, executes a follow-up Bedrock Retrieve query
   - Deduplicates combined results by UID
   - Falls back to original results silently on any failure in the coverage step
-- After returning results, asynchronously writes a recall log to S3 (`recall-logs/<YYYY-MM-DD>/<request-id>.json`)
+- Uses Lambda response streaming to return results to the caller first, then continues execution to write a recall log to S3 (`recall-logs/<YYYY-MM-DD>/<request-id>.json`). If the post-response S3 write fails, the log is silently lost (best-effort). CDK stack configures the API Gateway integration to support response streaming (`RESPONSE_STREAM` invocation mode)
 
 ### FR-10: Dream Cycle Execution
 
@@ -214,7 +220,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - SQS DLQ captures messages that fail processing after 3 attempts
 - Dream cycle partial failures are recoverable on next run via manifest
 - Lock file heartbeat TTL prevents permanent deadlocks from EC2 crashes
-- EC2 instance auto-recovers via Auto Scaling Group (min: 1, max: 1, desired: 1), pinned to a single AZ (same AZ as VPC interface endpoints)
+- EC2 instance auto-recovers via Auto Scaling Group (min: 1, max: 1, desired: 1), pinned to a single AZ (same AZ as VPC interface endpoints). Replacement instances clone the CodeCommit repo on boot; the dream cycle manifest is ephemeral (lost on replacement) — still-pending notes are re-processed from scratch on the next cycle
 - S3 sync failures on one cycle are caught by the next cycle's Phase 0
 
 ### NFR-3: Security
@@ -224,7 +230,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Acceptance Criteria:**
 - All API endpoints require AWS_IAM authorization (SigV4)
 - EC2 instance runs in a private subnet with no public IP
-- EC2 instance role follows least-privilege (scoped to specific SQS queue ARN, CodeCommit repo ARN, S3 bucket ARN, OpenSearch collection ARN, Bedrock model ARNs)
+- EC2 instance role follows least-privilege (scoped to specific SQS queue ARN, CodeCommit repo ARN, S3 bucket ARN, `cliBinaryS3Uri` object ARN, OpenSearch collection ARN, Bedrock model ARNs)
 - S3 bucket blocks public access
 - OpenSearch Serverless collection is not publicly accessible
 - No secrets stored in code or environment variables (IAM roles handle all auth)
@@ -289,7 +295,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - **Dream cycle crash mid-batch:** Lock heartbeat expires after 30 min; next run force-acquires lock; manifest indicates which batches completed; unfinished batches are retried
 - **OpenSearch reindex timeout (>10 min):** Dream cycle proceeds best-effort with current index state
 - **Bedrock API throttling during dream cycle:** Retries up to 3 times with exponential backoff per batch; persistent failure marks batch as failed in manifest
-- **EC2 instance termination:** ASG launches replacement; on boot, instance resumes SQS polling and dream cycle scheduling; any in-flight batch is retried (SQS visibility timeout returns message to queue)
+- **EC2 instance termination:** ASG launches replacement; user data clones CodeCommit repo and starts CLI process, resuming SQS polling and dream cycle scheduling. Dream cycle manifest is lost — still-pending notes are re-processed from scratch on next cycle (already-processed notes have `status: active` and are skipped). Any in-flight SQS batch is retried (visibility timeout returns messages to queue)
 
 ## Success Criteria
 
