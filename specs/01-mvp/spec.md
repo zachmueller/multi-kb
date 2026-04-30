@@ -6,9 +6,18 @@
 
 ## Overview
 
-A unified CLI binary that enables individuals to automatically extract knowledge from their AI conversations and share it across team and personal knowledge bases. The CLI operates in two modes — client mode (local, on a user's machine) and server mode (deployed to back-end infrastructure) — using a single codebase with shared logic and swappable storage/search backends.
+A unified CLI binary written in **Go** that enables individuals to automatically extract knowledge from their AI conversations and share it across team and personal knowledge bases. The CLI operates in two modes — client mode (local, on a user's machine) and server mode (deployed to back-end infrastructure) — using a single codebase with shared logic and swappable storage/search backends.
 
 The MVP focuses on the client-mode experience: scanning AI conversations, extracting knowledge via LLM, routing extracted notes to configured knowledge bases (local or remote), and injecting relevant knowledge into new AI conversations via harness hooks.
+
+## Clarifications
+
+### Session 2026-04-30
+- Q: What implementation language should be used for the CLI binary? → A: Go — chosen for trivial cross-compilation to all target platforms, single static binary output, strong AWS SDK support, and fast compile times.
+- Q: Are coverage assessment (two-pass recall) and recall logging (S3 logs + daily last-recalled updates) in scope for MVP? → A: Both deferred — they add latency and infrastructure complexity without being essential for the core capture-and-inject loop.
+- Q: How should the CLI handle scheduled processing on the user's machine? → A: OS-native cron — CLI registers with crontab (macOS/Linux) or Task Scheduler (Windows) during setup; each run is a short-lived process, not a daemon.
+- Q: What level of observability should MVP provide beyond error logs? → A: Structured run log + status command — each run appends a summary to `runs.jsonl`; `multi-kb status` displays last N runs and current config summary.
+- Q: Should `federate` auth be deferred from MVP given the open-source focus? → A: Keep in MVP — from the CLI's perspective, `federate` is simply "no auth config, call endpoint directly" since the backend handles auth transparently. Minimal additional implementation cost.
 
 ## User Stories
 
@@ -43,6 +52,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - A local KB is created automatically (no additional setup required)
 - User can add remote KBs by providing an API endpoint URL and selecting an auth type (`iam` or `federate`)
 - For `iam` auth, user specifies an AWS CLI profile name; no credentials are stored by the CLI itself
+- For `federate` auth, no additional auth configuration is needed from the user — the CLI calls the endpoint directly and the backend handles authentication transparently
 - CLI fetches and displays the remote KB's self-description to confirm connectivity
 - User can configure routing rules per directory, per directory+harness, and per directory+harness+persona/workflow
 - Each routing pairing supports two settings: routing mode (`always` or `consider`) and approval mode (`auto-approve` or `require-manual-approval`)
@@ -54,7 +64,10 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 **Description:** The CLI scans tracked directories on a schedule (or manual trigger) for modified conversations, extracts knowledge via LLM, and routes to target KBs.
 
 **Acceptance Criteria:**
-- Scanning runs on a user-configurable cron schedule or via manual trigger
+- Scanning runs on a user-configurable schedule or via manual trigger (e.g., `multi-kb process`)
+- Scheduled runs use the OS-native scheduler: crontab on macOS/Linux, Task Scheduler on Windows
+- During initial setup, the CLI registers itself with the OS-native scheduler at the user-configured interval (e.g., every 30 minutes)
+- Each scheduled run is a short-lived process (not a long-running daemon)
 - Only conversations modified since the per-directory `last-processed` timestamp are scanned
 - `last-processed` is based on conversation file's last-modified time, not wall clock time
 - Each conversation is translated from native harness format into an intermediate format before extraction
@@ -138,7 +151,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - UIDs are 16-character Crockford base32 strings generated locally
 - Newly captured notes start with `status: pending`
 - Knowledge recall against local KBs uses full text search (e.g., `git grep` or lightweight local search index) — not vector embeddings
-- Local dream cycles run on the same cron schedule as capture processing (or manual trigger)
+- Local dream cycles run on the same OS-native cron schedule as capture processing (or manual trigger via `multi-kb dream-cycle`)
 - Local dream cycles use the same Phase 1–4 logic as server mode, with full text search substituted for OpenSearch queries
 
 ### FR-9: Local Web UI for Approvals
@@ -166,13 +179,25 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Per-directory routing configuration tracks harness pairings, target KBs, routing modes, and approval modes
 - Per-directory `last-processed` timestamps are tracked (in this config or a separate state file)
 
+### FR-11: Observability and Status Reporting
+
+**Description:** The CLI maintains a structured run log and provides a status command so users can verify the tool is working correctly.
+
+**Acceptance Criteria:**
+- Each capture processing run appends a summary entry to `~/.multi-kb/logs/runs.jsonl` containing: timestamp, run trigger (cron or manual), directories scanned, conversations processed, notes extracted, notes routed (by target KB), errors encountered, and run duration
+- Each dream cycle run appends a similar summary entry (timestamp, trigger, batches processed, actions taken by type, errors, duration)
+- `multi-kb status` displays a summary of the last N runs (default 10), including success/failure status and key counts
+- `multi-kb status` also displays current configuration summary: tracked directories, configured KBs, and next scheduled run time
+- Run log entries use structured JSONL format for machine parseability
+
 ## Non-Functional Requirements
 
 ### NFR-1: Cross-Platform Distribution
 
-**Description:** The CLI must be easily installable across all major platforms without dependency management.
+**Description:** The CLI is implemented in Go and must be easily installable across all major platforms without dependency management.
 
 **Acceptance Criteria:**
+- Implemented in Go, compiled via `go build` with `CGO_ENABLED=0` for fully static binaries
 - Standalone binaries produced for Linux (amd64, arm64), macOS (amd64, arm64), and Windows (amd64)
 - No external runtime dependencies (no Python, Node.js, Java, etc.)
 - Install experience is: download binary, place on PATH, run
@@ -366,3 +391,5 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - **Harnesses beyond Notor and Claude Code:** Other harnesses (Kiro IDE, Kiro CLI, Cline) are deferred.
 - **Web UI design details:** The approval web UI's visual design and interaction specifics are deferred to a separate spec.
 - **Back-end CDK infrastructure:** Covered by the `multi-kb-cdk` repository spec.
+- **Coverage assessment for knowledge recall:** The two-pass retrieval quality check (secondary LLM call to detect gaps in recall results) described in the design doc is deferred to a future iteration.
+- **Recall logging and last-recalled updates:** S3-based recall logging and daily batch processing to update `last-recalled` frontmatter timestamps are deferred to a future iteration.
