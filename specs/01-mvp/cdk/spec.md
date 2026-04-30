@@ -10,6 +10,15 @@ This specification defines the back-end infrastructure for a multi-team knowledg
 
 The CDK stack is designed to be deployed independently by any team — each deployment produces a self-contained knowledge base instance with its own storage, search index, and API surface. The CLI (separate repo) interacts with these instances through the standardized API layer.
 
+## Clarifications
+
+### Session 2026-04-30
+
+- Q: VPC networking — VPC endpoints only vs NAT gateway vs hybrid? → A: VPC endpoints only (gateway endpoint for S3, interface endpoints for SQS, CodeCommit, Bedrock, and OpenSearch Serverless). No NAT gateway.
+- Q: How does `last-linked-to` get updated on the back end? → A: Deferred to post-MVP. The field remains in the frontmatter schema but is not populated by any process in the MVP.
+- Q: How does the EC2 instance get the CLI binary? → A: S3 bucket. Deployer uploads CLI binary to a configurable S3 path; user data script downloads it on boot via the S3 VPC gateway endpoint.
+- Q: Should the recall Lambda be VPC-attached to reach OpenSearch Serverless? → A: No. Lambda calls Bedrock Retrieve API only (public endpoint); Bedrock's service role accesses OpenSearch internally. No VPC attachment needed for Lambda.
+
 ## User Stories
 
 - As a team deploying a knowledge base, I want a single CDK deployment that provisions all required infrastructure so that I don't have to manually configure interconnected AWS services.
@@ -61,12 +70,13 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - Instance runs Amazon Linux 2023
-- Instance has git and the CLI binary pre-installed (via user data script or AMI)
+- Instance has git and the CLI binary pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint)
 - Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket), OpenSearch Serverless (data plane access), Bedrock (InvokeModel for dream cycle LLM calls)
 - Instance polls SQS, batches ~5–10 messages, and commits them as Markdown files to CodeCommit in a single git commit per batch
 - After each commit, instance syncs changed files to S3 (incremental, not full repo)
 - Instance manages a lock file for concurrency control between ingestion batches and dream cycles
-- Instance is deployed in a private subnet (no public IP); outbound access via NAT gateway
+- Instance is deployed in a private subnet (no public IP); outbound access via VPC endpoints (no NAT gateway)
+- VPC gateway endpoint for S3 (free); VPC interface endpoints for SQS, CodeCommit, Bedrock, and OpenSearch Serverless
 
 ### FR-5: CodeCommit Repository
 
@@ -76,6 +86,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Repository is created by the CDK stack with a configurable name
 - Notes are stored as `<UID>.md` files in the repository root (flat structure, no subdirectories for MVP)
 - Each note file contains YAML frontmatter with: `uid`, `title`, `status`, `last-updated`, `last-linked-to`, `last-recalled`, `consolidated-from-notes`, and `author`
+- `last-linked-to` is present in the schema but not populated by any MVP process (deferred to post-MVP)
 - The EC2 instance is the sole writer to this repository
 
 ### FR-6: S3 Bucket (Replication Layer)
@@ -96,8 +107,9 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - Collection type is "VECTORSEARCH"
-- Data access policy grants the EC2 instance and recall Lambda read/write access to the collection's indexes
-- Network policy allows access from VPC (EC2 instance) and Lambda
+- Data access policy grants the EC2 instance role and the Bedrock Knowledge Base service role read/write access to the collection's indexes
+- Network policy allows access from VPC (EC2 instance) and from the Bedrock service (for Knowledge Base Retrieve API queries)
+- Lambda functions do not access OpenSearch directly — they call the Bedrock Retrieve API, which accesses OpenSearch via its own service role
 - Encryption policy uses AWS-owned key for MVP
 - Supports incremental reindexing triggered by the EC2 instance
 
@@ -212,7 +224,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - OpenSearch Serverless uses minimum OCU configuration (2 OCUs for indexing, 2 for search)
 - Lambda functions use ARM64 architecture (Graviton) for cost savings
 - S3 uses standard storage class (no lifecycle rules for MVP)
-- No NAT Gateway charges when possible — evaluate VPC endpoints for S3, SQS, CodeCommit, and Bedrock as a cost optimization
+- No NAT gateway — all outbound traffic routed via VPC endpoints (S3 gateway endpoint is free; interface endpoints for SQS, CodeCommit, Bedrock, and OpenSearch Serverless)
 
 ## User Scenarios & Testing
 
@@ -312,6 +324,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 | `dreamCycleSchedule` | `"0 */6 * * *"` | Cron expression for dream cycle |
 | `excludePendingFromRecall` | `true` | Whether to filter pending notes from recall |
 | `coverageScoreThreshold` | `0.3` | Score below which coverage assessment fires |
+| `cliBinaryS3Uri` | _(required)_ | S3 URI of the CLI binary to install on the EC2 instance (e.g., `s3://my-artifacts/multi-kb-cli/latest/multi-kb-cli-linux-amd64`) |
 | `vpcId` | _(none — creates new VPC)_ | Optional existing VPC to deploy into |
 
 ### Stack Outputs
@@ -349,3 +362,4 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - **Cost allocation tags beyond stack-level:** Basic stack tags only
 - **VPC peering or cross-account networking:** Each KB instance is self-contained
 - **CLI binary build/release pipeline:** Handled in the `multi-kb-cli` repo
+- **`last-linked-to` timestamp updates:** Field is in the frontmatter schema but not populated by any MVP process
