@@ -1,6 +1,6 @@
 # Multi-KB CLI — MVP
 
-**Created:** 2025-07-15
+**Created:** 2026-04-30
 **Status:** Draft
 **Branch:** feature/01-mvp
 
@@ -23,6 +23,11 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: Where does the CLI get the `author` identity for `submitKnowledge` API calls? → A: Single `author` field configured in `config.yaml` during initial setup (one identity across all KBs). For `federate` auth this would typically be the Amazon alias; for `iam`/open-source it's a free-form string the user provides.
 - Q: What happens if a scheduled capture processing run overlaps with a still-running previous run? → A: Lock file with heartbeat TTL (same pattern as dream cycles) — if a previous run still holds the lock, the new run skips. Consistent with the existing dream cycle concurrency control.
 - Q: What do local dream cycle Phases 0 and 4 look like concretely, given there's no S3/OpenSearch locally? → A: Phase 0 is a no-op (local git repo is always current). Phase 4 is just git commit + update timestamps + clear manifest + release lock. No sync or reindex steps.
+- Q: Should per-directory `last-processed` timestamps and other mutable runtime state live in `config.yaml` or a separate file? → A: Separate state file (`~/.multi-kb/state.yaml`) — config is user-editable intent, state is CLI-managed runtime data. Separating them avoids read-modify-write conflicts if the user edits config while the CLI is running, and keeps config validation simple.
+- Q: What interaction model should the setup wizard (FR-2) use? → A: Interactive terminal wizard using guided prompts and menus (e.g., Go libraries like `bubbletea` or `survey`). Keeps the single-binary promise, requires no web UI dependency for setup, and is idiomatic for CLI tools.
+- Q: What specific full text search mechanism should local KB recall use? → A: `git grep` directly against the working tree — no separate search index. Zero-maintenance, no additional dependencies, and fast enough for expected MVP local KB sizes (hundreds to low thousands of notes).
+- Q: How should local KB recall results (from `git grep`) be ranked for interleaving with scored remote KB results? → A: Match count ranking — rank local results by number of query term matches per note, with title matches weighted higher than body matches. Provides a coarse relevance signal sufficient for rank-based interleaving.
+- Q: Should the approval web server run persistently or on-demand? → A: On-demand via `multi-kb approve` — server starts, opens browser, shuts down when done. Consistent with the "short-lived process, not a daemon" design principle. Approval is a deliberate user action, not a background task.
 
 ## User Stories
 
@@ -48,9 +53,11 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 ### FR-2: Initial Setup Experience
 
-**Description:** First-run setup walks the user through configuring chat sources, target knowledge bases, and routing rules.
+**Description:** First-run setup walks the user through configuring chat sources, target knowledge bases, and routing rules via an interactive terminal wizard.
 
 **Acceptance Criteria:**
+- Setup uses an interactive terminal wizard with guided prompts and selection menus (e.g., `bubbletea` or `survey` Go library)
+- Individual setup steps are also available as standalone subcommands (e.g., `multi-kb add-source`, `multi-kb add-kb`) for post-setup modifications
 - User can select which AI harnesses they use (Notor, Claude Code for MVP)
 - User can point to directories where they use those harnesses
 - CLI auto-discovers chat history locations within specified directories and presents a summary for confirmation
@@ -159,35 +166,42 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Notes use Obsidian-flavor Markdown with the same frontmatter schema as remote KBs (uid, title, status, last-updated, etc.)
 - UIDs are 16-character Crockford base32 strings generated locally
 - Newly captured notes start with `status: pending`
-- Knowledge recall against local KBs uses full text search (e.g., `git grep` or lightweight local search index) — not vector embeddings
+- Knowledge recall against local KBs uses `git grep` against the working tree — no separate search index, no vector embeddings
+- Local recall results are ranked by match count (number of query term matches per note, title matches weighted higher than body matches) to produce a coarse relevance ordering for interleaving with remote KB results
 - Local dream cycles run on the same OS-native cron schedule as capture processing (or manual trigger via `multi-kb dream-cycle`)
-- Local dream cycles use the same Phase 1–4 logic as server mode, with full text search substituted for OpenSearch queries and simplified boundary phases: Phase 0 is a no-op (local git repo is always current), Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
+- Local dream cycles use the same Phase 1–4 logic as server mode, with `git grep` substituted for OpenSearch queries and simplified boundary phases: Phase 0 is a no-op (local git repo is always current), Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
 
 ### FR-9: Local Web UI for Approvals
 
-**Description:** The CLI hosts a lightweight local web server providing a UI for reviewing and approving staged knowledge notes.
+**Description:** The CLI hosts an on-demand local web server (via `multi-kb approve`) providing a UI for reviewing and approving staged knowledge notes.
 
 **Acceptance Criteria:**
+- Web server launches on-demand via `multi-kb approve` command, automatically opens the user's default browser, and shuts down when the user closes it or all pending notes are resolved
 - Web server is accessible locally for reviewing pending notes from `~/.multi-kb/pending/`
 - Users can approve or reject individual staged notes
 - Approved notes are submitted to their target KB (local or remote) and the corresponding JSON file is deleted from `~/.multi-kb/pending/`
 - Rejected notes have their JSON file deleted from `~/.multi-kb/pending/`
 - UI displays note title, content, target KB, and source conversation context (all read from the pending JSON file)
 
-### FR-10: Configuration File Structure
+### FR-10: Configuration and State File Structure
 
-**Description:** All CLI configuration is stored in a YAML file at `~/.multi-kb/config.yaml`.
+**Description:** CLI configuration is stored in `~/.multi-kb/config.yaml` (user-editable intent). Mutable runtime state is stored separately in `~/.multi-kb/state.yaml` (CLI-managed, not user-edited).
 
 **Acceptance Criteria:**
-- Top-level `mode` setting determines client vs. server operation
-- Top-level `author` field stores the user's identity string (used for all `submitKnowledge` API calls)
-- `knowledge_bases` array defines remote KB connections (name, endpoint, auth, description)
-- `extraction` section defines model ID, AWS profile, and region for Bedrock calls
-- `translation` section optionally overrides summarization model
-- `dream_cycle` section optionally overrides consolidation model
-- `hook` section defines injection timeout
-- Per-directory routing configuration tracks harness pairings, target KBs, routing modes, and approval modes
-- Per-directory `last-processed` timestamps are tracked (in this config or a separate state file)
+- **Config file (`config.yaml`):**
+  - Top-level `mode` setting determines client vs. server operation
+  - Top-level `author` field stores the user's identity string (used for all `submitKnowledge` API calls)
+  - `knowledge_bases` array defines remote KB connections (name, endpoint, auth, description)
+  - `extraction` section defines model ID, AWS profile, and region for Bedrock calls
+  - `translation` section optionally overrides summarization model
+  - `dream_cycle` section optionally overrides consolidation model
+  - `hook` section defines injection timeout
+  - Per-directory routing configuration tracks harness pairings, target KBs, routing modes, and approval modes
+- **State file (`state.yaml`):**
+  - Per-directory `last-processed` timestamps
+  - Per-conversation processing status (`partially-processed`, `failed`)
+  - Last dream cycle timestamp
+  - CLI never writes to `config.yaml` after initial setup (except via explicit user-triggered commands like adding a new KB)
 
 ### FR-11: Observability and Status Reporting
 
