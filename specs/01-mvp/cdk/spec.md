@@ -14,10 +14,15 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 ### Session 2026-04-30
 
-- Q: VPC networking — VPC endpoints only vs NAT gateway vs hybrid? → A: VPC endpoints only (gateway endpoint for S3, interface endpoints for SQS, CodeCommit, Bedrock, and OpenSearch Serverless). No NAT gateway.
+- Q: VPC networking — VPC endpoints only vs NAT gateway vs hybrid? → A: VPC endpoints only (see "What is the exact set of VPC endpoints required?" below for full enumerated list). No NAT gateway.
 - Q: How does `last-linked-to` get updated on the back end? → A: Deferred to post-MVP. The field remains in the frontmatter schema but is not populated by any process in the MVP.
 - Q: How does the EC2 instance get the CLI binary? → A: S3 bucket. Deployer uploads CLI binary to a configurable S3 path; user data script downloads it on boot via the S3 VPC gateway endpoint.
 - Q: Should the recall Lambda be VPC-attached to reach OpenSearch Serverless? → A: No. Lambda calls Bedrock Retrieve API only (public endpoint); Bedrock's service role accesses OpenSearch internally. No VPC attachment needed for Lambda.
+- Q: Should the EC2 instance query OpenSearch directly or use Bedrock Retrieve API for dream cycle phases? → A: Direct OpenSearch Serverless queries via VPC endpoint. EC2 needs full query DSL control for metadata filtering (e.g., `status: pending`, excluding already-grouped UIDs) and iterative grouping logic in Phase 1. Bedrock Retrieve API is only used by the recall Lambda.
+- Q: How does the EC2 instance trigger OpenSearch reindexing from S3? → A: Via Bedrock `StartIngestionJob` / `GetIngestionJob` APIs against the Knowledge Base data source. EC2 does not perform direct OpenSearch indexing operations — the Bedrock KB sync pipeline handles S3 → OpenSearch indexing.
+- Q: What is the exact set of VPC endpoints required? → A: Six endpoints total. S3 gateway endpoint (`com.amazonaws.{region}.s3`); interface endpoints for SQS (`com.amazonaws.{region}.sqs`), CodeCommit git (`com.amazonaws.{region}.git-codecommit`), Bedrock Runtime (`com.amazonaws.{region}.bedrock-runtime`) for InvokeModel, Bedrock Agent (`com.amazonaws.{region}.bedrock-agent`) for StartIngestionJob/GetIngestionJob, and OpenSearch Serverless (`com.amazonaws.{region}.aoss`) for direct dream cycle queries. No generic `bedrock` control plane endpoint needed.
+- Q: Should VPC interface endpoints span multiple AZs for resilience or single AZ for cost? → A: Single AZ. ASG is pinned to the same AZ as the interface endpoints. Trades AZ failover for ~50% cost reduction on endpoints (~$36.50/month vs ~$73/month). Acceptable for MVP since the system is single-instance with no HA requirement beyond instance recovery within the same AZ.
+- Q: How are cron schedules (dream cycle, recall log processing) managed on the EC2 instance? → A: The CLI runs as a single long-running process with built-in timers. One process handles SQS polling, dream cycle scheduling, and recall log processing — managed as a single systemd unit. No system crontab entries.
 
 ## User Stories
 
@@ -71,12 +76,20 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Acceptance Criteria:**
 - Instance runs Amazon Linux 2023
 - Instance has git and the CLI binary pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint)
-- Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket), OpenSearch Serverless (data plane access), Bedrock (InvokeModel for dream cycle LLM calls)
+- CLI binary runs in server mode as a single long-running process managed by a systemd unit, handling SQS polling, dream cycle scheduling, and recall log processing via built-in timers (no system crontab)
+- Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket), OpenSearch Serverless (data plane access for direct queries during dream cycle), Bedrock (InvokeModel for dream cycle LLM calls, StartIngestionJob/GetIngestionJob for triggering KB data source sync)
 - Instance polls SQS, batches ~5–10 messages, and commits them as Markdown files to CodeCommit in a single git commit per batch
 - After each commit, instance syncs changed files to S3 (incremental, not full repo)
 - Instance manages a lock file for concurrency control between ingestion batches and dream cycles
 - Instance is deployed in a private subnet (no public IP); outbound access via VPC endpoints (no NAT gateway)
-- VPC gateway endpoint for S3 (free); VPC interface endpoints for SQS, CodeCommit, Bedrock, and OpenSearch Serverless
+- VPC endpoints (6 total):
+  - S3 gateway endpoint (`com.amazonaws.{region}.s3`) — CLI binary download, S3 sync (free)
+  - SQS interface endpoint (`com.amazonaws.{region}.sqs`) — queue polling
+  - CodeCommit git interface endpoint (`com.amazonaws.{region}.git-codecommit`) — git clone/push
+  - Bedrock Runtime interface endpoint (`com.amazonaws.{region}.bedrock-runtime`) — InvokeModel for dream cycle LLM calls
+  - Bedrock Agent interface endpoint (`com.amazonaws.{region}.bedrock-agent`) — StartIngestionJob/GetIngestionJob for KB data source sync
+  - OpenSearch Serverless interface endpoint (`com.amazonaws.{region}.aoss`) — direct query DSL access for dream cycle phases
+- All interface endpoints and the EC2 ASG are pinned to a single AZ to minimize endpoint costs (~$36.50/month for 5 interface endpoints in 1 AZ)
 
 ### FR-5: CodeCommit Repository
 
@@ -111,7 +124,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Network policy allows access from VPC (EC2 instance) and from the Bedrock service (for Knowledge Base Retrieve API queries)
 - Lambda functions do not access OpenSearch directly — they call the Bedrock Retrieve API, which accesses OpenSearch via its own service role
 - Encryption policy uses AWS-owned key for MVP
-- Supports incremental reindexing triggered by the EC2 instance
+- Reindexing is triggered indirectly by the EC2 instance via Bedrock `StartIngestionJob` API (Bedrock KB sync pipeline handles S3 → OpenSearch indexing)
 
 ### FR-8: Bedrock Knowledge Base
 
@@ -145,14 +158,14 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Description:** The EC2 instance runs dream cycle consolidation on a configurable cron schedule, processing pending notes through grouping, context retrieval, and LLM-driven consolidation.
 
 **Acceptance Criteria:**
-- Cron schedule is configurable (default: every 6 hours)
+- Schedule is configurable (default: every 6 hours), managed by the CLI process's built-in timer (not system crontab)
 - Acquires lock file before processing; skips if lock is held with active heartbeat
 - Stale lock (no heartbeat update within 30 minutes) can be force-acquired
-- Phase 0: Syncs CodeCommit → S3, triggers OpenSearch reindex, waits up to 10 minutes for completion
-- Phase 1: Queries OpenSearch for `status: pending` notes, groups by similarity (max 10 per batch)
-- Phase 2: For each batch, queries OpenSearch for related `status: active` notes (max 10 per batch)
+- Phase 0: Syncs CodeCommit → S3, triggers Bedrock KB data source sync (`StartIngestionJob`), polls `GetIngestionJob` for completion, waits up to 10 minutes
+- Phase 1: Queries OpenSearch directly (via VPC endpoint, using OpenSearch query DSL) for `status: pending` notes, groups by similarity (max 10 per batch)
+- Phase 2: For each batch, queries OpenSearch directly for related `status: active` notes (max 10 per batch)
 - Phase 3: Sends each work item to LLM, applies returned actions (keep/merge/split/consolidate), commits per batch
-- Phase 4: Final S3 sync, OpenSearch reindex, clears manifest, releases lock
+- Phase 4: Final S3 sync, triggers Bedrock KB data source sync (`StartIngestionJob`), clears manifest, releases lock
 - Tracks per-batch completion in a manifest file for partial failure recovery
 - Uses configurable Bedrock model for consolidation LLM calls
 
@@ -161,7 +174,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Description:** The EC2 instance processes recall logs daily to update `last-recalled` timestamps on knowledge notes.
 
 **Acceptance Criteria:**
-- Runs once per day (cron schedule)
+- Runs once per day, managed by the CLI process's built-in timer (not system crontab)
 - Scans S3 objects under the previous day's `recall-logs/` prefix
 - Collects all recalled UIDs
 - Updates `last-recalled` frontmatter on each referenced note in CodeCommit
@@ -189,7 +202,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - SQS DLQ captures messages that fail processing after 3 attempts
 - Dream cycle partial failures are recoverable on next run via manifest
 - Lock file heartbeat TTL prevents permanent deadlocks from EC2 crashes
-- EC2 instance auto-recovers via Auto Scaling Group (min: 1, max: 1, desired: 1)
+- EC2 instance auto-recovers via Auto Scaling Group (min: 1, max: 1, desired: 1), pinned to a single AZ (same AZ as VPC interface endpoints)
 - S3 sync failures on one cycle are caught by the next cycle's Phase 0
 
 ### NFR-3: Security
@@ -224,7 +237,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - OpenSearch Serverless uses minimum OCU configuration (2 OCUs for indexing, 2 for search)
 - Lambda functions use ARM64 architecture (Graviton) for cost savings
 - S3 uses standard storage class (no lifecycle rules for MVP)
-- No NAT gateway — all outbound traffic routed via VPC endpoints (S3 gateway endpoint is free; interface endpoints for SQS, CodeCommit, Bedrock, and OpenSearch Serverless)
+- No NAT gateway — all outbound traffic routed via VPC endpoints (S3 gateway endpoint is free; 5 interface endpoints in a single AZ for SQS, CodeCommit git, Bedrock Runtime, Bedrock Agent, and OpenSearch Serverless — ~$36.50/month)
 
 ## User Scenarios & Testing
 
