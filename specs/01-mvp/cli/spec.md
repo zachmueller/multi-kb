@@ -14,7 +14,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 ### Session 2026-04-30
 - Q: What implementation language should be used for the CLI binary? → A: Go — chosen for trivial cross-compilation to all target platforms, single static binary output, strong AWS SDK support, and fast compile times.
-- Q: Are coverage assessment (two-pass recall) and recall logging (S3 logs + daily last-recalled updates) in scope for MVP? → A: Both deferred — they add latency and infrastructure complexity without being essential for the core capture-and-inject loop.
+- Q: Are coverage assessment (two-pass recall) and recall logging (S3 logs + daily last-recalled updates) in scope for MVP? → A: Both are in scope but handled entirely server-side by the CDK infrastructure — the recall Lambda performs coverage assessment transparently and writes recall logs to S3; the EC2 instance processes recall logs daily to update `last-recalled` timestamps. No CLI-side implementation required.
 - Q: How should the CLI handle scheduled processing on the user's machine? → A: OS-native cron — CLI registers with crontab (macOS/Linux) or Task Scheduler (Windows) during setup; each run is a short-lived process, not a daemon.
 - Q: What level of observability should MVP provide beyond error logs? → A: Structured run log + status command — each run appends a summary to `runs.jsonl`; `multi-kb status` displays last N runs and current config summary.
 - Q: Should `federate` auth be deferred from MVP given the open-source focus? → A: Keep in MVP — from the CLI's perspective, `federate` is simply "no auth config, call endpoint directly" since the backend handles auth transparently. Minimal additional implementation cost.
@@ -87,7 +87,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - User can add remote KBs by providing an API endpoint URL and selecting an auth type (`iam` or `federate`)
 - For `iam` auth, user specifies an AWS CLI profile name; no credentials are stored by the CLI itself
 - For `federate` auth, no additional auth configuration is needed from the user — the CLI calls the endpoint directly and the backend handles authentication transparently
-- CLI fetches and displays the remote KB's self-description to confirm connectivity
+- User provides a description for each remote KB during setup (used by the extraction LLM for `consider`-mode routing decisions). The CLI does not fetch descriptions from the remote KB — descriptions are user-supplied local configuration.
 - User can configure routing rules per directory, per directory+harness, and per directory+harness+persona/workflow
 - Each routing pairing supports two settings: routing mode (`always` or `consider`) and approval mode (`auto-approve` or `require-manual-approval`)
 - User can define global exclusion rules describing content that should never be shared with non-local KBs
@@ -190,10 +190,10 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - A `default` local KB is created automatically during CLI setup
 - Users can create additional named local KBs
 - Each local KB is its own git repository
-- Notes use Obsidian-flavor Markdown with the same frontmatter schema as remote KBs (uid, title, status, last-updated, etc.)
+- Notes use Obsidian-flavor Markdown with the same frontmatter schema as remote KBs (uid, title, status, author, last-updated, last-linked-to, last-recalled, consolidated-from-notes)
 - UIDs are 16-character Crockford base32 strings generated locally (local KB UIDs are completely independent of remote KB UIDs — even when the same note content is routed to both local and remote KBs, each KB generates its own UID with no correlation between them)
 - Newly captured notes start with `status: pending`
-- Knowledge recall against local KBs uses `git grep` against the working tree — no separate search index, no vector embeddings
+- Knowledge recall against local KBs uses `git grep` against the working tree — no separate search index, no vector embeddings. Results are filtered to `status: active` notes only by default (matching remote KB behavior), excluding `pending` notes that haven't been through a dream cycle.
 - For hook-based recall (FR-7), the CLI first calls the translation summarization model (`translation.summarization_model_id`) to derive 3–5 search keywords from the user's natural language query, then runs `git grep` per keyword. For dream cycle Phase 2 recall, keywords are derived mechanically from the note's title and key terms (no LLM call).
 - Local recall results are ranked by match count (number of query term matches per note, with title matches weighted at 3x body matches) to produce a coarse relevance ordering for interleaving with remote KB results
 - Local dream cycles run as part of the combined `multi-kb run` command (capture processing then dream cycle sequentially) on the OS-native cron schedule, or via manual trigger with `multi-kb dream-cycle`
@@ -312,7 +312,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 6. User confirms the discovered chat source
 7. CLI creates the default local KB at `~/.multi-kb/local/default/`
 8. User opts to add a remote team KB, provides endpoint URL, selects `iam` auth, specifies AWS profile
-9. CLI fetches the KB's self-description and displays it for confirmation
+9. User provides a description for the KB (used for LLM routing decisions)
 10. User configures routing: all conversations from this directory route to both local (always, auto-approve) and team KB (consider, require-manual-approval)
 11. CLI writes `~/.multi-kb/config.yaml` and reports setup complete
 
@@ -403,7 +403,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - **Title:** Succinct title (≤255 characters)
 - **Content:** Markdown body, self-contained
 - **Status:** `pending` → `active` (lifecycle managed by dream cycles)
-- **Frontmatter:** uid, title, status, last-updated, last-linked-to, last-recalled, consolidated-from-notes
+- **Frontmatter:** uid, title, status, author, last-updated, last-linked-to, last-recalled, consolidated-from-notes
 
 ### Configuration (config.yaml)
 - **Mode:** `client` | `server`
@@ -446,5 +446,5 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - **Harnesses beyond Notor and Claude Code:** Other harnesses (Kiro IDE, Kiro CLI, Cline) are deferred.
 - **Web UI design details:** The approval web UI's visual design and interaction specifics are deferred to a separate spec.
 - **Back-end CDK infrastructure:** Covered by the `multi-kb-cdk` repository spec.
-- **Coverage assessment for knowledge recall:** The two-pass retrieval quality check (secondary LLM call to detect gaps in recall results) described in the design doc is deferred to a future iteration.
-- **Recall logging and last-recalled updates:** S3-based recall logging and daily batch processing to update `last-recalled` frontmatter timestamps are deferred to a future iteration.
+- **Coverage assessment for knowledge recall:** Handled entirely server-side by the CDK infrastructure — the recall Lambda performs the two-pass retrieval quality check transparently. No CLI-side implementation required.
+- **Recall logging and last-recalled updates:** Handled entirely server-side by the CDK infrastructure — the recall Lambda writes recall logs to S3, and the EC2 instance processes them daily to update `last-recalled` timestamps. No CLI-side implementation required.
