@@ -28,6 +28,11 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: What specific full text search mechanism should local KB recall use? → A: `git grep` directly against the working tree — no separate search index. Zero-maintenance, no additional dependencies, and fast enough for expected MVP local KB sizes (hundreds to low thousands of notes).
 - Q: How should local KB recall results (from `git grep`) be ranked for interleaving with scored remote KB results? → A: Match count ranking — rank local results by number of query term matches per note, with title matches weighted higher than body matches. Provides a coarse relevance signal sufficient for rank-based interleaving.
 - Q: Should the approval web server run persistently or on-demand? → A: On-demand via `multi-kb approve` — server starts, opens browser, shuts down when done. Consistent with the "short-lived process, not a daemon" design principle. Approval is a deliberate user action, not a background task.
+- Q: How should local dream cycle Phase 1 (group pending notes by similarity) work without OpenSearch similarity search? → A: Singleton batches — each pending note is processed individually (no similarity grouping). Phase 2 uses keyword-based `git grep` queries derived from the note's title and key terms to find related existing notes. The Phase 3 consolidation LLM still catches duplicates within its batch. This avoids faking similarity search with `git grep` and keeps local dream cycles simple.
+- Q: Where does the CLI find Claude Code conversation history — in the user-pointed directory or a fixed known location? → A: Fixed location with project mapping — CLI always reads from `~/.claude/projects/`, using the user-pointed directory to identify which project subdirectory to scan (by matching the project path). The user doesn't need to know where Claude Code stores its files.
+- Q: How does the user learn about pending notes awaiting approval? → A: Passive notification — `multi-kb status` output and hook injection output both include a pending note count (e.g., "3 notes awaiting approval") when the queue is non-empty. No OS-native notifications or active alerting for MVP.
+- Q: Does the CLI retain a local record of notes submitted to remote KBs (e.g., the returned UID)? → A: Fire-and-forget — CLI submits to remote KB, logs success/failure in `runs.jsonl`, but retains no per-note submission record. Duplicates handled by dream cycles. Local UID generation only occurs for locally-targeted notes (i.e., UIDs in the local KB have no connection to UIDs generated server-side by `submitKnowledge`, even for the same note content routed to both local and remote KBs).
+- Q: How should the CLI handle pre-existing harness hooks at the same trigger points during setup? → A: Append — add the multi-kb hook alongside any existing hooks. Both Notor and Claude Code support multiple hooks per trigger point, so appending is safe and avoids breaking existing user workflows.
 
 ## User Stories
 
@@ -60,7 +65,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Individual setup steps are also available as standalone subcommands (e.g., `multi-kb add-source`, `multi-kb add-kb`) for post-setup modifications
 - User can select which AI harnesses they use (Notor, Claude Code for MVP)
 - User can point to directories where they use those harnesses
-- CLI auto-discovers chat history locations within specified directories and presents a summary for confirmation
+- CLI auto-discovers chat history locations within specified directories and presents a summary for confirmation. For Claude Code, the CLI reads from the fixed location `~/.claude/projects/` and uses the user-pointed directory to identify which project subdirectory to scan (by matching the project path).
 - A local KB is created automatically (no additional setup required)
 - User can add remote KBs by providing an API endpoint URL and selecting an auth type (`iam` or `federate`)
 - For `iam` auth, user specifies an AWS CLI profile name; no credentials are stored by the CLI itself
@@ -70,7 +75,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Each routing pairing supports two settings: routing mode (`always` or `consider`) and approval mode (`auto-approve` or `require-manual-approval`)
 - User can define global exclusion rules describing content that should never be shared with non-local KBs
 - Simplified onboarding presets are available for approval mode: auto-approve always, always require manual approval, or select per group
-- CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code session init hook), writing the necessary hook configuration entries automatically
+- CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code session init hook), appending the multi-kb hook alongside any pre-existing hooks at the same trigger points (never overwriting existing hooks)
 - User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls
 
 ### FR-3: Conversation Scanning and Capture Processing
@@ -108,6 +113,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Content block arrays are flattened to plain text strings
 - Previously processed messages are flagged with `previously_processed: true` based on the directory's `last-processed` timestamp
 - Per-harness translator modules exist for Notor and Claude Code
+- Claude Code translator reads from the fixed location `~/.claude/projects/<project>/<session>.jsonl`, where `<project>` is derived from the user-configured directory path
 
 ### FR-5: Extraction Sub-Agent
 
@@ -153,6 +159,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - If no KBs respond within timeout, conversation proceeds with no injection and a warning is logged
 - Notor integration: injected block prepended to conversation system context via conversation-start hook
 - Claude Code integration: injected block prepended to conversation system context via session initialization hook
+- When the pending approval queue (`~/.multi-kb/pending/`) is non-empty, the injected block includes a notice with the pending note count (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
 
 ### FR-8: Local Knowledge Base Storage
 
@@ -164,12 +171,12 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Users can create additional named local KBs
 - Each local KB is its own git repository
 - Notes use Obsidian-flavor Markdown with the same frontmatter schema as remote KBs (uid, title, status, last-updated, etc.)
-- UIDs are 16-character Crockford base32 strings generated locally
+- UIDs are 16-character Crockford base32 strings generated locally (local KB UIDs are completely independent of remote KB UIDs — even when the same note content is routed to both local and remote KBs, each KB generates its own UID with no correlation between them)
 - Newly captured notes start with `status: pending`
 - Knowledge recall against local KBs uses `git grep` against the working tree — no separate search index, no vector embeddings
 - Local recall results are ranked by match count (number of query term matches per note, title matches weighted higher than body matches) to produce a coarse relevance ordering for interleaving with remote KB results
 - Local dream cycles run on the same OS-native cron schedule as capture processing (or manual trigger via `multi-kb dream-cycle`)
-- Local dream cycles use the same Phase 1–4 logic as server mode, with `git grep` substituted for OpenSearch queries and simplified boundary phases: Phase 0 is a no-op (local git repo is always current), Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
+- Local dream cycles use the same Phase 1–4 logic as server mode with the following local adaptations: Phase 0 is a no-op (local git repo is always current); Phase 1 skips similarity grouping entirely — each pending note is processed as a singleton batch; Phase 2 uses keyword-based `git grep` queries (derived from the note's title and key terms) to find related existing notes; Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
 
 ### FR-9: Local Web UI for Approvals
 
@@ -212,6 +219,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Each dream cycle run appends a similar summary entry (timestamp, trigger, batches processed, actions taken by type, errors, duration)
 - `multi-kb status` displays a summary of the last N runs (default 10), including success/failure status and key counts
 - `multi-kb status` also displays current configuration summary: tracked directories, configured KBs, and next scheduled run time
+- `multi-kb status` displays the pending approval queue count when non-empty (e.g., "3 notes awaiting approval")
 - Run log entries use structured JSONL format for machine parseability
 
 ## Non-Functional Requirements
