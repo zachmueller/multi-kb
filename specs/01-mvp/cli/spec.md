@@ -44,6 +44,13 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: What specific Claude Code hook mechanism should the CLI use for knowledge injection? → A: User-prompt-submit hook with first-message guard — the CLI registers a Claude Code `user_prompt_submit` hook during setup. The hook fires on every user message, but the CLI checks whether this is the first message in the conversation (e.g., by checking for the absence of prior assistant messages in the session context provided by the hook). If it is not the first message, the CLI exits immediately with no output. If it is the first message, the CLI performs knowledge recall and outputs the injected context block. This reuses a well-defined, stable Claude Code hook event while preserving the "conversation-start only" injection constraint.
 - Q: What weight multiplier should title matches receive relative to body matches in local KB recall ranking? → A: 3x — a title match counts as 3 body matches when computing match-count rank scores. Simple, meaningful signal boost without over-dominating results.
 
+### Session 2026-04-30 (Clarify)
+- Q: How are individual conversations keyed in `state.yaml` for tracking processing status (`partially-processed`, `failed`)? → A: Source file path (e.g., `~/.claude/projects/my-project/abc123.jsonl`). Available pre-parse so the CLI can skip failed conversations without re-reading them. Accepted trade-off: entries become stale if a conversation file is renamed or moved, but this is rare in practice.
+- Q: What happens when the extraction LLM returns an empty `suggested_target_kbs` array for a note and there are no `always`-mode KBs configured for the current directory? → A: Fallback to local `default` KB — the note is written to the local default KB to prevent silent data loss. The local default KB acts as a safety net so no extracted knowledge is ever discarded. This aligns with the "zero tribal knowledge" goal.
+- Q: Can users edit a note's title or content during the approval flow, or is it strictly approve/reject? → A: Approve/reject with optional inline edit — the approval UI allows users to modify a note's title and content before approving. This handles the common "almost right but needs a tweak" case (e.g., fixing LLM hallucinations, redacting sensitive content). Rejected notes are still simply deleted with no editing step.
+- Q: What should the lock file heartbeat TTL and update frequency be for the CLI? → A: 30-minute TTL with 60-second heartbeat updates — matches the server-side value from the design doc. Generous for local runs (which typically complete in minutes) but provides ample headroom for large conversation backlogs or slow LLM responses without spurious stale-lock recovery.
+- Q: How should `multi-kb status` determine and display the next scheduled run time, given the CLI uses OS-native cron? → A: Parse the crontab entry and compute the next occurrence — display as an absolute timestamp (e.g., "Next run: 2026-04-30 14:30"). The CLI reads the user's crontab, finds the `multi-kb run` entry, and calculates the next fire time from the cron expression.
+
 ## User Stories
 
 - As a developer using AI coding assistants, I want knowledge from my AI conversations to be automatically captured and shared with my team so that tribal knowledge is reduced to zero.
@@ -99,14 +106,15 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Manual triggers remain available as standalone subcommands (`multi-kb process` for capture only, `multi-kb dream-cycle` for dream cycle only)
 - All subcommands (`multi-kb run`, `multi-kb process`, `multi-kb dream-cycle`) share the same lock file. If the lock is already held, scheduled runs skip silently; manual subcommands print a user-friendly message identifying the lock holder and last heartbeat timestamp, then exit immediately.
 - Each scheduled run is a short-lived process (not a long-running daemon)
-- A lock file with heartbeat TTL prevents concurrent runs; if a previous run still holds the lock, the new run skips (same pattern as dream cycle concurrency control)
+- A lock file with heartbeat TTL (30-minute TTL, 60-second heartbeat update interval) prevents concurrent runs; if a previous run still holds the lock, the new run skips (same pattern as dream cycle concurrency control)
 - Only conversations modified since the per-directory `last-processed` timestamp are scanned
 - `last-processed` is based on conversation file's last-modified time, not wall clock time
 - Each conversation is translated from native harness format into an intermediate format before extraction
 - Extraction is performed via a single Bedrock API call per conversation (or per chunk for oversized conversations)
 - Extracted notes are routed to target KBs per the user's routing configuration
 - For `always`-mode KBs, notes are unconditionally routed regardless of LLM suggestions
-- For `consider`-mode KBs, the LLM's routing recommendations are respected
+- For `consider`-mode KBs, the LLM's routing recommendations are respected (suggestions that don't match a configured KB name are silently dropped)
+- If a note has no routed targets after applying all routing rules (i.e., empty `suggested_target_kbs` and no `always`-mode KBs for the directory), the note falls back to the local `default` KB to prevent silent data loss
 - Auto-approved notes are submitted directly via the target KB's `submitKnowledge` API (or written to the local KB)
 - Manual-approval notes are staged as individual JSON files in `~/.multi-kb/pending/` (one file per note, containing title, content, target KB name, source conversation path, and extraction timestamp)
 - Remote submissions are self-throttled to a maximum of 10 requests per second per target KB
@@ -200,7 +208,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Web UI assets (HTML, CSS, JS) are embedded in the Go binary via `embed.FS` and served from memory at runtime — no external asset files or runtime dependencies required
 - Web server is accessible locally for reviewing pending notes from `~/.multi-kb/pending/`
 - Users can approve or reject individual staged notes
-- Approved notes are submitted to their target KB (local or remote) and the corresponding JSON file is deleted from `~/.multi-kb/pending/`
+- Before approving, users can optionally edit a note's title and content inline (e.g., to fix LLM hallucinations or redact sensitive content). Edits are applied to the note before submission.
+- Approved notes (with any edits applied) are submitted to their target KB (local or remote) and the corresponding JSON file is deleted from `~/.multi-kb/pending/`
 - Rejected notes have their JSON file deleted from `~/.multi-kb/pending/`
 - UI displays note title, content, target KB, and source conversation context (all read from the pending JSON file)
 
@@ -220,7 +229,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
   - Per-directory routing configuration tracks harness pairings, target KBs, routing modes, and approval modes
 - **State file (`state.yaml`):**
   - Per-directory `last-processed` timestamps
-  - Per-conversation processing status (`partially-processed`, `failed`)
+  - Per-conversation processing status (`partially-processed`, `failed`), keyed by source file path (e.g., `~/.claude/projects/my-project/abc123.jsonl`). File path is used because it is available pre-parse, allowing the CLI to skip failed conversations without re-reading them.
   - Last dream cycle timestamp
   - CLI never writes to `config.yaml` after initial setup (except via explicit user-triggered commands like adding a new KB)
 
@@ -232,7 +241,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Each capture processing run appends a summary entry to `~/.multi-kb/logs/runs.jsonl` containing: timestamp, run trigger (cron or manual), directories scanned, conversations processed, notes extracted, notes routed (by target KB), errors encountered, and run duration
 - Each dream cycle run appends a similar summary entry (timestamp, trigger, batches processed, actions taken by type, errors, duration)
 - `multi-kb status` displays a summary of the last N runs (default 10), including success/failure status and key counts
-- `multi-kb status` also displays current configuration summary: tracked directories, configured KBs, and next scheduled run time
+- `multi-kb status` also displays current configuration summary: tracked directories, configured KBs, and next scheduled run time (computed by parsing the `multi-kb run` crontab entry and calculating the next occurrence, displayed as an absolute timestamp)
 - `multi-kb status` displays the pending approval queue count when non-empty (e.g., "3 notes awaiting approval")
 - Run log entries use structured JSONL format for machine parseability
 
