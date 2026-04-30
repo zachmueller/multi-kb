@@ -1,0 +1,368 @@
+# Multi-KB CLI — MVP
+
+**Created:** 2025-07-15
+**Status:** Draft
+**Branch:** feature/01-mvp
+
+## Overview
+
+A unified CLI binary that enables individuals to automatically extract knowledge from their AI conversations and share it across team and personal knowledge bases. The CLI operates in two modes — client mode (local, on a user's machine) and server mode (deployed to back-end infrastructure) — using a single codebase with shared logic and swappable storage/search backends.
+
+The MVP focuses on the client-mode experience: scanning AI conversations, extracting knowledge via LLM, routing extracted notes to configured knowledge bases (local or remote), and injecting relevant knowledge into new AI conversations via harness hooks.
+
+## User Stories
+
+- As a developer using AI coding assistants, I want knowledge from my AI conversations to be automatically captured and shared with my team so that tribal knowledge is reduced to zero.
+- As a team member, I want relevant knowledge from my team's KB to be injected into my AI conversations automatically so that I benefit from collective team knowledge without manual lookup.
+- As an individual, I want a local knowledge base for personal/private knowledge so that I can capture insights without sharing them externally.
+- As a user of multiple AI harnesses, I want a single tool that works across Notor and Claude Code so that I don't need separate knowledge capture solutions for each tool.
+- As a user joining a new team, I want simple setup that walks me through connecting to team KBs so that I can start benefiting from shared knowledge quickly.
+- As a team lead, I want to control what gets auto-published vs. what requires manual approval so that quality is maintained without creating bottlenecks.
+
+## Functional Requirements
+
+### FR-1: Unified Binary with Client/Server Modes
+
+**Description:** The CLI is distributed as a single standalone binary supporting two operational modes determined by configuration.
+
+**Acceptance Criteria:**
+- Binary operates in client mode by default (local operation on user's machine)
+- Binary operates in server mode when configured via `mode: server` in `config.yaml`
+- Standalone binaries are produced for Linux, macOS, and Windows with no external runtime dependencies
+- Same dream cycle logic, consolidation prompts, action application code, and error handling are shared across modes
+- Only storage/search backends and ingestion sources differ between modes
+
+### FR-2: Initial Setup Experience
+
+**Description:** First-run setup walks the user through configuring chat sources, target knowledge bases, and routing rules.
+
+**Acceptance Criteria:**
+- User can select which AI harnesses they use (Notor, Claude Code for MVP)
+- User can point to directories where they use those harnesses
+- CLI auto-discovers chat history locations within specified directories and presents a summary for confirmation
+- A local KB is created automatically (no additional setup required)
+- User can add remote KBs by providing an API endpoint URL and selecting an auth type (`iam` or `federate`)
+- For `iam` auth, user specifies an AWS CLI profile name; no credentials are stored by the CLI itself
+- CLI fetches and displays the remote KB's self-description to confirm connectivity
+- User can configure routing rules per directory, per directory+harness, and per directory+harness+persona/workflow
+- Each routing pairing supports two settings: routing mode (`always` or `consider`) and approval mode (`auto-approve` or `require-manual-approval`)
+- User can define global exclusion rules describing content that should never be shared with non-local KBs
+- Simplified onboarding presets are available for approval mode: auto-approve always, always require manual approval, or select per group
+
+### FR-3: Conversation Scanning and Capture Processing
+
+**Description:** The CLI scans tracked directories on a schedule (or manual trigger) for modified conversations, extracts knowledge via LLM, and routes to target KBs.
+
+**Acceptance Criteria:**
+- Scanning runs on a user-configurable cron schedule or via manual trigger
+- Only conversations modified since the per-directory `last-processed` timestamp are scanned
+- `last-processed` is based on conversation file's last-modified time, not wall clock time
+- Each conversation is translated from native harness format into an intermediate format before extraction
+- Extraction is performed via a single Bedrock API call per conversation (or per chunk for oversized conversations)
+- Extracted notes are routed to target KBs per the user's routing configuration
+- For `always`-mode KBs, notes are unconditionally routed regardless of LLM suggestions
+- For `consider`-mode KBs, the LLM's routing recommendations are respected
+- Auto-approved notes are submitted directly via the target KB's `submitKnowledge` API (or written to the local KB)
+- Manual-approval notes are staged in a pending queue for the web UI
+- Remote submissions are self-throttled to a maximum of 10 requests per second per target KB
+- After processing all conversations in a directory, the `last-processed` timestamp updates to the last-modified time of the final conversation file
+
+### FR-4: Conversation Translation Layer
+
+**Description:** Before extraction, conversations are translated from harness-native format into a standardized intermediate representation (JSONL).
+
+**Acceptance Criteria:**
+- Intermediate format uses JSONL with a conversation header line followed by message lines
+- Roles are normalized to `user`, `assistant`, `system`
+- Tool call/result pairs are collapsed into `tool_uses` entries on the assistant message
+- Small tool interactions (<~1K tokens) use mechanical summary templates without an LLM call
+- Large tool interactions (≥~1K tokens) are summarized via a fast, cheap LLM (configurable `translation.summarization_model_id`)
+- Content block arrays are flattened to plain text strings
+- Previously processed messages are flagged with `previously_processed: true` based on the directory's `last-processed` timestamp
+- Per-harness translator modules exist for Notor and Claude Code
+
+### FR-5: Extraction Sub-Agent
+
+**Description:** The core LLM-powered component that reads translated conversations and produces candidate knowledge notes.
+
+**Acceptance Criteria:**
+- Operates as a single Bedrock API call (not multi-turn)
+- Model is globally configurable in the CLI config (`extraction.model_id`)
+- System prompt is hardcoded in the binary (versioned per release)
+- Users can optionally extend the system prompt via `~/.multi-kb/prompts/extraction-append.md`
+- The append file is read fresh on each extraction run (no restart required)
+- Output is a JSON array of objects with `title`, `content`, and `suggested_target_kbs` fields
+- For re-processed conversations, extraction focuses on `previously_processed: false` messages while using the full conversation for context
+- Respects the user's global exclusion rules
+- Conversations exceeding 800K tokens are split at message boundaries and processed iteratively with summarized context carried forward
+
+### FR-6: Extraction Error Handling
+
+**Description:** Extraction failures are handled with retry logic and partial acceptance.
+
+**Acceptance Criteria:**
+- Bedrock API failures (throttling, timeout, network error) retry up to 3 times with exponential backoff
+- Malformed JSON output retries up to 3 times (fresh API call each retry)
+- Partially valid JSON arrays (some entries parse, some don't) are accepted for the valid entries; conversation marked `partially-processed`
+- After 3 retries with no usable output, conversation is marked `failed` and skipped
+- Both `partially-processed` and `failed` conversations are logged to `~/.multi-kb/logs/extraction-errors.jsonl` with conversation ID, source path, error details, and timestamp
+- Failed conversations are not automatically retried on subsequent runs (log provides data for future re-processing capability)
+
+### FR-7: Hook-Based Knowledge Injection
+
+**Description:** The CLI integrates with AI harness hook systems to inject relevant KB knowledge into new conversations at conversation start.
+
+**Acceptance Criteria:**
+- Hook fires only at conversation start (per-message injection is out of scope for MVP)
+- User's first message is used verbatim as the query for `recallKnowledge` API calls
+- All target KBs matching the current routing configuration are queried concurrently
+- Results from multiple KBs are merged via rank-based interleaving (top-ranked from each KB first, then second-ranked, etc.) until 10 notes are selected
+- Injected content is formatted as a Markdown list with note title, source KB name, and full content
+- No token budget cap on injected content for MVP
+- Hook is blocking with a configurable timeout (default: 5 seconds)
+- Partial results from responsive KBs are used if other KBs time out
+- If no KBs respond within timeout, conversation proceeds with no injection and a warning is logged
+- Notor integration: injected block prepended to conversation system context via conversation-start hook
+- Claude Code integration: injected block prepended to conversation system context via session initialization hook
+
+### FR-8: Local Knowledge Base Storage
+
+**Description:** The CLI maintains a local KB that mirrors remote KB format and lifecycle.
+
+**Acceptance Criteria:**
+- Local KBs are stored under `~/.multi-kb/local/`
+- A `default` local KB is created automatically during CLI setup
+- Users can create additional named local KBs
+- Each local KB is its own git repository
+- Notes use Obsidian-flavor Markdown with the same frontmatter schema as remote KBs (uid, title, status, last-updated, etc.)
+- UIDs are 16-character Crockford base32 strings generated locally
+- Newly captured notes start with `status: pending`
+- Knowledge recall against local KBs uses full text search (e.g., `git grep` or lightweight local search index) — not vector embeddings
+- Local dream cycles run on the same cron schedule as capture processing (or manual trigger)
+- Local dream cycles use the same Phase 1–4 logic as server mode, with full text search substituted for OpenSearch queries
+
+### FR-9: Local Web UI for Approvals
+
+**Description:** The CLI hosts a lightweight local web server providing a UI for reviewing and approving staged knowledge notes.
+
+**Acceptance Criteria:**
+- Web server is accessible locally for reviewing pending notes
+- Users can approve or reject individual staged notes
+- Approved notes are submitted to their target KB (local or remote)
+- Rejected notes are discarded from the pending queue
+- UI displays note title, content, target KB, and source conversation context
+
+### FR-10: Configuration File Structure
+
+**Description:** All CLI configuration is stored in a YAML file at `~/.multi-kb/config.yaml`.
+
+**Acceptance Criteria:**
+- Top-level `mode` setting determines client vs. server operation
+- `knowledge_bases` array defines remote KB connections (name, endpoint, auth, description)
+- `extraction` section defines model ID, AWS profile, and region for Bedrock calls
+- `translation` section optionally overrides summarization model
+- `dream_cycle` section optionally overrides consolidation model
+- `hook` section defines injection timeout
+- Per-directory routing configuration tracks harness pairings, target KBs, routing modes, and approval modes
+- Per-directory `last-processed` timestamps are tracked (in this config or a separate state file)
+
+## Non-Functional Requirements
+
+### NFR-1: Cross-Platform Distribution
+
+**Description:** The CLI must be easily installable across all major platforms without dependency management.
+
+**Acceptance Criteria:**
+- Standalone binaries produced for Linux (amd64, arm64), macOS (amd64, arm64), and Windows (amd64)
+- No external runtime dependencies (no Python, Node.js, Java, etc.)
+- Install experience is: download binary, place on PATH, run
+- Same binary is deployable to EC2 for server mode
+
+### NFR-2: Performance
+
+**Description:** The CLI must handle conversation processing and hook injection within acceptable time bounds.
+
+**Acceptance Criteria:**
+- Hook-based injection completes within the configurable timeout (default 5 seconds) including all network round-trips
+- Conversation scanning and discovery completes within seconds for typical directory sizes (hundreds of conversation files)
+- Token counting approximation is fast enough to not meaningfully add to processing time
+- Remote API submissions are throttled to 10 req/s per target KB to avoid overwhelming back-end infrastructure
+
+### NFR-3: Security and Privacy
+
+**Description:** The CLI must handle credentials safely and respect user privacy boundaries.
+
+**Acceptance Criteria:**
+- CLI stores no credentials itself — delegates entirely to the AWS SDK credential chain
+- Global exclusion rules prevent specified content categories from being shared with non-local KBs
+- Local KB content never leaves the user's machine unless explicitly routed to a remote KB
+- Clear error messages surface when credentials are expired or insufficient (guiding users to standard AWS CLI auth flows)
+- Manual approval mode is available for any target KB to prevent unreviewed publication
+
+### NFR-4: Reliability
+
+**Description:** The CLI must handle failures gracefully without data loss.
+
+**Acceptance Criteria:**
+- Crash between processing and timestamp update does not cause missed conversations (worst case: re-processing, handled gracefully by dream cycle deduplication)
+- Extraction failures are logged with sufficient detail for future re-processing
+- Partial extraction results are accepted rather than discarding entire conversations
+- Lock file with heartbeat TTL prevents stuck dream cycles from blocking future runs indefinitely
+- Network failures during hook injection degrade gracefully (conversation proceeds without injection)
+
+### NFR-5: Extensibility
+
+**Description:** The CLI must support customization without requiring users to fork the project.
+
+**Acceptance Criteria:**
+- User-extensible extraction prompt via `~/.multi-kb/prompts/extraction-append.md`
+- Configurable model IDs for extraction, translation summarization, and dream cycle consolidation
+- Per-directory/per-harness/per-persona routing granularity supports diverse team workflows
+- Global exclusion rules are user-defined natural language descriptions
+
+## User Scenarios & Testing
+
+### Primary Flow: First-Time Setup
+
+1. User downloads and runs the CLI binary for their platform
+2. CLI detects no existing configuration and enters setup wizard
+3. User selects "Notor" as their AI harness
+4. User points to their Obsidian vault directory
+5. CLI discovers Notor chat history at `{vault}/notor/history/` and presents summary
+6. User confirms the discovered chat source
+7. CLI creates the default local KB at `~/.multi-kb/local/default/`
+8. User opts to add a remote team KB, provides endpoint URL, selects `iam` auth, specifies AWS profile
+9. CLI fetches the KB's self-description and displays it for confirmation
+10. User configures routing: all conversations from this directory route to both local (always, auto-approve) and team KB (consider, require-manual-approval)
+11. CLI writes `~/.multi-kb/config.yaml` and reports setup complete
+
+### Primary Flow: Scheduled Capture Processing
+
+1. Cron triggers the CLI's capture processing
+2. CLI reads config, identifies tracked directories
+3. For each directory, CLI checks `last-processed` timestamp against conversation files' last-modified times
+4. New/modified conversations are found and queued for processing
+5. Each conversation is translated to intermediate format (tool interactions summarized)
+6. Translated conversation is sent to Bedrock extraction model
+7. LLM returns JSON array of candidate knowledge notes
+8. CLI routes each note per configuration: local KB notes are written directly; team KB notes with `require-manual-approval` are staged in pending queue
+9. `last-processed` timestamp updates to the last-modified time of the final processed file
+10. User later opens web UI, reviews pending notes, approves relevant ones which are submitted to the remote KB
+
+### Primary Flow: Hook-Based Injection
+
+1. User starts a new conversation in Notor
+2. Notor's conversation-start hook invokes the CLI
+3. CLI takes the user's first message verbatim
+4. CLI identifies target KBs for this directory (local default + team KB)
+5. CLI sends `recallKnowledge` requests to both KBs concurrently
+6. Local KB returns results via full text search; remote KB returns results via API
+7. CLI merges results via rank-based interleaving, selects top 10
+8. CLI formats results as Markdown and returns to Notor
+9. Notor prepends the knowledge block to the conversation's system context
+10. User's AI conversation benefits from injected team knowledge
+
+### Alternative Flow: Oversized Conversation Processing
+
+1. A conversation exceeds 800K tokens after translation
+2. CLI splits at the 800K boundary on a message boundary
+3. First chunk is processed through extraction, yielding knowledge notes
+4. First chunk is summarized to ~10-20K tokens
+5. Summary is prepended to the next chunk as context
+6. Next chunk is processed, yielding additional notes
+7. Process repeats until all chunks are processed
+8. All extracted notes from all chunks are combined and routed normally
+
+### Alternative Flow: Extraction Failure
+
+1. CLI sends translated conversation to Bedrock
+2. Bedrock returns a throttling error
+3. CLI retries with exponential backoff (attempt 2)
+4. Bedrock returns malformed JSON
+5. CLI retries (attempt 3)
+6. Bedrock returns valid JSON with 5 entries, 1 malformed
+7. CLI accepts 4 valid entries, marks conversation as `partially-processed`
+8. Valid notes are routed normally
+9. Error details logged to `~/.multi-kb/logs/extraction-errors.jsonl`
+
+### Alternative Flow: Hook Timeout
+
+1. User starts a new conversation
+2. Hook invokes CLI, which dispatches `recallKnowledge` to 3 configured KBs
+3. Local KB responds in 200ms with results
+4. Remote KB #1 responds in 1.5s with results
+5. Remote KB #2 does not respond within 5s timeout
+6. CLI merges results from local KB and remote KB #1 (ignoring KB #2)
+7. Top 10 notes selected from available results and injected
+8. Warning logged to `~/.multi-kb/logs/hook-errors.jsonl`
+
+### Edge Case: Re-Processing a Modified Conversation
+
+1. User returns to an old conversation (already processed) and adds new messages
+2. Conversation file's last-modified time now exceeds the directory's `last-processed` timestamp
+3. On next scan, CLI picks up this conversation
+4. During translation, messages with timestamps ≤ `last-processed` are flagged `previously_processed: true`
+5. New messages are flagged `previously_processed: false`
+6. Full conversation is sent to extraction sub-agent for context
+7. Sub-agent extracts knowledge only from the new portion
+8. Any resulting duplicates with previously extracted knowledge are handled by dream cycle consolidation
+
+## Success Criteria
+
+- Users can go from binary download to first successful knowledge capture in under 10 minutes of setup time
+- Knowledge from AI conversations is captured without any manual user action after initial setup (zero ongoing effort for auto-approved flows)
+- Relevant team knowledge surfaces in new AI conversations within the hook timeout window (default 5 seconds)
+- The system handles conversations of any length (including those exceeding 800K tokens) without silent data loss
+- Manual approval workflow enables users to review and filter knowledge before it reaches team KBs, with a clear queue and simple approve/reject interaction
+- A single CLI binary serves both local development use and server-mode deployment without code divergence
+
+## Key Entities
+
+### Knowledge Note
+- **UID:** 16-character Crockford base32 string (generated once, never changed)
+- **Title:** Succinct title (≤255 characters)
+- **Content:** Markdown body, self-contained
+- **Status:** `pending` → `active` (lifecycle managed by dream cycles)
+- **Frontmatter:** uid, title, status, last-updated, last-linked-to, last-recalled, consolidated-from-notes
+
+### Configuration (config.yaml)
+- **Mode:** `client` | `server`
+- **Knowledge bases:** Array of remote KB definitions (name, endpoint, auth, description)
+- **Chat sources:** Per-directory harness pairings with routing rules
+- **Extraction settings:** Model ID, AWS profile, region
+- **Translation settings:** Summarization model override
+- **Dream cycle settings:** Model override
+- **Hook settings:** Injection timeout
+
+### Intermediate Conversation Format
+- **Conversation header:** id, source harness, source path, timestamps, metadata (persona, workflow, project dir)
+- **Messages:** role (user/assistant/system), content (plain string), timestamp, previously_processed flag, tool_uses array
+
+### Pending Queue Entry
+- **Note:** Title + content of extracted knowledge note
+- **Target KB:** Which KB(s) the note is destined for
+- **Source:** Conversation ID and path for context
+- **Timestamp:** When the note was extracted
+
+## Assumptions
+
+- Users have working AWS CLI credentials for any remote KBs using `iam` auth (the CLI does not manage credential lifecycle)
+- Bedrock API access is available in the configured region with the configured model IDs
+- AI harness hook mechanisms (Notor conversation-start, Claude Code session init) are stable and available
+- Conversation history files are accessible on the local filesystem in known locations per harness
+- Users have git installed locally (required for local KB git operations)
+- Network connectivity to remote KBs is generally available (graceful degradation on failure)
+- The `~/.multi-kb/` directory is writable and has sufficient disk space for local KB storage
+
+## Out of Scope
+
+- **Server mode implementation details:** This spec covers the CLI binary's client-mode behavior. Server-mode specifics (SQS consumption, S3 sync, OpenSearch operations, CodeCommit) are covered by the back-end infrastructure spec.
+- **Per-message hook injection:** Only conversation-start injection is in scope for MVP.
+- **Vector embeddings for local KBs:** Local recall uses full text search only. Vector support deferred to a future iteration.
+- **Automatic retry of failed conversations:** Failed conversations are logged but not retried on subsequent runs.
+- **Submission deduplication:** No idempotency key or content-hash dedup at the API layer; dream cycle handles duplicates.
+- **Cross-KB score normalization:** Raw scores from different KBs are not compared; rank-based interleaving is used instead.
+- **Token budget cap on injected content:** No maximum enforced for MVP.
+- **Harnesses beyond Notor and Claude Code:** Other harnesses (Kiro IDE, Kiro CLI, Cline) are deferred.
+- **Web UI design details:** The approval web UI's visual design and interaction specifics are deferred to a separate spec.
+- **Back-end CDK infrastructure:** Covered by the `multi-kb-cdk` repository spec.
