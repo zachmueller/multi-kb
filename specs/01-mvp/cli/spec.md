@@ -38,6 +38,11 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: How does `multi-kb approve` detect that the user is done and shut down the web server? → A: Idle timeout — server shuts down after a configurable period (default: 5 minutes) with no browser activity. Also shuts down immediately when all pending notes are resolved. Ctrl+C always works as an explicit kill.
 - Q: Should the CLI validate the configured `author` field against the current AWS caller identity before submitting to remote KBs? → A: No — author verification is purely a server-side concern. The CLI sends whatever is configured; the backend rejects mismatches for `federate` auth. For `iam` auth there's no reliable local mapping from AWS profile to human identity string.
 - Q: How should the Claude Code translator derive per-message timestamps for the `previously_processed` flag, given Claude Code's native format lacks reliable per-message timestamps? → A: File-level ordering — use the conversation file's last-modified time as the effective timestamp for all messages. If a conversation was previously processed and is modified, all prior messages are flagged `previously_processed: true` and the full conversation is re-translated. The extraction prompt's focus on `previously_processed: false` messages handles the rest. Avoids fragile per-message timestamp inference.
+- Q: How should the CLI decompose a natural language first-message query into effective `git grep` searches for local KB recall? → A: LLM-derived keywords — use the translation summarization model (`translation.summarization_model_id`, e.g., Claude Haiku) to generate 3–5 search keywords from the user's natural language query, then `git grep` each keyword. Results are ranked by match count as already specified. This adds one fast, cheap LLM call to the hook injection path but produces much better keyword selection than mechanical stop-word removal.
+- Q: How should the approval web UI (FR-9) assets be packaged and served, given the single-binary constraint? → A: Embed static HTML/CSS/JS assets in the Go binary via `embed.FS`. The UI is a simple approve/reject interface, so a single-page app bundled at compile time keeps the single-binary promise intact with zero runtime file dependencies. Assets are served from memory at runtime by the built-in HTTP server.
+- Q: Should standalone manual subcommands (`multi-kb process`, `multi-kb dream-cycle`) respect the same lock file as the combined `multi-kb run`, or bypass it since they're user-initiated? → A: Respect the same lock — manual subcommands use the identical lock acquisition logic. If the lock is already held, the CLI prints a user-friendly message identifying what holds the lock and when the heartbeat was last updated, then exits immediately. This prevents concurrent writes to shared state/KB files regardless of trigger source.
+- Q: What specific Claude Code hook mechanism should the CLI use for knowledge injection? → A: User-prompt-submit hook with first-message guard — the CLI registers a Claude Code `user_prompt_submit` hook during setup. The hook fires on every user message, but the CLI checks whether this is the first message in the conversation (e.g., by checking for the absence of prior assistant messages in the session context provided by the hook). If it is not the first message, the CLI exits immediately with no output. If it is the first message, the CLI performs knowledge recall and outputs the injected context block. This reuses a well-defined, stable Claude Code hook event while preserving the "conversation-start only" injection constraint.
+- Q: What weight multiplier should title matches receive relative to body matches in local KB recall ranking? → A: 3x — a title match counts as 3 body matches when computing match-count rank scores. Simple, meaningful signal boost without over-dominating results.
 
 ## User Stories
 
@@ -80,7 +85,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Each routing pairing supports two settings: routing mode (`always` or `consider`) and approval mode (`auto-approve` or `require-manual-approval`)
 - User can define global exclusion rules describing content that should never be shared with non-local KBs
 - Simplified onboarding presets are available for approval mode: auto-approve always, always require manual approval, or select per group
-- CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code session init hook), appending the multi-kb hook alongside any pre-existing hooks at the same trigger points (never overwriting existing hooks)
+- CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code `user_prompt_submit` hook with first-message guard), appending the multi-kb hook alongside any pre-existing hooks at the same trigger points (never overwriting existing hooks)
 - User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls. The CLI performs no local validation of this value against the AWS caller identity — author verification is purely a server-side concern (backend rejects mismatches for `federate` auth).
 
 ### FR-3: Conversation Scanning and Capture Processing
@@ -92,6 +97,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Scheduled runs use the OS-native scheduler: crontab on macOS/Linux, Task Scheduler on Windows
 - During initial setup, the CLI registers a single combined command (`multi-kb run`) with the OS-native scheduler at the user-configured interval (e.g., every 30 minutes). This command performs capture processing followed by the local dream cycle sequentially under one lock acquisition.
 - Manual triggers remain available as standalone subcommands (`multi-kb process` for capture only, `multi-kb dream-cycle` for dream cycle only)
+- All subcommands (`multi-kb run`, `multi-kb process`, `multi-kb dream-cycle`) share the same lock file. If the lock is already held, scheduled runs skip silently; manual subcommands print a user-friendly message identifying the lock holder and last heartbeat timestamp, then exit immediately.
 - Each scheduled run is a short-lived process (not a long-running daemon)
 - A lock file with heartbeat TTL prevents concurrent runs; if a previous run still holds the lock, the new run skips (same pattern as dream cycle concurrency control)
 - Only conversations modified since the per-directory `last-processed` timestamp are scanned
@@ -155,7 +161,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 **Acceptance Criteria:**
 - Hooks are auto-registered during initial setup (see FR-2); no manual hook configuration required from the user
 - Hook fires only at conversation start (per-message injection is out of scope for MVP)
-- User's first message is used verbatim as the query for `recallKnowledge` API calls
+- User's first message is used verbatim as the query for remote KB `recallKnowledge` API calls. For local KBs, the CLI first derives 3–5 search keywords from the message via the translation summarization model (see FR-8) before executing `git grep` queries.
 - All target KBs matching the current routing configuration are queried concurrently
 - Results from multiple KBs are merged via rank-based interleaving (top-ranked from each KB first, then second-ranked, etc.) until 10 notes are selected
 - Injected content is formatted as a Markdown list with note title, source KB name, and full content
@@ -164,7 +170,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Partial results from responsive KBs are used if other KBs time out
 - If no KBs respond within timeout, conversation proceeds with no injection and a warning is logged
 - Notor integration: injected block prepended to conversation system context via conversation-start hook
-- Claude Code integration: injected block prepended to conversation system context via session initialization hook
+- Claude Code integration: CLI registers a `user_prompt_submit` hook. The hook fires on every user message but includes a first-message guard — if the conversation already has prior assistant messages, the CLI exits immediately with no output. On the first message, the CLI performs knowledge recall and outputs the injected context block, which Claude Code prepends to the conversation's system context.
 - When the pending approval queue (`~/.multi-kb/pending/`) is non-empty, the injected block includes a notice with the pending note count (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
 
 ### FR-8: Local Knowledge Base Storage
@@ -180,7 +186,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - UIDs are 16-character Crockford base32 strings generated locally (local KB UIDs are completely independent of remote KB UIDs — even when the same note content is routed to both local and remote KBs, each KB generates its own UID with no correlation between them)
 - Newly captured notes start with `status: pending`
 - Knowledge recall against local KBs uses `git grep` against the working tree — no separate search index, no vector embeddings
-- Local recall results are ranked by match count (number of query term matches per note, title matches weighted higher than body matches) to produce a coarse relevance ordering for interleaving with remote KB results
+- For hook-based recall (FR-7), the CLI first calls the translation summarization model (`translation.summarization_model_id`) to derive 3–5 search keywords from the user's natural language query, then runs `git grep` per keyword. For dream cycle Phase 2 recall, keywords are derived mechanically from the note's title and key terms (no LLM call).
+- Local recall results are ranked by match count (number of query term matches per note, with title matches weighted at 3x body matches) to produce a coarse relevance ordering for interleaving with remote KB results
 - Local dream cycles run as part of the combined `multi-kb run` command (capture processing then dream cycle sequentially) on the OS-native cron schedule, or via manual trigger with `multi-kb dream-cycle`
 - Local dream cycles use the same Phase 1–4 logic as server mode with the following local adaptations: Phase 0 is a no-op (local git repo is always current); Phase 1 skips similarity grouping entirely — each pending note is processed as a singleton batch; Phase 2 uses keyword-based `git grep` queries (derived from the note's title and key terms) to find related existing notes; Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
 
@@ -190,6 +197,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 **Acceptance Criteria:**
 - Web server launches on-demand via `multi-kb approve` command, automatically opens the user's default browser, and shuts down after a configurable idle timeout (default: 5 minutes) with no browser activity, or when all pending notes are resolved, whichever comes first. Ctrl+C in the terminal always terminates the server immediately.
+- Web UI assets (HTML, CSS, JS) are embedded in the Go binary via `embed.FS` and served from memory at runtime — no external asset files or runtime dependencies required
 - Web server is accessible locally for reviewing pending notes from `~/.multi-kb/pending/`
 - Users can approve or reject individual staged notes
 - Approved notes are submitted to their target KB (local or remote) and the corresponding JSON file is deleted from `~/.multi-kb/pending/`
