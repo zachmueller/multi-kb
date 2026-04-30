@@ -18,6 +18,11 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: How should the CLI handle scheduled processing on the user's machine? → A: OS-native cron — CLI registers with crontab (macOS/Linux) or Task Scheduler (Windows) during setup; each run is a short-lived process, not a daemon.
 - Q: What level of observability should MVP provide beyond error logs? → A: Structured run log + status command — each run appends a summary to `runs.jsonl`; `multi-kb status` displays last N runs and current config summary.
 - Q: Should `federate` auth be deferred from MVP given the open-source focus? → A: Keep in MVP — from the CLI's perspective, `federate` is simply "no auth config, call endpoint directly" since the backend handles auth transparently. Minimal additional implementation cost.
+- Q: Where does the pending approval queue live for notes awaiting manual review before submission to target KBs? → A: Dedicated `~/.multi-kb/pending/` directory with one JSON file per staged note (containing title, content, target KB, source conversation reference, timestamp). Simple, inspectable, no extra dependencies.
+- Q: How are harness hooks (for knowledge injection) installed — automatically during setup or manually by the user? → A: CLI auto-registers hooks during setup. For each selected harness, the CLI writes the necessary hook configuration entries automatically. This keeps the "under 10 minutes" success criterion achievable and avoids error-prone manual configuration.
+- Q: Where does the CLI get the `author` identity for `submitKnowledge` API calls? → A: Single `author` field configured in `config.yaml` during initial setup (one identity across all KBs). For `federate` auth this would typically be the Amazon alias; for `iam`/open-source it's a free-form string the user provides.
+- Q: What happens if a scheduled capture processing run overlaps with a still-running previous run? → A: Lock file with heartbeat TTL (same pattern as dream cycles) — if a previous run still holds the lock, the new run skips. Consistent with the existing dream cycle concurrency control.
+- Q: What do local dream cycle Phases 0 and 4 look like concretely, given there's no S3/OpenSearch locally? → A: Phase 0 is a no-op (local git repo is always current). Phase 4 is just git commit + update timestamps + clear manifest + release lock. No sync or reindex steps.
 
 ## User Stories
 
@@ -58,6 +63,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Each routing pairing supports two settings: routing mode (`always` or `consider`) and approval mode (`auto-approve` or `require-manual-approval`)
 - User can define global exclusion rules describing content that should never be shared with non-local KBs
 - Simplified onboarding presets are available for approval mode: auto-approve always, always require manual approval, or select per group
+- CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code session init hook), writing the necessary hook configuration entries automatically
+- User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls
 
 ### FR-3: Conversation Scanning and Capture Processing
 
@@ -68,6 +75,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Scheduled runs use the OS-native scheduler: crontab on macOS/Linux, Task Scheduler on Windows
 - During initial setup, the CLI registers itself with the OS-native scheduler at the user-configured interval (e.g., every 30 minutes)
 - Each scheduled run is a short-lived process (not a long-running daemon)
+- A lock file with heartbeat TTL prevents concurrent capture runs; if a previous run still holds the lock, the new run skips (same pattern as dream cycle concurrency control)
 - Only conversations modified since the per-directory `last-processed` timestamp are scanned
 - `last-processed` is based on conversation file's last-modified time, not wall clock time
 - Each conversation is translated from native harness format into an intermediate format before extraction
@@ -76,7 +84,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - For `always`-mode KBs, notes are unconditionally routed regardless of LLM suggestions
 - For `consider`-mode KBs, the LLM's routing recommendations are respected
 - Auto-approved notes are submitted directly via the target KB's `submitKnowledge` API (or written to the local KB)
-- Manual-approval notes are staged in a pending queue for the web UI
+- Manual-approval notes are staged as individual JSON files in `~/.multi-kb/pending/` (one file per note, containing title, content, target KB name, source conversation path, and extraction timestamp)
 - Remote submissions are self-throttled to a maximum of 10 requests per second per target KB
 - After processing all conversations in a directory, the `last-processed` timestamp updates to the last-modified time of the final conversation file
 
@@ -126,6 +134,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 **Description:** The CLI integrates with AI harness hook systems to inject relevant KB knowledge into new conversations at conversation start.
 
 **Acceptance Criteria:**
+- Hooks are auto-registered during initial setup (see FR-2); no manual hook configuration required from the user
 - Hook fires only at conversation start (per-message injection is out of scope for MVP)
 - User's first message is used verbatim as the query for `recallKnowledge` API calls
 - All target KBs matching the current routing configuration are queried concurrently
@@ -152,18 +161,18 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Newly captured notes start with `status: pending`
 - Knowledge recall against local KBs uses full text search (e.g., `git grep` or lightweight local search index) — not vector embeddings
 - Local dream cycles run on the same OS-native cron schedule as capture processing (or manual trigger via `multi-kb dream-cycle`)
-- Local dream cycles use the same Phase 1–4 logic as server mode, with full text search substituted for OpenSearch queries
+- Local dream cycles use the same Phase 1–4 logic as server mode, with full text search substituted for OpenSearch queries and simplified boundary phases: Phase 0 is a no-op (local git repo is always current), Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
 
 ### FR-9: Local Web UI for Approvals
 
 **Description:** The CLI hosts a lightweight local web server providing a UI for reviewing and approving staged knowledge notes.
 
 **Acceptance Criteria:**
-- Web server is accessible locally for reviewing pending notes
+- Web server is accessible locally for reviewing pending notes from `~/.multi-kb/pending/`
 - Users can approve or reject individual staged notes
-- Approved notes are submitted to their target KB (local or remote)
-- Rejected notes are discarded from the pending queue
-- UI displays note title, content, target KB, and source conversation context
+- Approved notes are submitted to their target KB (local or remote) and the corresponding JSON file is deleted from `~/.multi-kb/pending/`
+- Rejected notes have their JSON file deleted from `~/.multi-kb/pending/`
+- UI displays note title, content, target KB, and source conversation context (all read from the pending JSON file)
 
 ### FR-10: Configuration File Structure
 
@@ -171,6 +180,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 **Acceptance Criteria:**
 - Top-level `mode` setting determines client vs. server operation
+- Top-level `author` field stores the user's identity string (used for all `submitKnowledge` API calls)
 - `knowledge_bases` array defines remote KB connections (name, endpoint, auth, description)
 - `extraction` section defines model ID, AWS profile, and region for Bedrock calls
 - `translation` section optionally overrides summarization model
@@ -232,7 +242,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Crash between processing and timestamp update does not cause missed conversations (worst case: re-processing, handled gracefully by dream cycle deduplication)
 - Extraction failures are logged with sufficient detail for future re-processing
 - Partial extraction results are accepted rather than discarding entire conversations
-- Lock file with heartbeat TTL prevents stuck dream cycles from blocking future runs indefinitely
+- Lock file with heartbeat TTL prevents concurrent capture processing runs and stuck dream cycles from blocking future runs indefinitely
 - Network failures during hook injection degrade gracefully (conversation proceeds without injection)
 
 ### NFR-5: Extensibility
