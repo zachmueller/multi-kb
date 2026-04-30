@@ -33,6 +33,11 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: How does the user learn about pending notes awaiting approval? → A: Passive notification — `multi-kb status` output and hook injection output both include a pending note count (e.g., "3 notes awaiting approval") when the queue is non-empty. No OS-native notifications or active alerting for MVP.
 - Q: Does the CLI retain a local record of notes submitted to remote KBs (e.g., the returned UID)? → A: Fire-and-forget — CLI submits to remote KB, logs success/failure in `runs.jsonl`, but retains no per-note submission record. Duplicates handled by dream cycles. Local UID generation only occurs for locally-targeted notes (i.e., UIDs in the local KB have no connection to UIDs generated server-side by `submitKnowledge`, even for the same note content routed to both local and remote KBs).
 - Q: How should the CLI handle pre-existing harness hooks at the same trigger points during setup? → A: Append — add the multi-kb hook alongside any existing hooks. Both Notor and Claude Code support multiple hooks per trigger point, so appending is safe and avoids breaking existing user workflows.
+- Q: Should scheduled capture processing and local dream cycles run as separate cron entries or a single combined command? → A: Single combined command (`multi-kb run`) that performs capture processing then dream cycle sequentially under one lock acquisition. Avoids skip-contention between two independent cron entries competing for the shared lock. Manual triggers (`multi-kb process`, `multi-kb dream-cycle`) remain available as standalone subcommands.
+- Q: Which model handles chunk summarization when oversized conversations (>800K tokens) are split across multiple extraction passes? → A: The extraction model (`extraction.model_id`) with a summarization-specific prompt. High-quality context preservation is essential for later chunks to extract knowledge correctly, and this is a rare edge case so cost is negligible.
+- Q: How does `multi-kb approve` detect that the user is done and shut down the web server? → A: Idle timeout — server shuts down after a configurable period (default: 5 minutes) with no browser activity. Also shuts down immediately when all pending notes are resolved. Ctrl+C always works as an explicit kill.
+- Q: Should the CLI validate the configured `author` field against the current AWS caller identity before submitting to remote KBs? → A: No — author verification is purely a server-side concern. The CLI sends whatever is configured; the backend rejects mismatches for `federate` auth. For `iam` auth there's no reliable local mapping from AWS profile to human identity string.
+- Q: How should the Claude Code translator derive per-message timestamps for the `previously_processed` flag, given Claude Code's native format lacks reliable per-message timestamps? → A: File-level ordering — use the conversation file's last-modified time as the effective timestamp for all messages. If a conversation was previously processed and is modified, all prior messages are flagged `previously_processed: true` and the full conversation is re-translated. The extraction prompt's focus on `previously_processed: false` messages handles the rest. Avoids fragile per-message timestamp inference.
 
 ## User Stories
 
@@ -76,7 +81,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - User can define global exclusion rules describing content that should never be shared with non-local KBs
 - Simplified onboarding presets are available for approval mode: auto-approve always, always require manual approval, or select per group
 - CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code session init hook), appending the multi-kb hook alongside any pre-existing hooks at the same trigger points (never overwriting existing hooks)
-- User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls
+- User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls. The CLI performs no local validation of this value against the AWS caller identity — author verification is purely a server-side concern (backend rejects mismatches for `federate` auth).
 
 ### FR-3: Conversation Scanning and Capture Processing
 
@@ -85,9 +90,10 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 **Acceptance Criteria:**
 - Scanning runs on a user-configurable schedule or via manual trigger (e.g., `multi-kb process`)
 - Scheduled runs use the OS-native scheduler: crontab on macOS/Linux, Task Scheduler on Windows
-- During initial setup, the CLI registers itself with the OS-native scheduler at the user-configured interval (e.g., every 30 minutes)
+- During initial setup, the CLI registers a single combined command (`multi-kb run`) with the OS-native scheduler at the user-configured interval (e.g., every 30 minutes). This command performs capture processing followed by the local dream cycle sequentially under one lock acquisition.
+- Manual triggers remain available as standalone subcommands (`multi-kb process` for capture only, `multi-kb dream-cycle` for dream cycle only)
 - Each scheduled run is a short-lived process (not a long-running daemon)
-- A lock file with heartbeat TTL prevents concurrent capture runs; if a previous run still holds the lock, the new run skips (same pattern as dream cycle concurrency control)
+- A lock file with heartbeat TTL prevents concurrent runs; if a previous run still holds the lock, the new run skips (same pattern as dream cycle concurrency control)
 - Only conversations modified since the per-directory `last-processed` timestamp are scanned
 - `last-processed` is based on conversation file's last-modified time, not wall clock time
 - Each conversation is translated from native harness format into an intermediate format before extraction
@@ -111,7 +117,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Small tool interactions (<~1K tokens) use mechanical summary templates without an LLM call
 - Large tool interactions (≥~1K tokens) are summarized via a fast, cheap LLM (configurable `translation.summarization_model_id`)
 - Content block arrays are flattened to plain text strings
-- Previously processed messages are flagged with `previously_processed: true` based on the directory's `last-processed` timestamp
+- Previously processed messages are flagged with `previously_processed: true` based on the directory's `last-processed` timestamp. For harnesses with per-message timestamps (Notor), each message's timestamp is compared individually. For harnesses without reliable per-message timestamps (Claude Code), the flag is applied at the file level: if the conversation file was previously processed, all messages from the prior processing are flagged `previously_processed: true` (the entire conversation is re-translated, with the extraction prompt relying on the flag to focus on new content).
 - Per-harness translator modules exist for Notor and Claude Code
 - Claude Code translator reads from the fixed location `~/.claude/projects/<project>/<session>.jsonl`, where `<project>` is derived from the user-configured directory path
 
@@ -128,7 +134,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Output is a JSON array of objects with `title`, `content`, and `suggested_target_kbs` fields
 - For re-processed conversations, extraction focuses on `previously_processed: false` messages while using the full conversation for context
 - Respects the user's global exclusion rules
-- Conversations exceeding 800K tokens are split at message boundaries and processed iteratively with summarized context carried forward
+- Conversations exceeding 800K tokens are split at message boundaries and processed iteratively with summarized context carried forward. Chunk summarization uses the extraction model (`extraction.model_id`) with a summarization-specific prompt — not the cheaper translation model — to ensure high-quality context preservation across chunks.
 
 ### FR-6: Extraction Error Handling
 
@@ -175,7 +181,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Newly captured notes start with `status: pending`
 - Knowledge recall against local KBs uses `git grep` against the working tree — no separate search index, no vector embeddings
 - Local recall results are ranked by match count (number of query term matches per note, title matches weighted higher than body matches) to produce a coarse relevance ordering for interleaving with remote KB results
-- Local dream cycles run on the same OS-native cron schedule as capture processing (or manual trigger via `multi-kb dream-cycle`)
+- Local dream cycles run as part of the combined `multi-kb run` command (capture processing then dream cycle sequentially) on the OS-native cron schedule, or via manual trigger with `multi-kb dream-cycle`
 - Local dream cycles use the same Phase 1–4 logic as server mode with the following local adaptations: Phase 0 is a no-op (local git repo is always current); Phase 1 skips similarity grouping entirely — each pending note is processed as a singleton batch; Phase 2 uses keyword-based `git grep` queries (derived from the note's title and key terms) to find related existing notes; Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
 
 ### FR-9: Local Web UI for Approvals
@@ -183,7 +189,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 **Description:** The CLI hosts an on-demand local web server (via `multi-kb approve`) providing a UI for reviewing and approving staged knowledge notes.
 
 **Acceptance Criteria:**
-- Web server launches on-demand via `multi-kb approve` command, automatically opens the user's default browser, and shuts down when the user closes it or all pending notes are resolved
+- Web server launches on-demand via `multi-kb approve` command, automatically opens the user's default browser, and shuts down after a configurable idle timeout (default: 5 minutes) with no browser activity, or when all pending notes are resolved, whichever comes first. Ctrl+C in the terminal always terminates the server immediately.
 - Web server is accessible locally for reviewing pending notes from `~/.multi-kb/pending/`
 - Users can approve or reject individual staged notes
 - Approved notes are submitted to their target KB (local or remote) and the corresponding JSON file is deleted from `~/.multi-kb/pending/`
