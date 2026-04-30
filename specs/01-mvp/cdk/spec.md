@@ -66,7 +66,8 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Validates `author` is present, non-empty, and ≤ 100 characters
 - On validation failure, returns HTTP 400 with a JSON body: `{ "errors": { "<field>": "<reason>", ... } }` — a flat object keyed by field name, containing only the fields that failed validation
 - On success, generates a 16-character Crockford base32 UID for the new note
-- On success, enqueues a message to SQS containing the UID, title, content, and author
+- On success, generates a `submitted_at` timestamp (ISO 8601, current time)
+- On success, enqueues a message to SQS containing the UID, title, content, author, and submitted_at timestamp
 - On success, returns HTTP 202 with `{ "uid": "<UID>", "request_id": "<API Gateway request ID>" }`
 
 ### FR-3: SQS Queue for Ingestion
@@ -82,7 +83,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 ### FR-4: EC2 Instance (Server Mode)
 
-**Description:** A single long-lived EC2 instance runs the CLI binary in server mode. It performs SQS consumption, git operations against CodeCommit, S3 sync, and dream cycle processing.
+**Description:** A single long-lived EC2 instance runs the CLI binary in server mode. It performs SQS consumption, git operations against CodeCommit, S3 sync, and dream cycle processing. The server-mode CLI behavior is specified in the CLI spec (FR-12); this section covers the infrastructure provisioning and IAM configuration.
 
 **Acceptance Criteria:**
 - Instance runs Amazon Linux 2023
@@ -209,7 +210,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - `submitKnowledge` returns HTTP 202 within 2 seconds (p99) under normal conditions
 - `recallKnowledge` returns results within 5 seconds (p99) including coverage assessment
 - `recallKnowledge` without coverage assessment returns within 3 seconds (p99)
-- System handles up to 100 `submitKnowledge` calls per minute sustained without message loss
+- System handles up to 600 `submitKnowledge` calls per minute sustained without message loss (matches the CLI's per-KB self-throttle of 10 requests per second)
 - SQS-to-commit latency (time from enqueue to git commit) is under 60 seconds for non-locked periods
 
 ### NFR-2: Reliability
