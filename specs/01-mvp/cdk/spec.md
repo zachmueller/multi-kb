@@ -20,9 +20,14 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Q: Should the recall Lambda be VPC-attached to reach OpenSearch Serverless? → A: No. Lambda calls Bedrock Retrieve API only (public endpoint); Bedrock's service role accesses OpenSearch internally. No VPC attachment needed for Lambda.
 - Q: Should the EC2 instance query OpenSearch directly or use Bedrock Retrieve API for dream cycle phases? → A: Direct OpenSearch Serverless queries via VPC endpoint. EC2 needs full query DSL control for metadata filtering (e.g., `status: pending`, excluding already-grouped UIDs) and iterative grouping logic in Phase 1. Bedrock Retrieve API is only used by the recall Lambda.
 - Q: How does the EC2 instance trigger OpenSearch reindexing from S3? → A: Via Bedrock `StartIngestionJob` / `GetIngestionJob` APIs against the Knowledge Base data source. EC2 does not perform direct OpenSearch indexing operations — the Bedrock KB sync pipeline handles S3 → OpenSearch indexing.
-- Q: What is the exact set of VPC endpoints required? → A: Six endpoints total. S3 gateway endpoint (`com.amazonaws.{region}.s3`); interface endpoints for SQS (`com.amazonaws.{region}.sqs`), CodeCommit git (`com.amazonaws.{region}.git-codecommit`), Bedrock Runtime (`com.amazonaws.{region}.bedrock-runtime`) for InvokeModel, Bedrock Agent (`com.amazonaws.{region}.bedrock-agent`) for StartIngestionJob/GetIngestionJob, and OpenSearch Serverless (`com.amazonaws.{region}.aoss`) for direct dream cycle queries. No generic `bedrock` control plane endpoint needed.
-- Q: Should VPC interface endpoints span multiple AZs for resilience or single AZ for cost? → A: Single AZ. ASG is pinned to the same AZ as the interface endpoints. Trades AZ failover for ~50% cost reduction on endpoints (~$36.50/month vs ~$73/month). Acceptable for MVP since the system is single-instance with no HA requirement beyond instance recovery within the same AZ.
+- Q: What is the exact set of VPC endpoints required? → A: Ten endpoints total. S3 gateway endpoint (`com.amazonaws.{region}.s3`); interface endpoints for SQS (`com.amazonaws.{region}.sqs`), CodeCommit git (`com.amazonaws.{region}.git-codecommit`), Bedrock Runtime (`com.amazonaws.{region}.bedrock-runtime`) for InvokeModel, Bedrock Agent (`com.amazonaws.{region}.bedrock-agent`) for StartIngestionJob/GetIngestionJob, OpenSearch Serverless (`com.amazonaws.{region}.aoss`) for direct dream cycle queries, SSM (`com.amazonaws.{region}.ssm`), SSM Messages (`com.amazonaws.{region}.ssmmessages`), EC2 Messages (`com.amazonaws.{region}.ec2messages`) for Session Manager access, and CloudWatch Logs (`com.amazonaws.{region}.logs`) for CloudWatch agent log shipping. No generic `bedrock` control plane endpoint needed.
+- Q: Should VPC interface endpoints span multiple AZs for resilience or single AZ for cost? → A: Single AZ. ASG is pinned to the same AZ as the interface endpoints. Trades AZ failover for ~50% cost reduction on endpoints (~$65.70/month for 9 interface endpoints in 1 AZ vs ~$131.40/month in 2 AZs). Acceptable for MVP since the system is single-instance with no HA requirement beyond instance recovery within the same AZ.
 - Q: How are cron schedules (dream cycle, recall log processing) managed on the EC2 instance? → A: The CLI runs as a single long-running process with built-in timers. One process handles SQS polling, dream cycle scheduling, and recall log processing — managed as a single systemd unit. No system crontab entries.
+- Q: What runtime should the Lambda functions use? → A: Node.js 22 (`nodejs22.x`). Fastest cold starts among managed runtimes, important for meeting p99 latency targets. Natural pairing with CDK TypeScript codebase.
+- Q: What memory and timeout configuration should the Lambda functions use? → A: Right-sized per workload. submitKnowledge: 256 MB / 10s (lightweight validation + SQS send). recallKnowledge: 1024 MB / 30s (Bedrock Retrieve + optional coverage LLM call needs headroom for retries and slow responses).
+- Q: What should CloudWatch alarms do when they trigger? → A: No alarm actions for MVP. Alarms exist as CloudWatch metrics only — operators poll the console. SNS/email integration deferred to post-MVP.
+- Q: How should operators access the EC2 instance for debugging? → A: AWS Systems Manager Session Manager. Adds 3 interface endpoints (`ssm`, `ssmmessages`, `ec2messages` — ~$21.90/month additional in single AZ). No SSH keys, no bastion host, no public IP. SSM agent is pre-installed on Amazon Linux 2023.
+- Q: How should the CloudWatch agent be installed and configured, and is a VPC endpoint needed for log shipping? → A: Install via `dnf install amazon-cloudwatch-agent` in user data script. Add CloudWatch Logs interface endpoint (`com.amazonaws.{region}.logs`) for log shipping. Brings total to 10 endpoints (1 gateway + 9 interface), ~$65.70/month for interface endpoints in single AZ.
 
 ## User Stories
 
@@ -47,9 +52,10 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 ### FR-2: submitKnowledge Request Validation (Lambda)
 
-**Description:** A Lambda function sits behind the `submitKnowledge` endpoint and validates incoming requests before enqueuing them for processing.
+**Description:** A Lambda function (Node.js 22, ARM64) sits behind the `submitKnowledge` endpoint and validates incoming requests before enqueuing them for processing.
 
 **Acceptance Criteria:**
+- Runtime: Node.js 22 (`nodejs22.x`) on ARM64 (Graviton), 256 MB memory, 10-second timeout
 - Validates `title` is present, non-empty, and ≤ 255 characters
 - Validates `content` is present, non-empty, and ≤ 100,000 characters
 - Validates `author` is present, non-empty, and ≤ 100 characters
@@ -75,21 +81,26 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - Instance runs Amazon Linux 2023
-- Instance has git and the CLI binary pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint)
+- Instance has git, the CLI binary, and the CloudWatch agent pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint; installs CloudWatch agent via `dnf install amazon-cloudwatch-agent`)
 - CLI binary runs in server mode as a single long-running process managed by a systemd unit, handling SQS polling, dream cycle scheduling, and recall log processing via built-in timers (no system crontab)
-- Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket), OpenSearch Serverless (data plane access for direct queries during dream cycle), Bedrock (InvokeModel for dream cycle LLM calls, StartIngestionJob/GetIngestionJob for triggering KB data source sync)
+- Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket), OpenSearch Serverless (data plane access for direct queries during dream cycle), Bedrock (InvokeModel for dream cycle LLM calls, StartIngestionJob/GetIngestionJob for triggering KB data source sync), SSM (Session Manager access for operator debugging)
 - Instance polls SQS, batches ~5–10 messages, and commits them as Markdown files to CodeCommit in a single git commit per batch
 - After each commit, instance syncs changed files to S3 (incremental, not full repo)
 - Instance manages a lock file for concurrency control between ingestion batches and dream cycles
 - Instance is deployed in a private subnet (no public IP); outbound access via VPC endpoints (no NAT gateway)
-- VPC endpoints (6 total):
+- Operator access via AWS Systems Manager Session Manager (no SSH keys, no bastion host)
+- VPC endpoints (10 total):
   - S3 gateway endpoint (`com.amazonaws.{region}.s3`) — CLI binary download, S3 sync (free)
   - SQS interface endpoint (`com.amazonaws.{region}.sqs`) — queue polling
   - CodeCommit git interface endpoint (`com.amazonaws.{region}.git-codecommit`) — git clone/push
   - Bedrock Runtime interface endpoint (`com.amazonaws.{region}.bedrock-runtime`) — InvokeModel for dream cycle LLM calls
   - Bedrock Agent interface endpoint (`com.amazonaws.{region}.bedrock-agent`) — StartIngestionJob/GetIngestionJob for KB data source sync
   - OpenSearch Serverless interface endpoint (`com.amazonaws.{region}.aoss`) — direct query DSL access for dream cycle phases
-- All interface endpoints and the EC2 ASG are pinned to a single AZ to minimize endpoint costs (~$36.50/month for 5 interface endpoints in 1 AZ)
+  - SSM interface endpoint (`com.amazonaws.{region}.ssm`) — Session Manager control
+  - SSM Messages interface endpoint (`com.amazonaws.{region}.ssmmessages`) — Session Manager data channel
+  - EC2 Messages interface endpoint (`com.amazonaws.{region}.ec2messages`) — SSM agent communication
+  - CloudWatch Logs interface endpoint (`com.amazonaws.{region}.logs`) — CloudWatch agent log shipping
+- All interface endpoints and the EC2 ASG are pinned to a single AZ to minimize endpoint costs (~$65.70/month for 9 interface endpoints in 1 AZ)
 
 ### FR-5: CodeCommit Repository
 
@@ -139,9 +150,10 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 ### FR-9: recallKnowledge Lambda
 
-**Description:** A Lambda function behind the `recallKnowledge` endpoint queries the Bedrock Knowledge Base and optionally performs a coverage assessment.
+**Description:** A Lambda function (Node.js 22, ARM64) behind the `recallKnowledge` endpoint queries the Bedrock Knowledge Base and optionally performs a coverage assessment.
 
 **Acceptance Criteria:**
+- Runtime: Node.js 22 (`nodejs22.x`) on ARM64 (Graviton), 1024 MB memory, 30-second timeout
 - Accepts `query` (string, required) and `limit` (integer, optional, default 10) parameters
 - Calls Bedrock Knowledge Base Retrieve API with the query
 - Optionally filters results to `status: active` notes only (configurable via environment variable `EXCLUDE_PENDING`, default `true`)
@@ -226,7 +238,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Lambda functions log to CloudWatch with structured JSON output
 - EC2 instance logs dream cycle progress, errors, and batch outcomes to CloudWatch Logs (via CloudWatch agent)
 - DLQ depth is surfaced as a CloudWatch metric
-- CloudWatch alarms configured for: DLQ messages > 0, EC2 instance unhealthy, dream cycle lock held > 60 minutes
+- CloudWatch alarms configured for: DLQ messages > 0, EC2 instance unhealthy, dream cycle lock held > 60 minutes (no alarm actions — metrics only for MVP; operators poll the CloudWatch console)
 
 ### NFR-5: Cost Efficiency
 
@@ -237,7 +249,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - OpenSearch Serverless uses minimum OCU configuration (2 OCUs for indexing, 2 for search)
 - Lambda functions use ARM64 architecture (Graviton) for cost savings
 - S3 uses standard storage class (no lifecycle rules for MVP)
-- No NAT gateway — all outbound traffic routed via VPC endpoints (S3 gateway endpoint is free; 5 interface endpoints in a single AZ for SQS, CodeCommit git, Bedrock Runtime, Bedrock Agent, and OpenSearch Serverless — ~$36.50/month)
+- No NAT gateway — all outbound traffic routed via VPC endpoints (S3 gateway endpoint is free; 9 interface endpoints in a single AZ for SQS, CodeCommit git, Bedrock Runtime, Bedrock Agent, OpenSearch Serverless, SSM, SSM Messages, EC2 Messages, and CloudWatch Logs — ~$65.70/month)
 
 ## User Scenarios & Testing
 
