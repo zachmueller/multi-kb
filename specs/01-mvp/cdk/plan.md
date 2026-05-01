@@ -94,17 +94,23 @@ Verified against CLI spec and CLI plan contracts to ensure CDK/CLI alignment:
 
 Most infrastructure choices are specified directly. The following require targeted investigation:
 
-#### R-1: OpenSearch Serverless Collection Setup via CDK
+#### R-1: OpenSearch Serverless Collection Setup via CDK ✅
 - **Research Task:** Determine the correct CDK L1/L2 constructs for creating an OpenSearch Serverless collection with VECTORSEARCH type
 - **Questions to Answer:** Is there an L2 construct, or must we use `CfnCollection`? How to create encryption, network, and data access policies? How do policies reference the Bedrock KB service role before it exists (circular dependency)?
 - **Success Criteria:** Working CDK code that creates a collection accessible by both the EC2 role and Bedrock KB service
 - **Key Concern:** OpenSearch Serverless policies use JSON policy documents separate from IAM — three policy types (encryption, network, data access) must all be configured correctly
+- **Resolution:** No L2 constructs exist — use L1 constructs (`CfnCollection`, `CfnSecurityPolicy`, `CfnAccessPolicy`). Encryption policy must be created before collection via `addDependency()`. No circular dependency: CDK tokens resolve all forward references between roles, collection, and policies. Policy names must match `^[a-z][a-z0-9-]{2,31}$`. CDK tokens in `JSON.stringify()` synthesize to `Fn::Join`/`Fn::Sub` intrinsics. See [research.md R-1](research.md#r-1-opensearch-serverless-collection-setup-via-cdk).
 
-#### R-2: Bedrock Knowledge Base CDK Construct
+#### R-2: Bedrock Knowledge Base CDK Construct ✅
 - **Research Task:** Determine how to create a Bedrock Knowledge Base with S3 data source via CDK
 - **Questions to Answer:** Is there an L2 construct (`bedrock.CfnKnowledgeBase`, `bedrock.CfnDataSource`)? How to configure "no chunking" strategy? How to wire the S3 data source? How does the KB service role get created and permissioned for both S3 and OpenSearch?
 - **Success Criteria:** Working CDK code that creates a KB pointed at the S3 bucket with "no chunking", using the OpenSearch collection as the vector store
 - **Key Concern:** The service role for Bedrock KB needs permissions to read S3 AND write to OpenSearch — this is a separate role from the Lambda or EC2 roles
+- **Resolution:** No L2 constructs — use `CfnKnowledgeBase` and `CfnDataSource` (L1). Three new findings that reshape Phase C:
+  1. **Missing permission:** Bedrock KB service role needs `bedrock:InvokeModel` on the foundation model ARN (for embeddings). This was not in the original plan.
+  2. **Index pre-creation required:** Bedrock does NOT auto-create the OpenSearch vector index via CDK/CloudFormation (console-only feature). A custom resource Lambda must create the index before the KB. Index needs: `knn_vector` field (1024 dims for Titan V2, `faiss`/`hnsw` engine), plus `text` and `metadata` fields matching the KB `fieldMapping`.
+  3. **Field mappings required:** All three field mappings (`vectorField`, `textField`, `metadataField`) are required and must match between index schema and KB configuration.
+  See [research.md R-2](research.md#r-2-bedrock-knowledge-base-cdk-construct).
 
 #### R-3: EC2 User Data Script Best Practices
 - **Research Task:** Design the user data script for Amazon Linux 2023 that installs the CLI binary, CloudWatch agent, clones CodeCommit, and starts the systemd unit
@@ -112,11 +118,12 @@ Most infrastructure choices are specified directly. The following require target
 - **Success Criteria:** Working user data script that boots a fresh instance to running state with the CLI process active
 - **Key Concern:** The systemd unit, config.yaml, and CloudWatch agent config must all be templated with CDK-resolved values (SQS URL, repo name, bucket name, etc.)
 
-#### R-4: VPC Endpoint Security Group Configuration
+#### R-4: VPC Endpoint Security Group Configuration ✅
 - **Research Task:** Determine the security group rules for 9 interface VPC endpoints + 1 gateway endpoint
 - **Questions to Answer:** Can all interface endpoints share one security group? What inbound rules are needed (HTTPS/443 from EC2 SG)? Does the gateway endpoint need special route table configuration?
 - **Success Criteria:** Working VPC with all 10 endpoints, EC2 instance can reach all services
 - **Key Concern:** The OpenSearch Serverless VPC endpoint has its own network policy requirement (separate from the security group)
+- **Resolution:** Two SGs (EC2 + endpoint). EC2 SG: outbound 443 to endpoint SG. Endpoint SG: inbound 443 from EC2 SG. All 9 interface endpoints share the endpoint SG. Key findings: (1) AOSS uses `opensearchserverless.CfnVpcEndpoint` (L1), not `ec2.InterfaceVpcEndpoint` — takes `securityGroupIds` as `string[]`. (2) Must set `open: false` on `InterfaceVpcEndpoint` to prevent CDK from auto-adding permissive `0.0.0.0/0` ingress. (3) S3 gateway endpoint needs route table association only, no SG. See [research.md R-4](research.md#r-4-vpc-endpoint-security-group-configuration).
 
 #### R-5: Crockford Base32 UID Generation in Node.js
 - **Research Task:** Implement or find a library for 16-character Crockford base32 UID generation in the submitKnowledge Lambda
@@ -124,11 +131,12 @@ Most infrastructure choices are specified directly. The following require target
 - **Success Criteria:** Function that generates collision-resistant 16-char UIDs with the correct alphabet (`0-9A-HJKMNP-TV-Z`, excluding I, L, O, U)
 - **Note:** Must match the CLI's format exactly (CLI plan R-7). Both produce 80-bit entropy encoded as 16 Crockford base32 chars.
 
-#### R-6: OpenSearch Serverless Network Policy for Dual Access
+#### R-6: OpenSearch Serverless Network Policy for Dual Access ✅
 - **Research Task:** Configure OpenSearch Serverless network policy to allow access from both VPC (EC2) and from the Bedrock service (for Retrieve API queries)
 - **Questions to Answer:** Can a single network policy have both VPC and public/service access rules? Does Bedrock access OpenSearch via a service-linked role or a customer-managed role? How does the `AllowFromPublic` rule interact with VPC-only access for EC2?
 - **Success Criteria:** EC2 can query OpenSearch via VPC endpoint AND Bedrock Retrieve API can query the same collection
 - **Key Concern:** If the network policy is VPC-only, Bedrock Retrieve API (called by Lambda, which is NOT in the VPC) may not be able to reach OpenSearch. Need dual-access network policy.
+- **Resolution:** **IMPORTANT CHANGE:** Do NOT use `AllowFromPublic: true` — it silently overrides `SourceVPCEs` and `SourceServices`, making the collection fully public. Instead use `AllowFromPublic: false` with `SourceVPCEs: [<vpce-id>]` + `SourceServices: ["bedrock.amazonaws.com"]`. Bedrock accesses OpenSearch via AWS internal service-to-service networking (not the customer's VPC). The correct field name is `SourceVPCEs` (not `SourceVPCEndpoints`). This provides three-layer security: network origin + data access policy + IAM. See [research.md R-6](research.md#r-6-opensearch-serverless-network-policy-for-dual-access).
 
 #### R-7: Lambda Proxy Integration Response Format
 - **Research Task:** Confirm the exact response format required by API Gateway Lambda proxy integration for each status code
@@ -256,14 +264,15 @@ Build the persistent storage infrastructure:
 
 Build OpenSearch Serverless + Bedrock Knowledge Base:
 
-1. OpenSearch Serverless collection (VECTORSEARCH type)
-2. Encryption policy (AWS-owned key)
-3. Network policy (dual access: VPC for EC2 + service access for Bedrock)
-4. Data access policy (EC2 role + Bedrock KB service role)
-5. Bedrock Knowledge Base with S3 data source
-6. Bedrock KB service role (S3 read + OpenSearch write)
-7. "No chunking" chunking strategy configuration
-8. Stack outputs: collection endpoint, KB ID, data source ID
+1. OpenSearch Serverless collection (VECTORSEARCH type) — L1 `CfnCollection`
+2. Encryption policy (AWS-owned key) — must be created before collection via `addDependency()`
+3. Network policy — `AllowFromPublic: false` with `SourceVPCEs` + `SourceServices: ["bedrock.amazonaws.com"]` (R-6)
+4. Data access policy (EC2 role + Bedrock KB service role) — CDK tokens resolve role ARNs
+5. Bedrock KB service role (S3 read + OpenSearch write + **`bedrock:InvokeModel` for embeddings**) (R-2)
+6. **Custom resource Lambda to pre-create OpenSearch vector index** — Bedrock does not auto-create via CDK (R-2)
+7. Bedrock Knowledge Base with S3 data source — L1 `CfnKnowledgeBase`, `CfnDataSource`
+8. "No chunking" chunking strategy (`chunkingStrategy: 'NONE'`)
+9. Stack outputs: collection endpoint, KB ID, data source ID
 
 ### Phase D: Lambda Functions
 
@@ -346,13 +355,13 @@ End-to-end validation:
 ### Technical Risks
 
 **High Risk:**
-- **OpenSearch Serverless Dual-Access Network Policy:** The collection needs to be accessible from both the VPC (EC2 direct queries) and from the Bedrock service (Retrieve API, called by Lambda outside VPC). Misconfigured network policies could block one access path.
-  - **Mitigation:** R-6 research. Test both access paths independently after deployment.
-  - **Contingency:** If dual access is impossible with one policy, attach the recall Lambda to the VPC (adds Lambda cold start latency but resolves the access issue).
+- ~~**OpenSearch Serverless Dual-Access Network Policy:**~~ **RESOLVED (R-6).** Use `AllowFromPublic: false` with `SourceVPCEs` + `SourceServices: ["bedrock.amazonaws.com"]`. Bedrock uses AWS internal service networking, not the customer's VPC. Single-rule policy handles both access paths. Critical gotcha documented: `AllowFromPublic: true` silently overrides VPC/service restrictions.
 
-- **Bedrock KB + OpenSearch Serverless Circular Dependencies:** The KB service role needs OpenSearch collection ARN for its permissions, but the OpenSearch data access policy needs the KB service role ARN. CDK may struggle with this circular reference.
-  - **Mitigation:** R-1 and R-2 research. May need to create the service role first with a placeholder, then update after collection creation, or use CDK's `addDependency()` to control synthesis order.
-  - **Contingency:** Use a custom resource Lambda to create the KB after the collection is ready.
+- ~~**Bedrock KB + OpenSearch Serverless Circular Dependencies:**~~ **RESOLVED (R-1, R-2).** No circular dependency exists. CDK tokens resolve all forward references. Collection depends only on encryption policy. Roles use collection ARN tokens. Data access policy uses role ARN tokens. All resolve to CloudFormation intrinsics at synthesis time.
+
+- **OpenSearch Vector Index Pre-Creation (NEW — from R-2):** Bedrock KB does NOT auto-create the OpenSearch vector index via CDK/CloudFormation. A custom resource Lambda must create the index (1024-dim `knn_vector` field, `faiss`/`hnsw` engine) after the collection is available but before the KB is created.
+  - **Mitigation:** New task SRC-006 adds a CDK custom resource Lambda that creates the index via the OpenSearch REST API. The Lambda needs VPC access (to reach the collection via AOSS endpoint) and data access policy permissions.
+  - **Contingency:** If custom resource approach is unreliable, the index could be created manually as a one-time post-deploy step (documented in quickstart.md). However, this breaks the single-`cdk deploy` success criterion.
 
 **Medium Risk:**
 - **User Data Script Reliability:** The EC2 user data script must install the CLI binary, CloudWatch agent, clone CodeCommit, template config, and start systemd — all on first boot. Any failure leaves the instance in a bad state.

@@ -7,10 +7,11 @@
 
 ## Task Summary
 
-**Total Tasks:** 55
+**Total Tasks:** 56
 **Phases:** 9 (Setup → Networking → Storage → Search → Lambda → API → Compute → Observability → Quality)
 **Estimated Complexity:** High
 **Parallel Execution Opportunities:** 12 task groups
+**Research Status:** R-1, R-2, R-4, R-6 resolved; R-3, R-5, R-7 open
 
 ## Dependency Legend
 
@@ -108,27 +109,30 @@ _Corresponds to plan.md Phase A. Builds VPC infrastructure._
 - [ ] CDK assertion test: VPC endpoint resource with `s3` service name and `Gateway` type
 
 ### NET-003: Interface VPC Endpoints (9 endpoints)
-**Description:** Create all 9 interface VPC endpoints per spec FR-4 VPC endpoint list.
+**Description:** Create all 9 interface VPC endpoints per spec FR-4 VPC endpoint list and research.md R-4.
 **Files:**
 - `lib/constructs/networking.ts` — interface endpoint creation
 - `test/constructs/networking.test.ts` — endpoint assertions
 **Dependencies:** NET-001, NET-004
 **Acceptance Criteria:**
-- [ ] Creates interface endpoints for all 9 services:
+- [ ] Creates **8 standard interface endpoints** via `ec2.InterfaceVpcEndpoint`:
   1. `com.amazonaws.{region}.sqs`
   2. `com.amazonaws.{region}.git-codecommit`
   3. `com.amazonaws.{region}.bedrock-runtime`
   4. `com.amazonaws.{region}.bedrock-agent`
-  5. `com.amazonaws.{region}.aoss` (OpenSearch Serverless)
-  6. `com.amazonaws.{region}.ssm`
-  7. `com.amazonaws.{region}.ssmmessages`
-  8. `com.amazonaws.{region}.ec2messages`
-  9. `com.amazonaws.{region}.logs` (CloudWatch Logs)
+  5. `com.amazonaws.{region}.ssm`
+  6. `com.amazonaws.{region}.ssmmessages`
+  7. `com.amazonaws.{region}.ec2messages`
+  8. `com.amazonaws.{region}.logs` (CloudWatch Logs)
+- [ ] Creates **1 AOSS VPC endpoint** via `opensearchserverless.CfnVpcEndpoint` (L1 construct) — NOT `ec2.InterfaceVpcEndpoint`. This uses `AWS::OpenSearchServerless::VpcEndpoint`, not `AWS::EC2::VPCEndpoint`.
+  - AOSS endpoint props: `name` (must match `^[a-z][a-z0-9-]{2,31}$`), `vpcId`, `subnetIds`, `securityGroupIds`
+  - AOSS endpoint returns `attrId` (the VPC endpoint ID used in the network policy's `SourceVPCEs` field)
 - [ ] All endpoints placed in the single private subnet (same AZ)
-- [ ] All interface endpoints share the VPC endpoint security group (NET-004)
-- [ ] Private DNS enabled on all interface endpoints
-- [ ] Note: OpenSearch Serverless endpoint (`aoss`) may require `CfnVpcEndpoint` from `aws-opensearchserverless` module — handle per R-4 research
-- [ ] CDK assertion test: 9 interface endpoint resources exist; all reference the endpoint SG
+- [ ] All endpoints (8 standard + 1 AOSS) share the VPC endpoint security group (NET-004)
+- [ ] **CRITICAL: `open: false`** on all `InterfaceVpcEndpoint` constructs to prevent CDK from auto-adding permissive `0.0.0.0/0` ingress rule
+- [ ] Private DNS enabled on all 8 standard interface endpoints
+- [ ] Exports: AOSS VPC endpoint ID (needed by SRC-003 network policy `SourceVPCEs`)
+- [ ] CDK assertion test: 8 `AWS::EC2::VPCEndpoint` resources + 1 `AWS::OpenSearchServerless::VpcEndpoint` resource; all reference the endpoint SG
 
 ### NET-004: Security Groups
 **Description:** Create security groups for EC2 instance and VPC endpoints per research.md R-4.
@@ -137,11 +141,13 @@ _Corresponds to plan.md Phase A. Builds VPC infrastructure._
 - `test/constructs/networking.test.ts`
 **Dependencies:** NET-001
 **Acceptance Criteria:**
-- [ ] EC2 security group: outbound HTTPS (443) to endpoint SG
-- [ ] VPC endpoint security group: inbound HTTPS (443) from EC2 SG
+- [ ] EC2 security group: `allowAllOutbound: false`, explicit egress TCP 443 to endpoint SG only
+- [ ] VPC endpoint security group: `allowAllOutbound: false`, explicit ingress TCP 443 from EC2 SG only
 - [ ] No public inbound rules on either SG
-- [ ] All 9 interface endpoints reference the endpoint SG
-- [ ] CDK assertion test: two SG resources with correct ingress/egress rules
+- [ ] Both SGs shared by all 9 interface endpoints (8 standard + 1 AOSS)
+- [ ] AOSS `CfnVpcEndpoint` receives `[endpointSg.securityGroupId]` as `securityGroupIds` (string, not construct reference)
+- [ ] Exports: EC2 SG (for compute construct), endpoint SG (for endpoints)
+- [ ] CDK assertion test: two SG resources with correct ingress/egress rules; no `0.0.0.0/0` rules
 
 ---
 
@@ -210,85 +216,106 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 ### SRC-001: OpenSearch Serverless Collection
 **Description:** Create the OpenSearch Serverless collection of type VECTORSEARCH per spec FR-7 and research.md R-1.
 **Files:**
-- `lib/constructs/search.ts` — `SearchConstruct`: CfnCollection
+- `lib/constructs/search.ts` — `SearchConstruct`: `CfnCollection` from `aws-cdk-lib/aws-opensearchserverless`
 - `test/constructs/search.test.ts`
-**Dependencies:** ENV-002
+**Dependencies:** ENV-002, SRC-002 (encryption policy must exist before collection)
 **Acceptance Criteria:**
-- [ ] Uses `CfnCollection` (L1) from `aws-opensearchserverless`
+- [ ] Uses `CfnCollection` (L1) from `aws-cdk-lib/aws-opensearchserverless`
 - [ ] Type: `VECTORSEARCH`
-- [ ] Collection name derived from stack name or configurable
-- [ ] Collection depends on encryption policy (SRC-002) — CDK dependency set
-- [ ] Exports: collection ARN, collection endpoint, collection name
-- [ ] CDK assertion test: collection resource with type `VECTORSEARCH`
+- [ ] Collection name: configurable, must match `^[a-z][a-z0-9-]{2,27}$`
+- [ ] `standbyReplicas: 'DISABLED'` for MVP cost savings
+- [ ] **`collection.addDependency(encryptionPolicy)`** — collection FAILS without this
+- [ ] **`collection.addDependency(networkPolicy)`** — recommended so network access is ready when collection comes online
+- [ ] Exports: `collection.attrArn`, `collection.attrCollectionEndpoint`, `collection.attrId`, collection name
+- [ ] CDK assertion test: collection resource with type `VECTORSEARCH`; `DependsOn` includes encryption policy
 
 ### SRC-002: Encryption Policy
-**Description:** Create the OpenSearch Serverless encryption policy per spec FR-7 and data-model.md Entity 6.
+**Description:** Create the OpenSearch Serverless encryption policy per spec FR-7 and research.md R-1.
 **Files:**
-- `lib/constructs/search.ts` — CfnSecurityPolicy (encryption)
+- `lib/constructs/search.ts` — `CfnSecurityPolicy` from `aws-cdk-lib/aws-opensearchserverless`
 - `test/constructs/search.test.ts`
-**Dependencies:** SRC-001 (name reference, but must be created before collection)
+**Dependencies:** None (must be created BEFORE SRC-001 collection)
 **Acceptance Criteria:**
-- [ ] Uses `CfnSecurityPolicy` with type `encryption`
-- [ ] Policy specifies AWS-owned key (`AWSOwnedKey: true`)
-- [ ] Rules target the collection by name
-- [ ] CDK assertion test: security policy resource with type `encryption`
+- [ ] Uses `CfnSecurityPolicy` with `type: 'encryption'`
+- [ ] Policy name must match `^[a-z][a-z0-9-]{2,31}$`
+- [ ] Policy JSON is a **single object** (NOT an array — unlike network and data access policies)
+- [ ] Policy specifies `AWSOwnedKey: true`
+- [ ] `Rules` target the collection by name: `[{ "ResourceType": "collection", "Resource": ["collection/<name>"] }]`
+- [ ] Policy is `JSON.stringify()`-ed into the `policy` string prop
+- [ ] SRC-001 must call `collection.addDependency(encryptionPolicy)` — collection creation FAILS without encryption policy
+- [ ] CDK assertion test: security policy resource with type `encryption` and `AWSOwnedKey: true`
 
 ### SRC-003: Network Policy (Dual Access)
-**Description:** Create the OpenSearch Serverless network policy allowing both VPC and Bedrock service access per research.md R-6 and data-model.md Entity 6.
+**Description:** Create the OpenSearch Serverless network policy allowing both VPC and Bedrock service access per research.md R-6.
 **Files:**
-- `lib/constructs/search.ts` — CfnSecurityPolicy (network) or CfnNetworkSecurityPolicy
+- `lib/constructs/search.ts` — `CfnSecurityPolicy` with type `network`
 - `test/constructs/search.test.ts`
-**Dependencies:** NET-003 (for VPC endpoint ID)
+**Dependencies:** NET-003 (for AOSS VPC endpoint ID)
 **Acceptance Criteria:**
 - [ ] Uses `CfnSecurityPolicy` with type `network`
-- [ ] `AllowFromPublic: true` — enables Bedrock service to reach collection via Retrieve API
-- [ ] `SourceVPCEndpoints` includes the OpenSearch Serverless VPC endpoint ID — enables EC2 direct access
-- [ ] Both access paths work: EC2 via VPC endpoint, Bedrock service via public path
-- [ ] Security is enforced by the data access policy (principals), not the network policy alone
-- [ ] CDK assertion test: network security policy exists with both public and VPC access configured
+- [ ] **`AllowFromPublic: false`** — do NOT set to `true` (it silently overrides `SourceVPCEs` and `SourceServices`, making the collection fully public)
+- [ ] `SourceVPCEs: [<aoss-vpc-endpoint-id>]` — enables EC2 direct access via VPC endpoint. Note: field name is `SourceVPCEs` (NOT `SourceVPCEndpoints`)
+- [ ] `SourceServices: ["bedrock.amazonaws.com"]` — enables Bedrock service access via AWS internal networking
+- [ ] All field names are case-sensitive: `AllowFromPublic`, `SourceVPCEs`, `SourceServices`, `ResourceType`, `Resource`
+- [ ] Policy JSON is an **array** (unlike encryption policy which is a single object)
+- [ ] Both access paths work: EC2 via VPC endpoint, Bedrock via service private networking
+- [ ] Three-layer security model: network policy (origin) + data access policy (principal) + IAM
+- [ ] CDK assertion test: network security policy exists with `AllowFromPublic: false`, `SourceVPCEs`, and `SourceServices`
 
 ### SRC-004: Data Access Policy
-**Description:** Create the OpenSearch Serverless data access policy granting access to EC2 role and Bedrock KB service role per data-model.md Entity 6.
+**Description:** Create the OpenSearch Serverless data access policy granting access to EC2 role, Bedrock KB service role, and index creation Lambda role per research.md R-1.
 **Files:**
-- `lib/constructs/search.ts` — CfnAccessPolicy
+- `lib/constructs/search.ts` — `CfnAccessPolicy` from `aws-cdk-lib/aws-opensearchserverless`
 - `test/constructs/search.test.ts`
-**Dependencies:** SRC-001 (collection name), CMP-001 (EC2 role ARN), KBS-002 (Bedrock KB service role ARN)
+**Dependencies:** SRC-001 (collection name), CMP-001 (EC2 role ARN), KBS-002 (Bedrock KB service role ARN), SRC-006 (index creation Lambda role ARN)
 **Acceptance Criteria:**
-- [ ] Uses `CfnAccessPolicy`
-- [ ] Principals: EC2 instance role ARN + Bedrock KB service role ARN
+- [ ] Uses `CfnAccessPolicy` with `type: 'data'`
+- [ ] Policy name must match `^[a-z][a-z0-9-]{2,31}$`
+- [ ] **Principals:** EC2 instance role ARN + Bedrock KB service role ARN + index creation Lambda role ARN (all passed as CDK tokens via `JSON.stringify()`)
+- [ ] CDK tokens in `JSON.stringify()` resolve to `Fn::Join`/`Fn::Sub` intrinsics — this is well-supported
 - [ ] Index-level permissions: `aoss:ReadDocument`, `aoss:WriteDocument`, `aoss:CreateIndex`, `aoss:DeleteIndex`, `aoss:UpdateIndex`, `aoss:DescribeIndex`
 - [ ] Collection-level permissions: `aoss:CreateCollectionItems`, `aoss:DeleteCollectionItems`, `aoss:UpdateCollectionItems`, `aoss:DescribeCollectionItems`
 - [ ] Resources: `index/<collection-name>/*` and `collection/<collection-name>`
-- [ ] Note: this task has a circular dependency concern — EC2 role and Bedrock KB role must exist before this policy. Handle with CDK `addDependency()` or by creating the policy after both roles exist
+- [ ] **No circular dependency:** CDK tokens resolve all forward references. Roles reference collection ARN; policy references role ARNs. CloudFormation determines creation order via implicit `DependsOn`.
+- [ ] **Principals must ALSO have IAM-level `aoss:APIAccessAll`** on the collection ARN in their own IAM policies (AOSS data access policy and IAM policy work together)
 - [ ] CDK assertion test: access policy exists with correct principals and permissions
 
 ### KBS-001: Bedrock Knowledge Base
 **Description:** Create the Bedrock Knowledge Base with OpenSearch Serverless as the vector store per spec FR-8 and research.md R-2.
 **Files:**
-- `lib/constructs/knowledge-base.ts` — `KnowledgeBaseConstruct`: CfnKnowledgeBase
+- `lib/constructs/knowledge-base.ts` — `KnowledgeBaseConstruct`: `CfnKnowledgeBase` from `aws-cdk-lib/aws-bedrock`
 - `test/constructs/knowledge-base.test.ts`
-**Dependencies:** SRC-001 (collection endpoint/ARN), KBS-002 (service role)
+**Dependencies:** SRC-001 (collection ARN), KBS-002 (service role), **SRC-006 (vector index must exist before KB creation)**
 **Acceptance Criteria:**
-- [ ] Uses `CfnKnowledgeBase` (L1) from `aws-bedrock`
-- [ ] Embedding model: configurable via `embeddingModelId` prop (default: `amazon.titan-embed-text-v2:0`)
-- [ ] Storage configuration points to OpenSearch Serverless collection endpoint
+- [ ] Uses `CfnKnowledgeBase` (L1) from `aws-cdk-lib/aws-bedrock`
+- [ ] `knowledgeBaseConfiguration.type`: `'VECTOR'`
+- [ ] Embedding model: `embeddingModelArn` constructed from configurable model ID (default: `arn:aws:bedrock:{region}::foundation-model/amazon.titan-embed-text-v2:0`)
+- [ ] `storageConfiguration.type`: `'OPENSEARCH_SERVERLESS'`
+- [ ] `opensearchServerlessConfiguration`: `collectionArn`, `vectorIndexName`, and `fieldMapping` (all three fields required)
+- [ ] **Field mappings must match the pre-created index schema (SRC-006):**
+  - `vectorField`: `'bedrock-knowledge-base-default-vector'`
+  - `textField`: `'AMAZON_BEDROCK_TEXT_CHUNK'`
+  - `metadataField`: `'AMAZON_BEDROCK_METADATA'`
 - [ ] Role ARN: Bedrock KB service role (KBS-002)
-- [ ] Exports: Knowledge Base ID, Knowledge Base ARN
-- [ ] CDK assertion test: KB resource with correct embedding model and storage config
+- [ ] KB depends on SRC-006 custom resource (index must exist before KB)
+- [ ] Exports: `attrKnowledgeBaseId`, `attrKnowledgeBaseArn`
+- [ ] CDK assertion test: KB resource with correct embedding model ARN, storage type, collection ARN, and field mappings
 
 ### KBS-002: Bedrock KB Service Role
-**Description:** Create the IAM role assumed by Bedrock to access S3 and OpenSearch per data-model.md IAM Role Summary.
+**Description:** Create the IAM role assumed by Bedrock to access S3, OpenSearch, and the embedding model per research.md R-2.
 **Files:**
 - `lib/constructs/knowledge-base.ts` — service role for Bedrock KB
 - `test/constructs/knowledge-base.test.ts`
-**Dependencies:** STR-001 (S3 bucket ARN), SRC-001 (collection ARN)
+**Dependencies:** STR-001 (S3 bucket ARN), SRC-001 (collection ARN), ENV-002 (embedding model ID)
 **Acceptance Criteria:**
 - [ ] IAM role with trust policy for `bedrock.amazonaws.com` service principal
-- [ ] Permissions: `s3:GetObject` + `s3:ListBucket` on the KB bucket ARN
+- [ ] Trust policy conditions: `aws:SourceAccount` (account ID) + `ArnLike` condition on `arn:aws:bedrock:{region}:{account}:knowledge-base/*`
+- [ ] Permissions: `s3:GetObject` on `{bucket-arn}/*` + `s3:ListBucket` on bucket ARN (both with `aws:ResourceAccount` condition)
 - [ ] Permissions: `aoss:APIAccessAll` on the collection ARN
-- [ ] Least-privilege: no wildcard permissions
-- [ ] Exports: role ARN (needed by SRC-004 data access policy and KBS-001)
-- [ ] CDK assertion test: role with correct trust policy and permission statements
+- [ ] **Permissions: `bedrock:InvokeModel` on the foundation model ARN** (e.g., `arn:aws:bedrock:{region}::foundation-model/amazon.titan-embed-text-v2:0`). Note: model ARN uses empty account ID (`::`) because foundation models are AWS-owned.
+- [ ] Least-privilege: no wildcard permissions, all scoped to specific ARNs
+- [ ] Exports: role, role ARN (needed by SRC-004 data access policy and KBS-001)
+- [ ] CDK assertion test: role with correct trust policy (including conditions), 4 permission statements on specific ARNs
 
 ### KBS-003: Bedrock KB Data Source (S3)
 **Description:** Create the Bedrock Knowledge Base data source pointing to the S3 bucket with "no chunking" strategy per spec FR-8.
@@ -303,6 +330,30 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - [ ] Chunking strategy: `NONE` (each note is its own chunk)
 - [ ] Exports: data source ID (needed by EC2 config for StartIngestionJob)
 - [ ] CDK assertion test: data source resource with chunking strategy `NONE` and correct S3 bucket
+
+### SRC-006: Custom Resource — OpenSearch Vector Index Creation
+**Description:** Create a CDK custom resource (Lambda-backed) that pre-creates the OpenSearch vector index. Bedrock KB does NOT auto-create the index via CloudFormation — this is a console-only feature (research.md R-2).
+**Files:**
+- `lib/constructs/search.ts` — custom resource addition to `SearchConstruct`
+- `lambda/custom-resource/create-index.ts` — custom resource handler
+- `test/lambda/custom-resource/create-index.test.ts` — handler unit tests
+**Dependencies:** SRC-001 (collection endpoint, collection name), SRC-004 (data access policy — index creation Lambda needs access), NET-003 (AOSS VPC endpoint — Lambda must be in VPC to reach collection)
+**Acceptance Criteria:**
+- [ ] CDK `Provider` + `CustomResource` construct backed by a Lambda function
+- [ ] Lambda sends PUT request to OpenSearch collection endpoint to create index with schema:
+  - `settings.index.knn`: `true`
+  - `bedrock-knowledge-base-default-vector` field: `knn_vector`, 1024 dimensions, `faiss` engine, `hnsw` method, `l2` space type
+  - `AMAZON_BEDROCK_TEXT_CHUNK` field: `text`, `index: true`
+  - `AMAZON_BEDROCK_METADATA` field: `text`, `index: false`
+- [ ] Index name configurable (default: `'bedrock-kb-index'`)
+- [ ] Lambda is VPC-attached (needs to reach collection via AOSS VPC endpoint)
+- [ ] Lambda security group: same EC2 SG or a separate SG with outbound 443 to endpoint SG
+- [ ] Lambda IAM role: `aoss:APIAccessAll` on collection ARN
+- [ ] Lambda role must be listed in AOSS data access policy (SRC-004) principals
+- [ ] On Create: creates the index; on Update: no-op (index schema is immutable); on Delete: optionally deletes the index
+- [ ] Idempotent: if index already exists, succeeds without error
+- [ ] Vector dimension (1024) matches the embedding model configuration in KBS-001
+- [ ] CDK assertion test: custom resource exists; Lambda is VPC-attached; IAM role has `aoss:APIAccessAll`
 
 ### SRC-005: Stack Outputs — Search
 **Description:** Add CloudFormation outputs for search infrastructure.
@@ -619,14 +670,19 @@ _Bring all constructs together in the main stack._
 
 _Research items must complete before their dependent implementation phases._
 
-| Research | Must Complete Before | Blocks |
-|----------|---------------------|--------|
-| **R-2:** Bedrock KB metadata extraction | Phase 4 (Lambda Functions) | LMB-004 (recallKnowledge handler — determines uid/title extraction from Retrieve results) |
-| **R-1:** OpenSearch Serverless CDK setup | Phase 3 (Search Infrastructure) | SRC-001, SRC-002, SRC-003, SRC-004 (L1 construct usage, policy format) |
-| **R-6:** OpenSearch dual-access network policy | Phase 3 (Search Infrastructure) | SRC-003 (network policy configuration) |
-| **R-7:** Lambda proxy integration format | Phase 4 (Lambda Functions) | LMB-001 (response helpers) |
+| Research | Status | Must Complete Before | Blocks |
+|----------|--------|---------------------|--------|
+| **R-4:** VPC endpoint security groups | ✅ Resolved | Phase 1 (Networking) | NET-003, NET-004 (AOSS endpoint construct, `open: false`, SG config) |
+| **R-6:** OpenSearch dual-access network policy | ✅ Resolved | Phase 3 (Search Infrastructure) | SRC-003 (`AllowFromPublic: false` + `SourceVPCEs` + `SourceServices`) |
+| **R-1:** OpenSearch Serverless CDK setup | ✅ Resolved | Phase 3 (Search Infrastructure) | SRC-001, SRC-002, SRC-003, SRC-004 (L1 constructs, policy formats, dependency ordering) |
+| **R-2:** Bedrock KB CDK construct | ✅ Resolved | Phase 3 (Search Infrastructure) + Phase 4 (Lambda Functions) | KBS-001, KBS-002, KBS-003, SRC-006 (field mappings, service role permissions, index pre-creation) + LMB-004 (uid/title extraction from Retrieve results) |
+| **R-7:** Lambda proxy integration format | Open | Phase 4 (Lambda Functions) | LMB-001 (response helpers) |
+| **R-3:** EC2 user data script | Open | Phase 6 (EC2 Compute) | CMP-003 (user data script) |
+| **R-5:** Crockford base32 UID | Open | Phase 4 (Lambda Functions) | LMB-001 (UID generation) |
 
-**Tasks that can proceed without research:** Phases 0-2 (Setup, Networking, Storage), Phase 5 (API Gateway), Phase 6 (EC2 Compute — except final user data details), Phase 7 (Observability).
+**All Phase 3 research is resolved.** Implementation can now proceed through Phase 3 (Search Infrastructure) without blocking.
+
+**Tasks that can proceed without remaining research:** Phases 0-3 (Setup, Networking, Storage, Search Infrastructure), Phase 5 (API Gateway), Phase 6 (EC2 Compute — except CMP-003 user data details), Phase 7 (Observability).
 
 ---
 
@@ -714,7 +770,8 @@ ENV-001 → ENV-002 → NET-001 → NET-002
                   → SRC-001 ──→ SRC-002
                             ──→ SRC-003
                             ──→ KBS-002
-                            ──→ SRC-004 (needs CMP-001 + KBS-002)
+                            ──→ SRC-004 (needs CMP-001 + KBS-002 + SRC-006 Lambda role)
+                            ──→ SRC-006 (needs SRC-004 + NET-003) ──→ KBS-001
        → ENV-003
        → LMB-001 → LMB-002 → LMB-003 ──→ API-002 ──┐
                  → LMB-004 → LMB-005 ──→ API-003 ──┤
@@ -731,9 +788,11 @@ ENV-001 → ENV-002 → NET-001 → NET-002
        All constructs → WIR-001 → WIR-002
 ```
 
-**Critical Path:** ENV-001 → ENV-002 → STR-001 → KBS-002 → KBS-001 → KBS-003 → LMB-005 → API-003 → WIR-001 → WIR-002
+**Critical Path:** ENV-001 → ENV-002 → STR-001 → KBS-002 → SRC-004 → SRC-006 → KBS-001 → KBS-003 → LMB-005 → API-003 → WIR-001 → WIR-002
 
-This is the longest dependency chain (~10 sequential tasks) running through the storage → search → recall Lambda → API → wiring path. The networking chain (NET-001 → NET-003 → SRC-003) runs in parallel and typically completes faster.
+This is the longest dependency chain (~12 sequential tasks) running through storage → search → index creation → KB → recall Lambda → API → wiring. The critical path is now 2 tasks longer due to SRC-006 (index pre-creation) which must complete between SRC-004 and KBS-001. The networking chain (NET-001 → NET-003 → SRC-003) runs in parallel and typically completes faster.
+
+**Note on SRC-004 / SRC-006 ordering:** SRC-004 (data access policy) and SRC-006 (index creation) have a mutual dependency: SRC-004 needs SRC-006's Lambda role ARN, and SRC-006 needs the data access policy to grant access. Resolution: create the SRC-006 Lambda role first (as part of SRC-006 construct), pass its ARN to SRC-004, then have the custom resource execution depend on both the data access policy and the collection being ready.
 
 ## Parallel Execution Groups
 
@@ -748,6 +807,6 @@ This is the longest dependency chain (~10 sequential tasks) running through the 
 | API Endpoints | API-002, API-003 | API-001 + Lambda constructs |
 | Compute Chain | CMP-001 → CMP-002/CMP-003 → CMP-004 | Storage + Search + KB |
 | Observability | OBS-001, OBS-002 | API + Storage (DLQ) |
-| KB Chain | KBS-002 → KBS-001 → KBS-003 | STR-001 + SRC-001 |
+| KB Chain | KBS-002 → SRC-004 → SRC-006 → KBS-001 → KBS-003 | STR-001 + SRC-001 + CMP-001 |
 | Quality Parallel | QAT-001, QAT-002, QAT-003, QAT-004 | WIR-001 |
 | Stack Outputs | STR-004, SRC-005, API-004, CMP-005 | Respective constructs |

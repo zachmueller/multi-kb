@@ -2,425 +2,103 @@
 
 **Created:** 2026-05-01
 **Plan:** [plan.md](plan.md)
-**Status:** Open (findings to be populated during Phase 0)
+**Status:** R-1, R-2, R-4, R-6 resolved; R-3, R-5, R-7 open
 
 ## R-1: OpenSearch Serverless Collection Setup via CDK
 
 **Question:** What CDK constructs are needed to create an OpenSearch Serverless VECTORSEARCH collection with all three policy types?
 
-**Areas to Investigate:**
-- L2 construct availability (or need for L1 `CfnCollection`, `CfnSecurityPolicy`, `CfnAccessPolicy`, `CfnNetworkSecurityPolicy` from `aws-cdk-lib/aws-opensearchserverless`)
-- Encryption policy creation (AWS-owned key)
-- Network policy creation (dual access: VPC endpoint + public for Bedrock)
-- Data access policy creation (principals: EC2 role + Bedrock KB service role)
-- Dependency ordering: collection must wait for encryption policy; data access policy needs role ARNs that may not exist yet
-- How to handle the circular dependency between OpenSearch data access policy and Bedrock KB service role
-
-**Success Criteria:** CDK code that synthesizes a working collection with all three policies, accessible by both EC2 and Bedrock service.
+**Status:** Resolved
 
 **Findings:**
 
-### 1. L2 vs L1 Constructs
+### No L2 Constructs
 
-**No L2 constructs exist.** The CDK v2 module `aws-cdk-lib/aws-opensearchserverless` explicitly states: "There are no official hand-written (L2) constructs for this service yet." All constructs are L1 (CloudFormation wrappers).
+`aws-cdk-lib/aws-opensearchserverless` contains only L1 constructs:
 
-**Complete list of available constructs in `aws-cdk-lib/aws-opensearchserverless`:**
+| Construct | Purpose |
+|-----------|---------|
+| `CfnCollection` | Creates a collection |
+| `CfnSecurityPolicy` | Creates encryption or network policy (type field selects) |
+| `CfnAccessPolicy` | Creates data access policy |
+| `CfnVpcEndpoint` | Creates AOSS-specific VPC endpoint (NOT a standard EC2 VPC endpoint) |
+| `CfnLifecyclePolicy` | Creates lifecycle policy |
 
-| Construct | CloudFormation Type | Purpose |
-|-----------|-------------------|---------|
-| `CfnCollection` | `AWS::OpenSearchServerless::Collection` | Creates a collection |
-| `CfnSecurityPolicy` | `AWS::OpenSearchServerless::SecurityPolicy` | Creates encryption or network policy |
-| `CfnAccessPolicy` | `AWS::OpenSearchServerless::AccessPolicy` | Creates data access policy |
-| `CfnVpcEndpoint` | `AWS::OpenSearchServerless::VpcEndpoint` | Creates AOSS-specific VPC endpoint |
-| `CfnLifecyclePolicy` | `AWS::OpenSearchServerless::LifecyclePolicy` | Creates lifecycle policy |
+There is no `CfnNetworkSecurityPolicy` — network policies use `CfnSecurityPolicy` with `type: 'network'`.
 
-There is no `CfnNetworkSecurityPolicy` -- network policies use `CfnSecurityPolicy` with `type: 'network'`.
-
-### 2. CfnCollection for VECTORSEARCH
-
-**CfnCollectionProps interface:**
+### CfnCollection
 
 ```typescript
-interface CfnCollectionProps {
-  name: string;                    // REQUIRED
-  type?: string;                   // 'SEARCH' | 'TIMESERIES' | 'VECTORSEARCH'
-  description?: string;
-  standbyReplicas?: string;        // 'ENABLED' | 'DISABLED' (immutable after creation)
-  tags?: CfnTag[];
-  collectionGroupName?: string;
-  encryptionConfig?: CfnCollection.EncryptionConfigProperty;
-  vectorOptions?: CfnCollection.VectorOptionsProperty;
-}
+new opensearchserverless.CfnCollection(this, 'Collection', {
+  name: collectionName,       // REQUIRED: ^[a-z][a-z0-9-]{2,27}$
+  type: 'VECTORSEARCH',
+  standbyReplicas: 'DISABLED', // MVP cost savings
+});
 ```
 
-**Name constraints:**
-- Must start with a lowercase letter
-- 3-28 characters long
-- Only lowercase a-z, digits 0-9, and hyphen (-)
-- Must be unique within the account and region
-- Pattern: `^[a-z][a-z0-9-]{2,27}$`
+Attributes: `attrArn`, `attrCollectionEndpoint`, `attrId`.
 
-**Attributes exposed (read-only after creation):**
+**Collection FAILS to create without an encryption policy.** Must use `collection.addDependency(encryptionPolicy)`.
 
-| CDK Attribute | CloudFormation Attribute | Example Value |
-|---------------|------------------------|---------------|
-| `attrArn` | `Arn` | `arn:aws:aoss:us-east-1:123456789012:collection/07tjusf2h91cunochc` |
-| `attrCollectionEndpoint` | `CollectionEndpoint` | `https://07tjusf2h91cunochc.us-east-1.aoss.amazonaws.com` |
-| `attrDashboardEndpoint` | `DashboardEndpoint` | `https://07tjusf2h91cunochc.us-east-1.aoss.amazonaws.com/_dashboards` |
-| `attrId` | `Id` | `07tjusf2h91cunochc` |
-| `attrKmsKeyArn` | `KmsKeyArn` | KMS key ARN used for encryption |
+### CfnSecurityPolicy — Encryption
 
-**Encryption dependency: YES, mandatory.** The collection will FAIL to create if no encryption configuration exists. Either:
-- Specify `encryptionConfig` inline on the collection, OR
-- Create a matching `CfnSecurityPolicy` (type: `encryption`) first and use CDK `addDependency()`
-
-### 3. CfnSecurityPolicy for Encryption
-
-**CfnSecurityPolicyProps interface:**
-
-```typescript
-interface CfnSecurityPolicyProps {
-  name: string;         // REQUIRED, pattern: ^[a-z][a-z0-9-]{2,31}$
-  policy: string;       // REQUIRED, JSON string (minified, no whitespace)
-  type: string;         // REQUIRED, 'encryption' | 'network'
-  description?: string;
-}
-```
-
-**Encryption policy JSON format (single object, NOT an array):**
+Policy is a **single JSON object** (not an array):
 
 ```json
 {
-  "Rules": [
-    {
-      "ResourceType": "collection",
-      "Resource": ["collection/<collection-name>"]
-    }
-  ],
+  "Rules": [{ "ResourceType": "collection", "Resource": ["collection/<name>"] }],
   "AWSOwnedKey": true
 }
 ```
 
-The collection is referenced by name pattern in the `Resource` array. Wildcards are supported (e.g., `collection/my-kb*`).
+Must be created BEFORE the collection.
 
-**Must be created BEFORE the collection.** Use CDK `addDependency()` to enforce this.
+### CfnSecurityPolicy — Network
 
-### 4. CfnAccessPolicy for Data Access
+See R-6 findings below.
 
-**CfnAccessPolicyProps interface:**
+### CfnAccessPolicy — Data Access
 
-```typescript
-interface CfnAccessPolicyProps {
-  name: string;         // REQUIRED, pattern: ^[a-z][a-z0-9-]{2,31}$
-  policy: string;       // REQUIRED, JSON string (minified)
-  type: string;         // REQUIRED, only valid value: 'data'
-  description?: string;
-}
-```
-
-**Data access policy JSON format (array of objects):**
+Policy is a **JSON array of objects**:
 
 ```json
-[
-  {
-    "Description": "Access for KB roles",
-    "Rules": [
-      {
-        "ResourceType": "index",
-        "Resource": ["index/<collection-name>/*"],
-        "Permission": [
-          "aoss:ReadDocument",
-          "aoss:WriteDocument",
-          "aoss:CreateIndex",
-          "aoss:DeleteIndex",
-          "aoss:UpdateIndex",
-          "aoss:DescribeIndex"
-        ]
-      },
-      {
-        "ResourceType": "collection",
-        "Resource": ["collection/<collection-name>"],
-        "Permission": [
-          "aoss:CreateCollectionItems",
-          "aoss:DeleteCollectionItems",
-          "aoss:UpdateCollectionItems",
-          "aoss:DescribeCollectionItems"
-        ]
-      }
-    ],
-    "Principal": [
-      "arn:aws:iam::123456789012:role/ec2-role",
-      "arn:aws:iam::123456789012:role/bedrock-kb-role"
-    ]
-  }
-]
-```
-
-**Complete permission lists:**
-
-Index-level permissions (ResourceType: `index`):
-- `aoss:ReadDocument`
-- `aoss:WriteDocument`
-- `aoss:CreateIndex`
-- `aoss:DeleteIndex`
-- `aoss:UpdateIndex`
-- `aoss:DescribeIndex`
-- `aoss:*` (wildcard)
-
-Collection-level permissions (ResourceType: `collection`):
-- `aoss:CreateCollectionItems`
-- `aoss:DeleteCollectionItems`
-- `aoss:UpdateCollectionItems`
-- `aoss:DescribeCollectionItems`
-- `aoss:*` (wildcard)
-
-**No separate VECTORSEARCH-specific permissions exist** -- the same permissions apply to all collection types.
-
-**Principals:** Specified as full IAM role/user ARNs. SAML identities also supported but not needed for this use case.
-
-**CDK token references in policy strings:** YES, CDK tokens work. Use `JSON.stringify()` to build the policy, and CDK tokens (e.g., `role.roleArn`) resolve at synthesis time within the string. Example:
-
-```typescript
-policy: JSON.stringify([{
-  Rules: [...],
-  Principal: [ec2Role.roleArn, bedrockKbRole.roleArn]
-}])
-```
-
-CDK tokens like `role.roleArn` produce CloudFormation `{ Ref }` or `{ Fn::GetAtt }` intrinsics in the synthesized template. When used inside `JSON.stringify()`, CDK's token resolution system replaces them with the appropriate CloudFormation intrinsics during synthesis. The resulting template uses `Fn::Sub` or `Fn::Join` to compose the final JSON string at deploy time.
-
-**Important IAM prerequisite:** Principals listed in the data access policy must ALSO have IAM permissions (`aoss:APIAccessAll`) on the collection ARN in their own IAM policy. The AOSS data access policy and IAM policy work together -- both must grant access.
-
-### 5. Circular Dependency Handling
-
-The dependency chain is:
-
-```
-Bedrock KB Service Role → needs collection ARN for IAM policy
-OpenSearch Data Access Policy → needs Bedrock KB Role ARN + EC2 Role ARN
-Collection → needs encryption policy (but NOT data access or network policy)
-```
-
-**This is NOT a true circular dependency.** Here is why:
-
-- The **collection** only depends on the encryption policy
-- The **Bedrock KB service role** needs `aoss:APIAccessAll` on the collection ARN in its IAM policy
-- The **data access policy** needs the role ARNs of both EC2 and Bedrock KB roles
-- The **collection** does NOT depend on the data access policy
-
-The resolution order is:
-
-1. Create encryption policy (no dependencies)
-2. Create collection (depends on encryption policy)
-3. Create EC2 role and Bedrock KB service role in parallel (both need collection ARN for IAM policy -- this is a forward reference that CDK tokens handle automatically)
-4. Create data access policy (needs both role ARNs and collection name -- all available as CDK tokens)
-
-**CDK tokens resolve this cleanly.** When you write `collection.attrArn` in a role's policy statement or `role.roleArn` in the access policy JSON, CDK generates CloudFormation intrinsics that resolve at deploy time. There is no actual circular dependency because:
-- The collection does not reference the roles
-- The roles reference the collection (forward reference, resolved by CloudFormation)
-- The access policy references both roles and the collection name (all resolved by CloudFormation)
-
-CDK will automatically add the correct `DependsOn` relationships in the synthesized template. You may need explicit `addDependency()` only for the encryption policy -> collection relationship (since CDK may not detect this implicit dependency).
-
-### 6. Dependency Ordering
-
-| Resource | Must Be Created Before | Reason |
-|----------|----------------------|--------|
-| Encryption policy | Collection | Collection creation FAILS without it |
-| Network policy | No strict ordering | Can be created before or after collection; collection is accessible per the policy once both exist |
-| Data access policy | No strict ordering | Can be created before or after collection; access is granted once both exist |
-| Collection | Bedrock KB, EC2 role policies | Roles need collection ARN; KB needs collection endpoint |
-
-**Recommended CDK dependency setup:**
-- `collection.addDependency(encryptionPolicy)` -- REQUIRED
-- `collection.addDependency(networkPolicy)` -- RECOMMENDED (ensures network access is ready when collection comes online)
-- No dependency needed: data access policy can be created in parallel with collection
-
-### 7. Complete CDK TypeScript Code for SearchConstruct
-
-```typescript
-import { Construct } from 'constructs';
-import { Stack } from 'aws-cdk-lib';
-import * as opensearchserverless from 'aws-cdk-lib/aws-opensearchserverless';
-
-export interface SearchConstructProps {
-  /** Collection name (must be lowercase, 3-28 chars, a-z0-9 and hyphens) */
-  collectionName: string;
-  /** AOSS VPC endpoint ID for network policy */
-  vpcEndpointId: string;
-  /** IAM role ARNs that need data access to the collection */
-  dataAccessPrincipalArns: string[];
-  /** Optional: disable standby replicas to save cost (default: DISABLED for MVP) */
-  standbyReplicas?: string;
-}
-
-export class SearchConstruct extends Construct {
-  public readonly collection: opensearchserverless.CfnCollection;
-  public readonly collectionName: string;
-  public readonly collectionArn: string;
-  public readonly collectionEndpoint: string;
-  public readonly collectionId: string;
-
-  constructor(scope: Construct, id: string, props: SearchConstructProps) {
-    super(scope, id);
-
-    this.collectionName = props.collectionName;
-
-    // --- Encryption Policy (must exist before collection) ---
-    const encryptionPolicy = new opensearchserverless.CfnSecurityPolicy(
-      this,
-      'EncryptionPolicy',
-      {
-        name: `${props.collectionName}-enc`,
-        type: 'encryption',
-        description: `Encryption policy for ${props.collectionName} collection`,
-        policy: JSON.stringify({
-          Rules: [
-            {
-              ResourceType: 'collection',
-              Resource: [`collection/${props.collectionName}`],
-            },
-          ],
-          AWSOwnedKey: true,
-        }),
-      },
-    );
-
-    // --- Network Policy (dual access: VPC + Bedrock service) ---
-    const networkPolicy = new opensearchserverless.CfnSecurityPolicy(
-      this,
-      'NetworkPolicy',
-      {
-        name: `${props.collectionName}-net`,
-        type: 'network',
-        description: `Network policy for ${props.collectionName} collection`,
-        policy: JSON.stringify([
-          {
-            Description: 'VPC endpoint and Bedrock service access',
-            Rules: [
-              {
-                ResourceType: 'collection',
-                Resource: [`collection/${props.collectionName}`],
-              },
-            ],
-            AllowFromPublic: false,
-            SourceVPCEs: [props.vpcEndpointId],
-            SourceServices: ['bedrock.amazonaws.com'],
-          },
-        ]),
-      },
-    );
-
-    // --- Collection ---
-    this.collection = new opensearchserverless.CfnCollection(
-      this,
-      'Collection',
-      {
-        name: props.collectionName,
-        type: 'VECTORSEARCH',
-        description: `VECTORSEARCH collection for ${props.collectionName}`,
-        standbyReplicas: props.standbyReplicas ?? 'DISABLED',
-      },
-    );
-
-    // REQUIRED: collection fails without encryption policy
-    this.collection.addDependency(encryptionPolicy);
-    // RECOMMENDED: network access ready when collection comes online
-    this.collection.addDependency(networkPolicy);
-
-    // --- Data Access Policy ---
-    const accessPolicy = new opensearchserverless.CfnAccessPolicy(
-      this,
-      'DataAccessPolicy',
-      {
-        name: `${props.collectionName}-access`,
-        type: 'data',
-        description: `Data access policy for ${props.collectionName} collection`,
-        policy: JSON.stringify([
-          {
-            Description: `Data access for ${props.collectionName}`,
-            Rules: [
-              {
-                ResourceType: 'index',
-                Resource: [`index/${props.collectionName}/*`],
-                Permission: [
-                  'aoss:ReadDocument',
-                  'aoss:WriteDocument',
-                  'aoss:CreateIndex',
-                  'aoss:DeleteIndex',
-                  'aoss:UpdateIndex',
-                  'aoss:DescribeIndex',
-                ],
-              },
-              {
-                ResourceType: 'collection',
-                Resource: [`collection/${props.collectionName}`],
-                Permission: [
-                  'aoss:CreateCollectionItems',
-                  'aoss:DeleteCollectionItems',
-                  'aoss:UpdateCollectionItems',
-                  'aoss:DescribeCollectionItems',
-                ],
-              },
-            ],
-            Principal: props.dataAccessPrincipalArns,
-          },
-        ]),
-      },
-    );
-
-    // Expose attributes
-    this.collectionArn = this.collection.attrArn;
-    this.collectionEndpoint = this.collection.attrCollectionEndpoint;
-    this.collectionId = this.collection.attrId;
-  }
-}
-```
-
-**Usage in the main stack (showing dependency resolution):**
-
-```typescript
-// 1. Create networking (VPC, AOSS VPC endpoint)
-const networking = new NetworkingConstruct(this, 'Networking', { ... });
-
-// 2. Create storage (S3, CodeCommit, SQS)
-const storage = new StorageConstruct(this, 'Storage', { ... });
-
-// 3. Create Bedrock KB service role first (needs collection ARN via token)
-const bedrockKbRole = new iam.Role(this, 'BedrockKbRole', {
-  assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com'),
-});
-
-// 4. Create EC2 role (needs collection ARN via token)
-const ec2Role = new iam.Role(this, 'Ec2Role', {
-  assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-});
-
-// 5. Create search construct -- pass role ARNs as CDK tokens
-const search = new SearchConstruct(this, 'Search', {
-  collectionName: `${stackName}-kb`,
-  vpcEndpointId: networking.aossVpcEndpoint.attrId,
-  dataAccessPrincipalArns: [
-    ec2Role.roleArn,        // CDK token, resolved at deploy time
-    bedrockKbRole.roleArn,  // CDK token, resolved at deploy time
+[{
+  "Rules": [
+    {
+      "ResourceType": "index",
+      "Resource": ["index/<collection-name>/*"],
+      "Permission": ["aoss:ReadDocument", "aoss:WriteDocument", "aoss:CreateIndex",
+                      "aoss:DeleteIndex", "aoss:UpdateIndex", "aoss:DescribeIndex"]
+    },
+    {
+      "ResourceType": "collection",
+      "Resource": ["collection/<collection-name>"],
+      "Permission": ["aoss:CreateCollectionItems", "aoss:DeleteCollectionItems",
+                      "aoss:UpdateCollectionItems", "aoss:DescribeCollectionItems"]
+    }
   ],
-});
-
-// 6. Add IAM permissions to roles (using collection ARN token)
-bedrockKbRole.addToPolicy(new iam.PolicyStatement({
-  actions: ['aoss:APIAccessAll'],
-  resources: [search.collectionArn],  // CDK token
-}));
-
-ec2Role.addToPolicy(new iam.PolicyStatement({
-  actions: ['aoss:APIAccessAll'],
-  resources: [search.collectionArn],  // CDK token
-}));
+  "Principal": ["<role-arn-1>", "<role-arn-2>"]
+}]
 ```
 
-**Key insight on CDK tokens in JSON.stringify:** When `props.dataAccessPrincipalArns` contains CDK tokens (like `role.roleArn`), `JSON.stringify()` produces a string with unresolved token placeholders. CDK's token resolution system then transforms the entire string into a `Fn::Join` or `Fn::Sub` expression in the synthesized CloudFormation template, which CloudFormation resolves at deploy time. This is well-supported behavior.
+Principals must ALSO have IAM-level `aoss:APIAccessAll` on the collection ARN. Both the AOSS data access policy and IAM policy must grant access.
 
-**Decision:** Use L1 constructs (`CfnCollection`, `CfnSecurityPolicy`, `CfnAccessPolicy`) with explicit `addDependency()` for the encryption policy. Pass role ARNs as CDK tokens in the data access policy JSON. Create the AOSS VPC endpoint using `CfnVpcEndpoint` from the opensearchserverless module, not `ec2.InterfaceVpcEndpoint`.
+CDK tokens (e.g., `role.roleArn`) work inside `JSON.stringify()` — CDK resolves them to `Fn::Join`/`Fn::Sub` intrinsics in the synthesized template.
+
+Policy name constraint: `^[a-z][a-z0-9-]{2,31}$`.
+
+### No Circular Dependency
+
+The dependency chain resolves cleanly with CDK tokens:
+
+1. Encryption policy (no deps)
+2. Collection (depends on encryption policy via `addDependency`)
+3. EC2 role + Bedrock KB role (use `collection.attrArn` token for IAM policies)
+4. Data access policy (uses role ARN tokens + collection name)
+
+CDK tokens produce CloudFormation intrinsics at synthesis time. CloudFormation determines creation order via implicit `DependsOn`. Only the encryption policy → collection dependency needs explicit `addDependency()`.
+
+**Decision:** Use L1 constructs with explicit `addDependency()` for encryption → collection. Pass role ARNs as CDK tokens in the data access policy JSON. The AOSS VPC endpoint uses `CfnVpcEndpoint` from the opensearchserverless module, not `ec2.InterfaceVpcEndpoint`.
 
 ---
 
@@ -428,648 +106,125 @@ ec2Role.addToPolicy(new iam.PolicyStatement({
 
 **Question:** How to create a Bedrock Knowledge Base with S3 data source and "no chunking" strategy via CDK?
 
-**Areas to Investigate:**
-- L1 constructs: `CfnKnowledgeBase`, `CfnDataSource` from `aws-cdk-lib/aws-bedrock`
-- KB configuration: embedding model ID, storage config pointing to OpenSearch Serverless collection
-- Data source configuration: S3 bucket, "no chunking" strategy (`chunkingStrategy: { chunkingStrategy: 'NONE' }`)
-- Service role creation: role that Bedrock assumes to read S3 and write OpenSearch
-- How to wire the OpenSearch collection endpoint and index name into the KB storage config
-- Whether the KB auto-creates the OpenSearch index or if we need to pre-create it
-
-**Success Criteria:** CDK code that creates a KB + data source, with a service role that has correct permissions for both S3 and OpenSearch.
+**Status:** Resolved
 
 **Findings:**
 
-### 1. L2 vs L1 Constructs for Bedrock
+### No L2 Constructs
 
-**No L2 constructs exist for Knowledge Base or DataSource.** The `aws-cdk-lib/aws-bedrock` module contains only two L2 constructs:
+`aws-cdk-lib/aws-bedrock` has only two L2 constructs: `FoundationModel` and `ProvisionedModel`. Knowledge Base and DataSource require L1 constructs: `CfnKnowledgeBase` and `CfnDataSource`.
 
-- `FoundationModel` -- lookup existing Bedrock base foundation models
-- `ProvisionedModel` -- lookup Bedrock provisioned throughput models
+The `@aws-cdk/aws-bedrock-alpha` package also lacks KB/DataSource L2s.
 
-The `@aws-cdk/aws-bedrock-alpha` package (v2.252.0-alpha.0) also does NOT contain Knowledge Base or DataSource L2 constructs. It provides L2 constructs only for Agents, Guardrails, Prompts, and Inference Profiles.
-
-**All Knowledge Base / DataSource work must use L1 constructs.**
-
-**Complete list of L1 constructs in `aws-cdk-lib/aws-bedrock`:**
-
-| Construct | CloudFormation Type |
-|-----------|-------------------|
-| `CfnAgent` | `AWS::Bedrock::Agent` |
-| `CfnAgentAlias` | `AWS::Bedrock::AgentAlias` |
-| `CfnApplicationInferenceProfile` | `AWS::Bedrock::ApplicationInferenceProfile` |
-| `CfnAutomatedReasoningPolicy` | `AWS::Bedrock::AutomatedReasoningPolicy` |
-| `CfnAutomatedReasoningPolicyVersion` | `AWS::Bedrock::AutomatedReasoningPolicyVersion` |
-| `CfnBlueprint` | `AWS::Bedrock::Blueprint` |
-| `CfnDataAutomationLibrary` | `AWS::Bedrock::DataAutomationLibrary` |
-| `CfnDataAutomationProject` | `AWS::Bedrock::DataAutomationProject` |
-| **`CfnDataSource`** | **`AWS::Bedrock::DataSource`** |
-| `CfnEnforcedGuardrailConfiguration` | `AWS::Bedrock::EnforcedGuardrailConfiguration` |
-| `CfnFlow` | `AWS::Bedrock::Flow` |
-| `CfnFlowAlias` | `AWS::Bedrock::FlowAlias` |
-| `CfnFlowVersion` | `AWS::Bedrock::FlowVersion` |
-| `CfnGuardrail` | `AWS::Bedrock::Guardrail` |
-| `CfnGuardrailVersion` | `AWS::Bedrock::GuardrailVersion` |
-| `CfnIntelligentPromptRouter` | `AWS::Bedrock::IntelligentPromptRouter` |
-| **`CfnKnowledgeBase`** | **`AWS::Bedrock::KnowledgeBase`** |
-| `CfnPrompt` | `AWS::Bedrock::Prompt` |
-| `CfnPromptVersion` | `AWS::Bedrock::PromptVersion` |
-| `CfnResourcePolicy` | `AWS::Bedrock::ResourcePolicy` |
-
-### 2. CfnKnowledgeBase Properties
-
-**CfnKnowledgeBaseProps interface (from CDK type definitions):**
+### CfnKnowledgeBase
 
 ```typescript
-interface CfnKnowledgeBaseProps {
-  // REQUIRED
-  name: string;                    // Pattern: ^([0-9a-zA-Z][_-]?){1,100}$
-  roleArn: string;                 // IAM role ARN, max 2048 chars
-  knowledgeBaseConfiguration: CfnKnowledgeBase.KnowledgeBaseConfigurationProperty | IResolvable;
-
-  // OPTIONAL
-  description?: string;            // 1-200 chars
-  storageConfiguration?: CfnKnowledgeBase.StorageConfigurationProperty | IResolvable;  // REPLACEMENT if changed
-  tags?: Record<string, string>;
-}
-```
-
-**KnowledgeBaseConfigurationProperty:**
-
-```typescript
-interface KnowledgeBaseConfigurationProperty {
-  type: string;  // 'VECTOR' | 'KENDRA' | 'SQL'
-  vectorKnowledgeBaseConfiguration?: VectorKnowledgeBaseConfigurationProperty | IResolvable;
-  kendraKnowledgeBaseConfiguration?: KendraKnowledgeBaseConfigurationProperty | IResolvable;
-  sqlKnowledgeBaseConfiguration?: SqlKnowledgeBaseConfigurationProperty | IResolvable;
-}
-```
-
-**VectorKnowledgeBaseConfigurationProperty:**
-
-```typescript
-interface VectorKnowledgeBaseConfigurationProperty {
-  embeddingModelArn: string;  // REQUIRED - ARN of the embedding model
-  embeddingModelConfiguration?: EmbeddingModelConfigurationProperty | IResolvable;  // Optional
-  supplementalDataStorageConfiguration?: SupplementalDataStorageConfigurationProperty | IResolvable;  // Optional
-}
-```
-
-**EmbeddingModelConfigurationProperty (for specifying dimensions):**
-
-```typescript
-interface EmbeddingModelConfigurationProperty {
-  bedrockEmbeddingModelConfiguration?: BedrockEmbeddingModelConfigurationProperty | IResolvable;
-}
-
-interface BedrockEmbeddingModelConfigurationProperty {
-  dimensions?: number;            // Override default dimensions (e.g., 1024, 512, 256)
-  embeddingDataType?: string;     // e.g., 'FLOAT32'
-  audio?: AudioConfigurationProperty[];   // Multimodal audio config
-  video?: VideoConfigurationProperty[];   // Multimodal video config
-}
-```
-
-**StorageConfigurationProperty:**
-
-```typescript
-interface StorageConfigurationProperty {
-  type: string;  // REQUIRED: 'OPENSEARCH_SERVERLESS' | 'RDS' | 'PINECONE' | 'MONGO_DB_ATLAS' | 'NEPTUNE_ANALYTICS' | 'S3_VECTORS' | 'OPENSEARCH_MANAGED_CLUSTER'
-
-  // Include the one matching the type:
-  opensearchServerlessConfiguration?: OpenSearchServerlessConfigurationProperty | IResolvable;
-  rdsConfiguration?: RdsConfigurationProperty | IResolvable;
-  pineconeConfiguration?: PineconeConfigurationProperty | IResolvable;
-  mongoDbAtlasConfiguration?: MongoDbAtlasConfigurationProperty | IResolvable;
-  neptuneAnalyticsConfiguration?: NeptuneAnalyticsConfigurationProperty | IResolvable;
-  s3VectorsConfiguration?: S3VectorsConfigurationProperty | IResolvable;
-  opensearchManagedClusterConfiguration?: OpenSearchManagedClusterConfigurationProperty | IResolvable;
-}
-```
-
-**OpenSearchServerlessConfigurationProperty (the one we need):**
-
-```typescript
-interface OpenSearchServerlessConfigurationProperty {
-  collectionArn: string;   // REQUIRED - ARN of the OpenSearch Serverless collection
-  vectorIndexName: string; // REQUIRED - Name of the vector index in the collection
-  fieldMapping: OpenSearchServerlessFieldMappingProperty | IResolvable;  // REQUIRED
-}
-```
-
-**OpenSearchServerlessFieldMappingProperty:**
-
-```typescript
-interface OpenSearchServerlessFieldMappingProperty {
-  vectorField: string;    // REQUIRED - Field name for vector embeddings
-  textField: string;      // REQUIRED - Field name for raw text chunks
-  metadataField: string;  // REQUIRED - Field name for Bedrock-managed metadata
-}
-```
-
-**All three field mappings are REQUIRED.** There is no default naming -- you must explicitly specify each field name.
-
-**Attributes exposed by CfnKnowledgeBase:**
-
-| CDK Attribute | CloudFormation Attribute | Type | Description |
-|---------------|------------------------|------|-------------|
-| `attrKnowledgeBaseId` | `KnowledgeBaseId` | `string` | Unique KB identifier |
-| `attrKnowledgeBaseArn` | `KnowledgeBaseArn` | `string` | Full ARN |
-| `attrStatus` | `Status` | `string` | Status (CREATING, ACTIVE, DELETING, FAILED) |
-| `attrCreatedAt` | `CreatedAt` | `string` | Creation timestamp |
-| `attrUpdatedAt` | `UpdatedAt` | `string` | Last update timestamp |
-| `attrFailureReasons` | `FailureReasons` | `string[]` | Failure reasons if status is FAILED |
-
-### 3. CfnDataSource Properties
-
-**CfnDataSourceProps interface (from CDK type definitions):**
-
-```typescript
-interface CfnDataSourceProps {
-  // REQUIRED
-  name: string;                    // Pattern: ^([0-9a-zA-Z][_-]?){1,100}$
-  knowledgeBaseId: string;         // Pattern: ^[0-9a-zA-Z]{10}$ -- links to KB
-  dataSourceConfiguration: CfnDataSource.DataSourceConfigurationProperty | IResolvable;
-
-  // OPTIONAL
-  description?: string;                     // 1-200 chars
-  dataDeletionPolicy?: string;              // 'RETAIN' | 'DELETE'
-  serverSideEncryptionConfiguration?: CfnDataSource.ServerSideEncryptionConfigurationProperty | IResolvable;
-  vectorIngestionConfiguration?: CfnDataSource.VectorIngestionConfigurationProperty | IResolvable;
-}
-```
-
-**DataSourceConfigurationProperty:**
-
-```typescript
-interface DataSourceConfigurationProperty {
-  type: string;  // REQUIRED: 'S3' | 'CONFLUENCE' | 'SALESFORCE' | 'SHAREPOINT' | 'WEB'
-
-  // Include the one matching the type:
-  s3Configuration?: S3DataSourceConfigurationProperty | IResolvable;
-  confluenceConfiguration?: ConfluenceDataSourceConfigurationProperty | IResolvable;
-  salesforceConfiguration?: SalesforceDataSourceConfigurationProperty | IResolvable;
-  sharePointConfiguration?: SharePointDataSourceConfigurationProperty | IResolvable;
-  webConfiguration?: WebDataSourceConfigurationProperty | IResolvable;
-}
-```
-
-**S3DataSourceConfigurationProperty:**
-
-```typescript
-interface S3DataSourceConfigurationProperty {
-  bucketArn: string;                    // REQUIRED - S3 bucket ARN
-  bucketOwnerAccountId?: string;        // Optional - cross-account bucket owner
-  inclusionPrefixes?: string[];         // Optional - max 1 item, max 300 chars each
-}
-```
-
-**VectorIngestionConfigurationProperty:**
-
-```typescript
-interface VectorIngestionConfigurationProperty {
-  chunkingConfiguration?: ChunkingConfigurationProperty | IResolvable;
-  customTransformationConfiguration?: CustomTransformationConfigurationProperty | IResolvable;
-  parsingConfiguration?: ParsingConfigurationProperty | IResolvable;
-  contextEnrichmentConfiguration?: ContextEnrichmentConfigurationProperty | IResolvable;
-}
-```
-
-**ChunkingConfigurationProperty (for "no chunking"):**
-
-```typescript
-interface ChunkingConfigurationProperty {
-  chunkingStrategy: string;  // REQUIRED: 'NONE' | 'FIXED_SIZE' | 'HIERARCHICAL' | 'SEMANTIC'
-
-  // Only include if chunkingStrategy is NOT 'NONE':
-  fixedSizeChunkingConfiguration?: FixedSizeChunkingConfigurationProperty | IResolvable;
-  hierarchicalChunkingConfiguration?: HierarchicalChunkingConfigurationProperty | IResolvable;
-  semanticChunkingConfiguration?: SemanticChunkingConfigurationProperty | IResolvable;
-}
-```
-
-**"No chunking" configuration is:**
-
-```typescript
-vectorIngestionConfiguration: {
-  chunkingConfiguration: {
-    chunkingStrategy: 'NONE',
+new bedrock.CfnKnowledgeBase(this, 'KnowledgeBase', {
+  name: kbName,
+  roleArn: serviceRole.roleArn,
+  knowledgeBaseConfiguration: {
+    type: 'VECTOR',
+    vectorKnowledgeBaseConfiguration: {
+      embeddingModelArn: `arn:aws:bedrock:${region}::foundation-model/amazon.titan-embed-text-v2:0`,
+    },
   },
-},
-```
-
-When `chunkingStrategy` is `'NONE'`, all other fields in `ChunkingConfigurationProperty` should be omitted. Each file is treated as a single chunk.
-
-**Attributes exposed by CfnDataSource:**
-
-| CDK Attribute | CloudFormation Attribute | Type | Description |
-|---------------|------------------------|------|-------------|
-| `attrDataSourceId` | `DataSourceId` | `string` | Unique data source identifier |
-| `attrDataSourceStatus` | `DataSourceStatus` | `string` | `Available` or `Deleting` |
-| `attrCreatedAt` | `CreatedAt` | `string` | Creation timestamp |
-| `attrUpdatedAt` | `UpdatedAt` | `string` | Last update timestamp |
-| `attrFailureReasons` | `FailureReasons` | `string[]` | Failure reasons |
-
-### 4. Service Role for Bedrock KB
-
-**Trust policy principal:** `bedrock.amazonaws.com`
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "bedrock.amazonaws.com"
+  storageConfiguration: {
+    type: 'OPENSEARCH_SERVERLESS',
+    opensearchServerlessConfiguration: {
+      collectionArn: collection.attrArn,
+      vectorIndexName: 'bedrock-kb-index',
+      fieldMapping: {
+        vectorField: 'bedrock-knowledge-base-default-vector',
+        textField: 'AMAZON_BEDROCK_TEXT_CHUNK',
+        metadataField: 'AMAZON_BEDROCK_METADATA',
       },
-      "Action": "sts:AssumeRole",
-      "Condition": {
-        "StringEquals": {
-          "aws:SourceAccount": "<account-id>"
-        },
-        "ArnLike": {
-          "AWS:SourceArn": "arn:aws:bedrock:<region>:<account-id>:knowledge-base/*"
-        }
-      }
-    }
-  ]
-}
+    },
+  },
+});
 ```
 
-**Required permissions (4 policy statements):**
+All three field mappings (`vectorField`, `textField`, `metadataField`) are **REQUIRED**. The field names must match the pre-created OpenSearch index schema exactly.
 
-**a) S3 permissions:**
+Attributes: `attrKnowledgeBaseId`, `attrKnowledgeBaseArn`, `attrStatus`.
 
-```json
-{
-  "Effect": "Allow",
-  "Action": ["s3:ListBucket"],
-  "Resource": ["arn:aws:s3:::<bucket-name>"],
-  "Condition": {
-    "StringEquals": { "aws:ResourceAccount": "<account-id>" }
-  }
-}
+### CfnDataSource — S3 with No Chunking
+
+```typescript
+new bedrock.CfnDataSource(this, 'DataSource', {
+  name: `${kbName}-s3`,
+  knowledgeBaseId: kb.attrKnowledgeBaseId,
+  dataSourceConfiguration: {
+    type: 'S3',
+    s3Configuration: { bucketArn: bucket.bucketArn },
+  },
+  vectorIngestionConfiguration: {
+    chunkingConfiguration: { chunkingStrategy: 'NONE' },
+  },
+  dataDeletionPolicy: 'DELETE',
+});
 ```
 
-```json
-{
-  "Effect": "Allow",
-  "Action": ["s3:GetObject"],
-  "Resource": ["arn:aws:s3:::<bucket-name>/*"],
-  "Condition": {
-    "StringEquals": { "aws:ResourceAccount": "<account-id>" }
-  }
-}
-```
+Attributes: `attrDataSourceId`, `attrDataSourceStatus`.
 
-**b) OpenSearch Serverless permissions:**
+### Service Role — Missing Permission Found
 
-```json
-{
-  "Effect": "Allow",
-  "Action": ["aoss:APIAccessAll"],
-  "Resource": ["arn:aws:aoss:<region>:<account-id>:collection/<collection-id>"]
-}
-```
-
-**c) Bedrock model invocation (YES, REQUIRED):**
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["bedrock:InvokeModel"],
-  "Resource": [
-    "arn:aws:bedrock:<region>::foundation-model/amazon.titan-embed-text-v2:0"
-  ]
-}
-```
-
-The role DOES need `bedrock:InvokeModel` to call the embedding model during ingestion and retrieval. The resource ARN for foundation models uses an empty account ID (the `::` in the ARN) because foundation models are AWS-owned.
-
-**d) Optional but recommended -- model listing:**
-
-```json
-{
-  "Effect": "Allow",
-  "Action": ["bedrock:ListFoundationModels", "bedrock:ListCustomModels"],
-  "Resource": "*"
-}
-```
-
-These are needed if the KB setup validates model availability, but are not strictly required for ingestion/retrieval.
-
-**Summary of required IAM permissions:**
+The Bedrock KB service role needs **4 permission sets** (not 3 as originally planned):
 
 | Action | Resource | Purpose |
 |--------|----------|---------|
-| `s3:ListBucket` | Bucket ARN | List objects in data source bucket |
-| `s3:GetObject` | Bucket ARN/* | Read documents from data source |
-| `aoss:APIAccessAll` | Collection ARN | Read/write OpenSearch Serverless |
-| `bedrock:InvokeModel` | Foundation model ARN | Generate embeddings |
+| `s3:ListBucket` | Bucket ARN | List objects in data source |
+| `s3:GetObject` | Bucket ARN/* | Read documents |
+| `aoss:APIAccessAll` | Collection ARN | Read/write OpenSearch |
+| **`bedrock:InvokeModel`** | Foundation model ARN | **Generate embeddings** |
 
-**The role also needs to be listed as a principal in the OpenSearch Serverless data access policy** (see R-1 findings, section 4). The IAM policy (`aoss:APIAccessAll`) and the AOSS data access policy work together -- both must grant access.
+The `bedrock:InvokeModel` permission was missing from the original plan. The model ARN uses an empty account ID: `arn:aws:bedrock:{region}::foundation-model/amazon.titan-embed-text-v2:0`.
 
-### 5. OpenSearch Index Auto-Creation
+Trust policy: `bedrock.amazonaws.com` with `aws:SourceAccount` and `ArnLike` conditions.
 
-**Bedrock KB does NOT auto-create the OpenSearch index in all cases.** There are two options:
+### OpenSearch Index MUST Be Pre-Created (New Task Required)
 
-- **Quick-create flow (console only):** When creating a KB through the AWS Console, Bedrock can auto-create a collection AND index for you. This is a console convenience feature, not available via CloudFormation/CDK.
+**Bedrock KB does NOT auto-create the OpenSearch vector index via CloudFormation/CDK.** Auto-creation is a console-only convenience.
 
-- **Bring-your-own (CDK/CloudFormation):** When using CDK or CloudFormation, you must pre-create the OpenSearch index before creating the KB. The KB expects the index to already exist with the correct schema.
-
-**For our CDK deployment, we MUST pre-create the index.** This requires a custom resource (Lambda function) that calls the OpenSearch Serverless API to create the index after the collection is available.
-
-**Index name constraints:** The `vectorIndexName` in the KB storage configuration must match the name of the pre-created index. There are no specific naming constraints beyond what OpenSearch allows (lowercase, alphanumeric, hyphens).
-
-### 6. Vector Index Configuration
-
-**The index MUST be pre-created with the correct schema before creating the KB.** The `StartIngestionJob` API does NOT create the index -- it only ingests documents into an existing index.
-
-**Required index schema for OpenSearch Serverless VECTORSEARCH:**
-
-The index must be created via the OpenSearch REST API (PUT to the collection endpoint) with a mapping that includes:
-
-- A `knn_vector` field for embeddings (engine: `faiss` or `nmslib`)
-- A string field for text chunks
-- A string field for metadata
-
-**Example index creation body:**
+For CDK deployments, a **custom resource Lambda** must create the index before the KB is created. The index requires:
 
 ```json
 {
-  "settings": {
-    "index": {
-      "knn": true
-    }
-  },
+  "settings": { "index": { "knn": true } },
   "mappings": {
     "properties": {
       "bedrock-knowledge-base-default-vector": {
         "type": "knn_vector",
         "dimension": 1024,
-        "method": {
-          "engine": "faiss",
-          "name": "hnsw",
-          "parameters": {},
-          "space_type": "l2"
-        }
+        "method": { "engine": "faiss", "name": "hnsw", "parameters": {}, "space_type": "l2" }
       },
-      "AMAZON_BEDROCK_TEXT_CHUNK": {
-        "type": "text",
-        "index": true
-      },
-      "AMAZON_BEDROCK_METADATA": {
-        "type": "text",
-        "index": false
-      }
+      "AMAZON_BEDROCK_TEXT_CHUNK": { "type": "text", "index": true },
+      "AMAZON_BEDROCK_METADATA": { "type": "text", "index": false }
     }
   }
 }
 ```
 
-**Vector dimensions for `amazon.titan-embed-text-v2:0`:**
+Key details:
+- `amazon.titan-embed-text-v2:0` produces **1024 dimensions** by default (also supports 512, 256)
+- Field names in the index must match the KB's `fieldMapping` configuration
+- The custom resource Lambda needs network access to the collection endpoint (via VPC + AOSS endpoint) and data access policy permission
+- `StartIngestionJob` does NOT create the index — it only ingests into an existing index
 
-| Dimension | Notes |
-|-----------|-------|
-| **1024** | **DEFAULT** |
-| 512 | Reduced dimension option |
-| 256 | Reduced dimension option |
+**This requires a new implementation task** (SRC-006) for the custom resource Lambda.
 
-The default is **1024 dimensions**. You can optionally override this via `embeddingModelConfiguration.bedrockEmbeddingModelConfiguration.dimensions` in the KB configuration. The index's `dimension` field must match whatever the KB is configured to use.
+### Circular Dependency — Non-Issue
 
-**The field names in the index mapping must match the field names specified in the KB's `fieldMapping` configuration.** They can be anything you choose, but they must be consistent between the index schema and the KB configuration.
+Same as R-1: CDK tokens resolve all forward references. The creation order is:
 
-### 7. Circular Dependency Resolution
+1. Bedrock KB service role (trust policy only, no collection ref needed)
+2. OpenSearch collection (depends on encryption policy)
+3. Add IAM policies to role using `collection.attrArn` tokens
+4. AOSS data access policy using `role.roleArn` tokens
+5. OpenSearch index via custom resource (depends on collection + data access policy)
+6. CfnKnowledgeBase (depends on role + collection + index)
+7. CfnDataSource (depends on KB)
 
-The dependency chain is:
-
-```
-Bedrock KB Service Role → needs collection ARN for IAM policy (aoss:APIAccessAll)
-OpenSearch Data Access Policy → needs service role ARN as principal
-CfnKnowledgeBase → needs service role ARN + collection ARN
-```
-
-**This is NOT a circular dependency.** All references are forward references that CDK tokens handle:
-
-1. Create the **Bedrock KB service role** (no dependencies -- the role itself is just a trust policy)
-2. Create the **collection** (depends on encryption policy only)
-3. Add IAM policy to the role with `aoss:APIAccessAll` on `collection.attrArn` (CDK token)
-4. Create the **AOSS data access policy** with `role.roleArn` as principal (CDK token)
-5. Create the **CfnKnowledgeBase** with `role.roleArn` and `collection.attrArn` (CDK tokens)
-6. Create the **CfnDataSource** with `kb.attrKnowledgeBaseId` (CDK token)
-
-CDK tokens for `collection.attrArn`, `role.roleArn`, and `kb.attrKnowledgeBaseId` all resolve to CloudFormation intrinsics (`Fn::GetAtt`, `Fn::Ref`) at synthesis time. CloudFormation resolves the actual values at deploy time and automatically determines the correct creation order via implicit `DependsOn` relationships.
-
-The only manual dependency needed is `collection.addDependency(encryptionPolicy)` (as documented in R-1).
-
-### 8. Complete CDK TypeScript Code for KnowledgeBaseConstruct
-
-```typescript
-import { Construct } from 'constructs';
-import { Stack, Arn } from 'aws-cdk-lib';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as bedrock from 'aws-cdk-lib/aws-bedrock';
-
-export interface KnowledgeBaseConstructProps {
-  /** Name for the knowledge base */
-  knowledgeBaseName: string;
-  /** S3 bucket containing the data source documents */
-  dataBucket: s3.IBucket;
-  /** ARN of the OpenSearch Serverless collection */
-  collectionArn: string;
-  /** Name of the pre-created vector index in the collection */
-  vectorIndexName: string;
-  /** Optional: embedding model ARN (defaults to Titan Embed Text V2) */
-  embeddingModelArn?: string;
-  /** Optional: vector dimensions (default: 1024 for Titan V2) */
-  vectorDimensions?: number;
-  /** Optional: field name for vector embeddings (default: 'bedrock-knowledge-base-default-vector') */
-  vectorField?: string;
-  /** Optional: field name for text chunks (default: 'AMAZON_BEDROCK_TEXT_CHUNK') */
-  textField?: string;
-  /** Optional: field name for metadata (default: 'AMAZON_BEDROCK_METADATA') */
-  metadataField?: string;
-  /** Optional: S3 prefix to scope the data source */
-  s3Prefix?: string;
-}
-
-export class KnowledgeBaseConstruct extends Construct {
-  public readonly knowledgeBase: bedrock.CfnKnowledgeBase;
-  public readonly dataSource: bedrock.CfnDataSource;
-  public readonly serviceRole: iam.Role;
-  public readonly knowledgeBaseId: string;
-  public readonly knowledgeBaseArn: string;
-  public readonly dataSourceId: string;
-
-  constructor(scope: Construct, id: string, props: KnowledgeBaseConstructProps) {
-    super(scope, id);
-
-    const stack = Stack.of(this);
-    const region = stack.region;
-    const account = stack.account;
-
-    const embeddingModelArn =
-      props.embeddingModelArn ??
-      `arn:aws:bedrock:${region}::foundation-model/amazon.titan-embed-text-v2:0`;
-
-    const vectorField = props.vectorField ?? 'bedrock-knowledge-base-default-vector';
-    const textField = props.textField ?? 'AMAZON_BEDROCK_TEXT_CHUNK';
-    const metadataField = props.metadataField ?? 'AMAZON_BEDROCK_METADATA';
-
-    // --- IAM Service Role for Bedrock KB ---
-    this.serviceRole = new iam.Role(this, 'ServiceRole', {
-      assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com', {
-        conditions: {
-          StringEquals: {
-            'aws:SourceAccount': account,
-          },
-          ArnLike: {
-            'AWS:SourceArn': `arn:aws:bedrock:${region}:${account}:knowledge-base/*`,
-          },
-        },
-      }),
-      description: `Service role for Bedrock Knowledge Base ${props.knowledgeBaseName}`,
-    });
-
-    // S3 permissions: ListBucket on bucket, GetObject on objects
-    this.serviceRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'S3ListBucket',
-        actions: ['s3:ListBucket'],
-        resources: [props.dataBucket.bucketArn],
-        conditions: {
-          StringEquals: {
-            'aws:ResourceAccount': account,
-          },
-        },
-      }),
-    );
-
-    this.serviceRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'S3GetObject',
-        actions: ['s3:GetObject'],
-        resources: [`${props.dataBucket.bucketArn}/*`],
-        conditions: {
-          StringEquals: {
-            'aws:ResourceAccount': account,
-          },
-        },
-      }),
-    );
-
-    // OpenSearch Serverless permissions
-    this.serviceRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'OpenSearchServerlessAccess',
-        actions: ['aoss:APIAccessAll'],
-        resources: [props.collectionArn],
-      }),
-    );
-
-    // Bedrock model invocation permission (required for embeddings)
-    this.serviceRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'BedrockInvokeModel',
-        actions: ['bedrock:InvokeModel'],
-        resources: [embeddingModelArn],
-      }),
-    );
-
-    // --- CfnKnowledgeBase ---
-    this.knowledgeBase = new bedrock.CfnKnowledgeBase(this, 'KnowledgeBase', {
-      name: props.knowledgeBaseName,
-      roleArn: this.serviceRole.roleArn,
-      knowledgeBaseConfiguration: {
-        type: 'VECTOR',
-        vectorKnowledgeBaseConfiguration: {
-          embeddingModelArn: embeddingModelArn,
-          // Optionally specify dimensions if overriding default:
-          ...(props.vectorDimensions
-            ? {
-                embeddingModelConfiguration: {
-                  bedrockEmbeddingModelConfiguration: {
-                    dimensions: props.vectorDimensions,
-                  },
-                },
-              }
-            : {}),
-        },
-      },
-      storageConfiguration: {
-        type: 'OPENSEARCH_SERVERLESS',
-        opensearchServerlessConfiguration: {
-          collectionArn: props.collectionArn,
-          vectorIndexName: props.vectorIndexName,
-          fieldMapping: {
-            vectorField: vectorField,
-            textField: textField,
-            metadataField: metadataField,
-          },
-        },
-      },
-    });
-
-    // --- CfnDataSource (S3, no chunking) ---
-    this.dataSource = new bedrock.CfnDataSource(this, 'DataSource', {
-      name: `${props.knowledgeBaseName}-s3`,
-      knowledgeBaseId: this.knowledgeBase.attrKnowledgeBaseId,
-      dataSourceConfiguration: {
-        type: 'S3',
-        s3Configuration: {
-          bucketArn: props.dataBucket.bucketArn,
-          ...(props.s3Prefix
-            ? { inclusionPrefixes: [props.s3Prefix] }
-            : {}),
-        },
-      },
-      vectorIngestionConfiguration: {
-        chunkingConfiguration: {
-          chunkingStrategy: 'NONE',
-        },
-      },
-      dataDeletionPolicy: 'DELETE',
-    });
-
-    // Expose attributes
-    this.knowledgeBaseId = this.knowledgeBase.attrKnowledgeBaseId;
-    this.knowledgeBaseArn = this.knowledgeBase.attrKnowledgeBaseArn;
-    this.dataSourceId = this.dataSource.attrDataSourceId;
-  }
-}
-```
-
-**Usage example showing integration with SearchConstruct from R-1:**
-
-```typescript
-import * as s3 from 'aws-cdk-lib/aws-s3';
-
-// Assumes SearchConstruct already created the collection
-const dataBucket = new s3.Bucket(this, 'KnowledgeBucket');
-
-const kb = new KnowledgeBaseConstruct(this, 'KnowledgeBase', {
-  knowledgeBaseName: 'my-knowledge-base',
-  dataBucket: dataBucket,
-  collectionArn: search.collectionArn,      // CDK token from SearchConstruct
-  vectorIndexName: 'bedrock-kb-index',       // Must match pre-created index
-});
-
-// The KB service role must also be added to the AOSS data access policy
-// Pass kb.serviceRole.roleArn to SearchConstruct's dataAccessPrincipalArns
-```
-
-**Key imports summary:**
-
-```typescript
-import * as bedrock from 'aws-cdk-lib/aws-bedrock';
-// CfnKnowledgeBase is at: bedrock.CfnKnowledgeBase
-// CfnDataSource is at: bedrock.CfnDataSource
-// Namespace types: bedrock.CfnKnowledgeBase.OpenSearchServerlessConfigurationProperty, etc.
-```
-
-**Decision:** Use L1 constructs `CfnKnowledgeBase` and `CfnDataSource` from `aws-cdk-lib/aws-bedrock`. The service role needs `bedrock.amazonaws.com` trust, plus `s3:ListBucket`, `s3:GetObject`, `aoss:APIAccessAll`, and `bedrock:InvokeModel` permissions. The OpenSearch index MUST be pre-created (via a CDK custom resource) before the KB is created. Use `chunkingStrategy: 'NONE'` for the data source. The embedding model is `amazon.titan-embed-text-v2:0` with 1024 dimensions by default. Field mappings (`vectorField`, `textField`, `metadataField`) are all required and must match between the index schema and the KB configuration.
+**Decision:** Use L1 constructs `CfnKnowledgeBase` and `CfnDataSource`. Add `bedrock:InvokeModel` to the service role (was missing). Add a new custom resource task (SRC-006) to pre-create the OpenSearch vector index before KB creation. Use 1024-dimension vectors with `faiss`/`hnsw` engine. All three field mappings are required and must match between index schema and KB config.
 
 ---
 
@@ -1098,50 +253,70 @@ import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 
 **Question:** What security group rules are needed for 9 interface VPC endpoints + 1 gateway endpoint?
 
-**Areas to Investigate:**
-- Can all 9 interface endpoints share a single security group? (Yes — they all need the same inbound rule: TCP 443 from EC2 SG)
-- S3 gateway endpoint: no security group needed, but route table association required
-- OpenSearch Serverless VPC endpoint: uses a separate `CfnVpcEndpoint` from the `aws-opensearchserverless` module (not a standard `ec2.InterfaceVpcEndpoint`)
-- Whether the Lambda functions (NOT in VPC) need any security group rules (no — they call public AWS API endpoints)
-- Outbound rules on EC2 SG: need to allow HTTPS (443) to VPC endpoint SG
-
-**Success Criteria:** Minimal security group configuration where EC2 can reach all services via VPC endpoints.
+**Status:** Resolved
 
 **Findings:**
 
-### VPC Endpoint Architecture
+### Endpoint Architecture (10 Total)
 
-**10 endpoints total:**
-- 1 S3 gateway endpoint (via `ec2.GatewayVpcEndpoint`) -- no security group, route table association only
-- 8 standard interface endpoints (via `ec2.InterfaceVpcEndpoint`) -- share one security group
-- 1 AOSS VPC endpoint (via `opensearchserverless.CfnVpcEndpoint`) -- uses its own security group parameter
+| Type | Count | CDK Construct | Security Group |
+|------|-------|---------------|----------------|
+| S3 gateway | 1 | `ec2.GatewayVpcEndpoint` | None (route table only) |
+| Standard interface | 8 | `ec2.InterfaceVpcEndpoint` | Shared endpoint SG |
+| AOSS interface | 1 | `opensearchserverless.CfnVpcEndpoint` | Shared endpoint SG |
 
-**The 8 standard interface endpoints** (all created with `ec2.InterfaceVpcEndpoint`):
-1. `com.amazonaws.{region}.sqs`
-2. `com.amazonaws.{region}.git-codecommit`
-3. `com.amazonaws.{region}.bedrock-runtime`
-4. `com.amazonaws.{region}.bedrock-agent`
-5. `com.amazonaws.{region}.ssm`
-6. `com.amazonaws.{region}.ssmmessages`
-7. `com.amazonaws.{region}.ec2messages`
-8. `com.amazonaws.{region}.logs`
+**8 standard interface endpoints** (all via `ec2.InterfaceVpcEndpoint`):
+1. `sqs` 2. `git-codecommit` 3. `bedrock-runtime` 4. `bedrock-agent` 5. `ssm` 6. `ssmmessages` 7. `ec2messages` 8. `logs`
 
-**The AOSS VPC endpoint** (created with `opensearchserverless.CfnVpcEndpoint`):
-- This is NOT a standard interface endpoint. It uses `AWS::OpenSearchServerless::VpcEndpoint`, not `AWS::EC2::VPCEndpoint`
-- `CfnVpcEndpointProps`: `name` (required), `subnetIds` (required), `vpcId` (required), `securityGroupIds` (optional)
-- Returns `attrId` which is the VPC endpoint ID (e.g., `vpce-050f79086ee71ac05`) -- this ID is used in the network policy's `SourceVPCEs` field
+**1 AOSS endpoint** (via `opensearchserverless.CfnVpcEndpoint`): This is NOT a standard interface endpoint — it uses `AWS::OpenSearchServerless::VpcEndpoint`, not `AWS::EC2::VPCEndpoint`. It accepts `securityGroupIds` as `string[]`, so it CAN share the same endpoint SG.
 
-### Security Group Configuration
+### Security Group Rules (Minimal)
 
-**Two security groups:**
-1. **EC2 SG**: Outbound HTTPS (443) to endpoint SG
-2. **VPC Endpoint SG**: Inbound HTTPS (443) from EC2 SG
+Two security groups:
 
-**Both the standard interface endpoints and the AOSS VPC endpoint can share the same endpoint security group.** The AOSS `CfnVpcEndpoint` accepts a `securityGroupIds` array.
+**EC2 SG:** Outbound TCP 443 → endpoint SG
+**Endpoint SG:** Inbound TCP 443 ← EC2 SG
 
-**Lambda functions (NOT in VPC):** No security group rules needed. They call public AWS API endpoints (Bedrock, S3).
+No additional rules needed. Stateful SG tracking handles return traffic.
 
-**Decision:** Use two security groups. The EC2 SG allows outbound 443 to the endpoint SG. The endpoint SG allows inbound 443 from the EC2 SG. All 9 interface endpoints (8 standard + 1 AOSS) share the endpoint SG. The S3 gateway endpoint needs route table association but no SG. The AOSS VPC endpoint is created via `opensearchserverless.CfnVpcEndpoint` with the shared endpoint SG in `securityGroupIds`.
+### CDK Code Pattern
+
+```typescript
+const ec2Sg = new ec2.SecurityGroup(this, 'Ec2Sg', {
+  vpc, description: 'EC2 instance', allowAllOutbound: false,
+});
+const endpointSg = new ec2.SecurityGroup(this, 'EndpointSg', {
+  vpc, description: 'VPC interface endpoints', allowAllOutbound: false,
+});
+ec2Sg.addEgressRule(endpointSg, ec2.Port.tcp(443), 'HTTPS to endpoints');
+endpointSg.addIngressRule(ec2Sg, ec2.Port.tcp(443), 'HTTPS from EC2');
+
+// S3 gateway (no SG)
+vpc.addGatewayEndpoint('S3', {
+  service: ec2.GatewayVpcEndpointAwsService.S3,
+  subnets: [{ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }],
+});
+
+// Standard interface endpoints — CRITICAL: open: false prevents auto-permissive ingress
+new ec2.InterfaceVpcEndpoint(this, 'SqsEndpoint', {
+  vpc, service: ec2.InterfaceVpcEndpointAwsService.SQS,
+  securityGroups: [endpointSg], privateDnsEnabled: true,
+  open: false, // Prevents CDK from adding 0.0.0.0/0 ingress rule
+  subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+});
+
+// AOSS endpoint (L1 construct, takes string IDs)
+new opensearchserverless.CfnVpcEndpoint(this, 'AossEndpoint', {
+  name: 'aoss-endpoint', // ^[a-z][a-z0-9-]{2,31}$
+  vpcId: vpc.vpcId,
+  subnetIds: [subnet.subnetId],
+  securityGroupIds: [endpointSg.securityGroupId],
+});
+```
+
+**Critical: `open: false`** on `InterfaceVpcEndpoint` prevents CDK from auto-adding a permissive `0.0.0.0/0` ingress rule. Without this, the tight SG-to-SG rules are undermined.
+
+**Decision:** Two SGs (EC2 + endpoint), shared across all 9 interface endpoints. AOSS uses `opensearchserverless.CfnVpcEndpoint` with `securityGroupIds`. Always set `open: false` on standard interface endpoints. S3 gateway needs route table association only.
 
 ---
 
@@ -1168,108 +343,65 @@ import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 
 **Question:** How to configure the network policy so both VPC (EC2) and Bedrock service can access the collection?
 
-**Areas to Investigate:**
-- Network policy JSON schema: `AllowFromPublic`, `SourceVPCEndpoints`, `SourceServices`
-- Does `AllowFromPublic: true` allow Bedrock service access? (Bedrock Retrieve API accesses OpenSearch from the Bedrock service network, not from the customer's VPC)
-- Can a single policy combine VPC endpoint source AND public access?
-- Alternative: `SourceServices: ["bedrock.amazonaws.com"]` — does this work?
-- Security implications of `AllowFromPublic: true` (mitigated by data access policy requiring specific IAM principals)
-
-**Success Criteria:** Network policy that allows both EC2 (via VPC endpoint) and Bedrock (via service network) to reach the collection.
-
-**Key Concern:** If we use VPC-only access, the recallKnowledge Lambda (not in VPC) → Bedrock Retrieve API → OpenSearch path will fail because Bedrock's internal access won't be able to reach a VPC-only collection.
+**Status:** Resolved
 
 **Findings:**
 
-### Network Policy JSON Format (Definitive)
+### Network Policy JSON Format
 
-The network policy is an **array of objects** (unlike encryption policy which is a single object).
-
-**Complete field reference (all field names are case-sensitive):**
+The policy is a **JSON array** (unlike encryption policy which is a single object). Field names are **case-sensitive**:
 
 ```json
-[
-  {
-    "Description": "string",
-    "Rules": [
-      {
-        "ResourceType": "collection" | "dashboard",
-        "Resource": ["collection/<name-or-pattern>"]
-      }
-    ],
-    "AllowFromPublic": true | false,
-    "SourceVPCEs": ["vpce-xxxxxxxxx"],
-    "SourceServices": ["bedrock.amazonaws.com"]
-  }
-]
+[{
+  "Description": "string",
+  "Rules": [{ "ResourceType": "collection", "Resource": ["collection/<name>"] }],
+  "AllowFromPublic": false,
+  "SourceVPCEs": ["vpce-xxx"],
+  "SourceServices": ["bedrock.amazonaws.com"]
+}]
 ```
 
-**Field names confirmed (case-sensitive):**
-- `AllowFromPublic` (not `allowFromPublic`)
-- `SourceVPCEs` (not `SourceVPCEndpoints` or `SourceVpcEndpoints`)
-- `SourceServices` (not `sourceServices`)
-- `ResourceType` (not `resourceType`)
-- `Resource` (not `resource`)
-- `Description` (not `description`)
+Correct field names: `SourceVPCEs` (NOT `SourceVPCEndpoints`), `SourceServices`, `AllowFromPublic`.
 
-**Critical behavioral rules:**
-1. If `AllowFromPublic: true`, it **overrides** any `SourceVPCEs` or `SourceServices` settings
-2. `SourceServices` private access **only applies to collection endpoints**, not to Dashboards
-3. Multiple VPC endpoints in overlapping rules are **additive**
-4. Currently the only valid `SourceServices` value is `"bedrock.amazonaws.com"`
+### Critical: Do NOT Use AllowFromPublic
 
-### Dual Access Pattern (Recommended)
+**If `AllowFromPublic: true`, it OVERRIDES `SourceVPCEs` and `SourceServices`.** The collection becomes fully public and the VPC/service restrictions are silently ignored.
 
-Use `AllowFromPublic: false` with both `SourceVPCEs` and `SourceServices` for maximum security:
+### Recommended Dual-Access Pattern
 
 ```json
-[
-  {
-    "Description": "VPC endpoint access for EC2 + Bedrock service access",
-    "Rules": [
-      {
-        "ResourceType": "collection",
-        "Resource": ["collection/<collection-name>"]
-      }
-    ],
-    "AllowFromPublic": false,
-    "SourceVPCEs": ["vpce-050f79086ee71ac05"],
-    "SourceServices": ["bedrock.amazonaws.com"]
-  }
-]
+[{
+  "Rules": [{ "ResourceType": "collection", "Resource": ["collection/<name>"] }],
+  "AllowFromPublic": false,
+  "SourceVPCEs": ["<aoss-vpc-endpoint-id>"],
+  "SourceServices": ["bedrock.amazonaws.com"]
+}]
 ```
 
-This is more secure than `AllowFromPublic: true` because:
-- EC2 access is restricted to the specific VPC endpoint
-- Bedrock service access is restricted to the `bedrock.amazonaws.com` service principal
-- No public internet access to the collection
+This enables:
+- **EC2 access:** Via VPC endpoint (restricted to the specific VPCE)
+- **Bedrock service access:** Via AWS service private network (`SourceServices`)
+- **No public internet access** to the collection
 
-### Alternative: AllowFromPublic (Simpler but Less Secure)
+### Bedrock Service Access Path
 
-```json
-[
-  {
-    "Rules": [
-      {
-        "ResourceType": "collection",
-        "Resource": ["collection/<collection-name>"]
-      }
-    ],
-    "AllowFromPublic": true
-  }
-]
+When Lambda calls `bedrock:Retrieve`, Bedrock reaches OpenSearch via **AWS internal service-to-service networking**, not the customer's VPC. `SourceServices: ["bedrock.amazonaws.com"]` enables this internal path. Putting Lambda in the VPC would NOT change this — Bedrock's internal path is separate.
+
+### Three-Layer Security Model
+
+```
+Request → Network Policy (origin) → Data Access Policy (principal) → IAM Policy → Access
 ```
 
-This also works because `AllowFromPublic: true` allows Bedrock service access. However, it opens the collection endpoint to the public internet. The data access policy (requiring specific IAM principals) still restricts who can actually read/write data, so the security impact is mitigated. But the `SourceVPCEs` + `SourceServices` approach is strictly better.
+With `AllowFromPublic: false` + `SourceVPCEs` + `SourceServices`, all three layers enforce restrictions. This is strictly more secure than `AllowFromPublic: true` (which collapses the network layer).
 
-### Prior Research Context Confirmed
+### Corrections to Existing Documentation
 
-The context from the user is correct:
-- Field names ARE case-sensitive: `SourceVPCEs`, `SourceServices`, `AllowFromPublic`
-- `AllowFromPublic: false` with `SourceVPCEs` + `SourceServices` is the recommended pattern
-- The AOSS VPC endpoint uses `opensearchserverless.CfnVpcEndpoint`, NOT `ec2.InterfaceVpcEndpoint`
+The plan and data-model files should be updated:
+- Change `AllowFromPublic: true` → `AllowFromPublic: false` with `SourceServices`
+- Change `SourceVPCEndpoints` → `SourceVPCEs` (correct field name)
 
-**Decision:** Use the dual-access pattern with `AllowFromPublic: false`, `SourceVPCEs: [vpcEndpointId]`, and `SourceServices: ["bedrock.amazonaws.com"]`. This provides both EC2 access via VPC endpoint and Bedrock service access without exposing the collection to the public internet. The data-model.md Entity 6 should be updated to reflect the corrected field name `SourceVPCEs` (not `SourceVPCEndpoints`) and to use the private dual-access pattern instead of `AllowFromPublic: true`.
+**Decision:** Use `AllowFromPublic: false` with `SourceVPCEs` + `SourceServices: ["bedrock.amazonaws.com"]`. Do NOT use `AllowFromPublic: true`. Update task SRC-003 acceptance criteria accordingly.
 
 ---
 

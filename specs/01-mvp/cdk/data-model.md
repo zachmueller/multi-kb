@@ -224,19 +224,23 @@ Three policy types, all managed by CDK:
 
 #### Network Policy
 ```json
-{
-  "Rules": [
-    {
-      "Resource": ["collection/<collection-name>"],
-      "ResourceType": "collection"
-    }
-  ],
-  "AllowFromPublic": true,
-  "SourceVPCEndpoints": ["vpce-<endpoint-id>"]
-}
+[
+  {
+    "Description": "VPC endpoint and Bedrock service access",
+    "Rules": [
+      {
+        "ResourceType": "collection",
+        "Resource": ["collection/<collection-name>"]
+      }
+    ],
+    "AllowFromPublic": false,
+    "SourceVPCEs": ["vpce-<endpoint-id>"],
+    "SourceServices": ["bedrock.amazonaws.com"]
+  }
+]
 ```
 
-Note: `AllowFromPublic: true` is required for Bedrock service access (Bedrock Retrieve API calls come from the Bedrock service, not from within the VPC). EC2 access goes through the VPC endpoint. This is the dual-access pattern from R-6.
+Note (R-6): Do NOT use `AllowFromPublic: true` — it silently overrides `SourceVPCEs` and `SourceServices`, making the collection fully public. Instead, use `AllowFromPublic: false` with `SourceVPCEs` (for EC2 VPC endpoint access) + `SourceServices: ["bedrock.amazonaws.com"]` (for Bedrock internal service-to-service access). Field names are case-sensitive: `SourceVPCEs` (not `SourceVPCEndpoints`). Network policy is a JSON **array** (unlike encryption policy). Three-layer security: network origin + data access policy + IAM.
 
 #### Data Access Policy
 ```json
@@ -336,4 +340,5 @@ Bedrock Knowledge Base
 | submitKnowledge Lambda Role | `sqs:SendMessage` on queue ARN | submitKnowledge Lambda |
 | recallKnowledge Lambda Role | `bedrock:Retrieve` on KB ARN, `bedrock:InvokeModel` on coverage model ARN, `s3:PutObject` on `{bucket}/recall-logs/*` | recallKnowledge Lambda |
 | EC2 Instance Role | `sqs:ReceiveMessage`+`sqs:DeleteMessage` on queue ARN, `codecommit:GitPull`+`codecommit:GitPush` on repo ARN, `s3:GetObject`+`s3:PutObject`+`s3:DeleteObject`+`s3:ListBucket` on bucket ARN, `s3:GetObject` on CLI binary S3 URI, `aoss:APIAccessAll` on collection ARN, `bedrock:InvokeModel` on consolidation model ARN, `bedrock-agent:StartIngestionJob`+`bedrock-agent:GetIngestionJob` on KB/data source, `ssm:*` (Session Manager) | EC2 instance |
-| Bedrock KB Service Role | `s3:GetObject`+`s3:ListBucket` on bucket ARN, `aoss:APIAccessAll` on collection ARN | Bedrock KB data source sync |
+| Bedrock KB Service Role | `s3:GetObject`+`s3:ListBucket` on bucket ARN, `aoss:APIAccessAll` on collection ARN, **`bedrock:InvokeModel` on embedding model ARN** (R-2) | Bedrock KB data source sync (ingestion + retrieval) |
+| Index Creation Lambda Role | `aoss:APIAccessAll` on collection ARN (also listed in AOSS data access policy) | Custom resource Lambda for OpenSearch index pre-creation (R-2) |
