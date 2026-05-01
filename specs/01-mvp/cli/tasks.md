@@ -410,7 +410,7 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 **Dependencies:** EXT-001, FND-001
 **Acceptance Criteria:**
 - [ ] Sends SigV4-signed POST to `{endpoint}/submitKnowledge` with {title, content, author}
-- [ ] For `iam` auth: signs with configured AWS profile; for `federate`: direct call (no auth config)
+- [ ] For `iam` auth: signs with configured AWS profile via SigV4; for `federate` auth: sends plain HTTP POST with no auth headers (the network layer handles identity transparently)
 - [ ] Pre-flight validation: title ≤255 chars, content ≤100K chars, author ≤100 chars
 - [ ] Self-throttle: max 10 requests/second per target KB
 - [ ] HTTP 202: success (UID logged but not stored)
@@ -478,7 +478,7 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 **Acceptance Criteria:**
 - [ ] Sends SigV4-signed POST to `{endpoint}/recallKnowledge` with {query, limit}
 - [ ] Parses response: JSON array of {uid, title, content, score}
-- [ ] Handles `iam` vs `federate` auth (same pattern as submitKnowledge)
+- [ ] Handles `iam` vs `federate` auth: `iam` uses SigV4 signing; `federate` sends plain HTTP POST with no auth headers
 - [ ] Respects configurable timeout (from hook.timeout)
 - [ ] Returns partial results on timeout (context cancellation)
 - [ ] Test cases: successful recall, timeout, auth error, empty results
@@ -531,7 +531,7 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 **Dependencies:** FND-001, FND-007, FND-009, HKI-003, HKI-004, HKI-005, HKI-006
 **Acceptance Criteria:**
 - [ ] Accepts `--harness` flag (claude-code or notor)
-- [ ] Claude Code: implements first-message guard — checks for absence of prior assistant messages; if not first message, exits immediately with no output
+- [ ] Claude Code: implements first-message guard — checks for absence of prior assistant messages; if not first message, exits immediately with no output. **Note:** The exact detection mechanism depends on R-5 research findings (what data does the hook receive?). Defer implementation approach until R-5 completes.
 - [ ] Reads user's first message (from stdin or hook context)
 - [ ] Identifies target KBs for the current directory from config
 - [ ] Queries all target KBs concurrently (local via git grep with LLM keywords, remote via recallKnowledge)
@@ -804,6 +804,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - `internal/config/validate.go` — add server-mode validation rules
 - `internal/config/config_test.go` — add server-mode test cases
 **Dependencies:** FND-001
+**Contract:** CDK [server-config.md](../cdk/contracts/server-config.md) — defines the fields the CDK user data script templates; CLI validation must match
 **Acceptance Criteria:**
 - [ ] Parses all server-mode fields: sqs.queue_url, sqs.batch_size, codecommit.repo_name/region, s3.bucket/region, opensearch.endpoint/region, bedrock_kb.knowledge_base_id/data_source_id, tick_interval, dream_cycle.interval/model_id, recall_log.schedule
 - [ ] Server-mode fields only validated when `mode: server`

@@ -509,6 +509,7 @@ _Corresponds to plan.md Phase F._
 **Files:**
 - `lib/constructs/compute.ts` — user data script generation
 **Dependencies:** CMP-001, STR-001, STR-002, STR-003, SRC-001, KBS-001, KBS-003, ENV-002
+**Contract:** [server-config.md](contracts/server-config.md) — defines the exact config.yaml fields to template and their CDK output sources
 **Acceptance Criteria:**
 - [ ] Uses `UserData.forLinux()` with `set -euxo pipefail`
 - [ ] Step 1: Install packages (`dnf install -y amazon-cloudwatch-agent git`)
