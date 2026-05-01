@@ -120,17 +120,25 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - [ ] Test cases: acquire fresh, acquire stale, fail on active, release, heartbeat updates
 
 ### FND-004 [P]: Crockford Base32 UID Generation
-**Description:** Implement 16-character Crockford base32 UID generation per research.md R-7.
+**Description:** Implement 16-character Crockford base32 UID generation per [research.md R-7](research.md#r-7-crockford-base32-uid-generation).
 **Files:**
-- `internal/submit/uid.go` — GenerateUID function
+- `internal/submit/uid.go` — `GenerateUID` function + `EncodeCrockford` function
 - `internal/submit/uid_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
 - [ ] Uses `crypto/rand` for 10 random bytes (80 bits of entropy)
 - [ ] Encodes to exactly 16 characters using Crockford base32 alphabet (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`)
+- [ ] Uses bit-buffer encoding algorithm (R-7): accumulate 8 bits per byte, extract 5-bit groups MSB-first via `(buf >> bits) & 0x1F`
 - [ ] No I, L, O, U characters in output
-- [ ] Uppercase output (Crockford canonical form)
-- [ ] Test cases: length=16, valid alphabet, uniqueness over 10K generations, deterministic encoding of known bytes
+- [ ] Uppercase output (Crockford canonical form — use uppercase alphabet constant directly, no post-processing)
+- [ ] Zero external dependencies — no third-party Crockford library
+- [ ] `EncodeCrockford([]byte)` exported separately from `GenerateUID()` for deterministic testing
+- [ ] Test cases: length=16, valid alphabet, uniqueness over 10K generations, deterministic encoding of 5 shared test vectors from R-7:
+  - `[0x00 × 10]` → `"0000000000000000"`
+  - `[0xFF × 10]` → `"ZZZZZZZZZZZZZZZZ"`
+  - `[0x00..0x09]` → `"000G40R40M30E209"`
+  - `[0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x42]` → `"VTPVXVYAZTXBW022"`
+  - `"HelloWorld"` bytes → `"91JPRV3FAXQQ4V34"`
 
 ### FND-005: Local KB Git Repository Creation
 **Description:** Implement local KB directory and git repository initialization.
@@ -1049,9 +1057,9 @@ _Research items must complete before their dependent implementation phases._
 
 **Remaining research:** R-2 (highest priority — blocks CDK Lambda tasks).
 
-**R-3, R-4, R-5, and R-6 are complete.** Their findings reshape TRN-002, TRN-003, HKI-001, HKI-002, HKI-006, and HKI-007 — see updated task descriptions.
+**R-3, R-4, R-5, R-6, and R-7 are complete.** Their findings reshape TRN-002, TRN-003, HKI-001, HKI-002, HKI-006, HKI-007, and FND-004 — see updated task descriptions. R-7 findings added bit-buffer encoding algorithm, test vector table, and `EncodeCrockford` export guidance to FND-004.
 
-**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 2 (R-3 and R-4 complete), Phase 3 (Extraction), Phase 4 (R-5 and R-6 complete), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
+**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation — R-7 resolved, FND-004 reshaped), Phase 2 (R-3 and R-4 complete), Phase 3 (Extraction), Phase 4 (R-5 and R-6 complete), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
 
 ---
 

@@ -11,7 +11,7 @@
 **Phases:** 9 (Setup → Networking → Storage → Search → Lambda → API → Compute → Observability → Quality)
 **Estimated Complexity:** High
 **Parallel Execution Opportunities:** 12 task groups
-**Research Status:** R-1, R-2, R-4, R-6 resolved; R-3, R-5, R-7 open
+**Research Status:** R-1, R-2, R-4, R-5, R-6 resolved; R-3, R-7 open
 
 ## Dependency Legend
 
@@ -374,7 +374,7 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 ### LMB-001: Shared Lambda Utilities
 **Description:** Implement shared utilities used by both Lambda handlers per plan.md lambda/shared/.
 **Files:**
-- `lambda/shared/uid.ts` — Crockford base32 UID generation (per research.md R-5)
+- `lambda/shared/uid.ts` — Crockford base32 UID generation (per [research.md R-5](research.md#r-5-crockford-base32-uid-generation-in-nodejs))
 - `lambda/shared/response.ts` — API Gateway Lambda proxy response helpers (per research.md R-7)
 - `lambda/shared/validation.ts` — field validation utilities
 - `test/lambda/shared/uid.test.ts`
@@ -382,11 +382,19 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - `test/lambda/shared/validation.test.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] **UID generation:** `crypto.randomBytes(10)` → 16-char Crockford base32 (alphabet: `0123456789ABCDEFGHJKMNPQRSTVWXYZ`); uppercase; exactly 16 chars
+- [ ] **UID generation (R-5):** `crypto.randomBytes(10)` → 16-char Crockford base32 (alphabet: `0123456789ABCDEFGHJKMNPQRSTVWXYZ`); uppercase; exactly 16 chars
+- [ ] Uses bit-buffer encoding algorithm (R-5): accumulate 8 bits per byte, extract 5-bit groups MSB-first via `(buf >>> bits) & 0x1F` (unsigned right shift)
+- [ ] Zero npm dependencies — uses only Node.js built-in `crypto`
+- [ ] `encodeCrockford(Buffer)` exported separately from `generateUid()` for deterministic testing
 - [ ] **Response helpers:** `success(statusCode, body)`, `error(statusCode, body)` — wrap in Lambda proxy format `{ statusCode, headers: {"Content-Type": "application/json"}, body: JSON.stringify(...) }`
 - [ ] **Validation:** `validateSubmitKnowledge(body)` returns `{ valid: true, data }` or `{ valid: false, errors: {} }`; validates title (present, non-empty, ≤255), content (present, non-empty, ≤100K), author (present, non-empty, ≤100)
-- [ ] All zero-dependency (no npm packages required — uses Node.js built-ins)
-- [ ] Test: UID format (length, alphabet, uniqueness over 1K), response shape, all validation rules from contracts/submit-knowledge.md table
+- [ ] Test: UID deterministic encoding of 5 shared test vectors from R-5:
+  - `Buffer.from([0x00 × 10])` → `"0000000000000000"`
+  - `Buffer.from([0xFF × 10])` → `"ZZZZZZZZZZZZZZZZ"`
+  - `Buffer.from([0x00..0x09])` → `"000G40R40M30E209"`
+  - `Buffer.from([0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x42])` → `"VTPVXVYAZTXBW022"`
+  - `Buffer.from("HelloWorld")` → `"91JPRV3FAXQQ4V34"`
+- [ ] Test: UID format (length=16, valid alphabet, no I/L/O/U, uniqueness over 1K), response shape, all validation rules from contracts/submit-knowledge.md table
 
 ### LMB-002: submitKnowledge Lambda Handler
 **Description:** Implement the submitKnowledge Lambda per spec FR-2 and contracts/submit-knowledge.md.
@@ -676,13 +684,15 @@ _Research items must complete before their dependent implementation phases._
 | **R-6:** OpenSearch dual-access network policy | ✅ Resolved | Phase 3 (Search Infrastructure) | SRC-003 (`AllowFromPublic: false` + `SourceVPCEs` + `SourceServices`) |
 | **R-1:** OpenSearch Serverless CDK setup | ✅ Resolved | Phase 3 (Search Infrastructure) | SRC-001, SRC-002, SRC-003, SRC-004 (L1 constructs, policy formats, dependency ordering) |
 | **R-2:** Bedrock KB CDK construct | ✅ Resolved | Phase 3 (Search Infrastructure) + Phase 4 (Lambda Functions) | KBS-001, KBS-002, KBS-003, SRC-006 (field mappings, service role permissions, index pre-creation) + LMB-004 (uid/title extraction from Retrieve results) |
+| **R-5:** Crockford base32 UID | ✅ Resolved | Phase 4 (Lambda Functions) | LMB-001 (UID generation — reshaped with bit-buffer algorithm and 5 shared test vectors) |
 | **R-7:** Lambda proxy integration format | Open | Phase 4 (Lambda Functions) | LMB-001 (response helpers) |
 | **R-3:** EC2 user data script | Open | Phase 6 (EC2 Compute) | CMP-003 (user data script) |
-| **R-5:** Crockford base32 UID | Open | Phase 4 (Lambda Functions) | LMB-001 (UID generation) |
 
 **All Phase 3 research is resolved.** Implementation can now proceed through Phase 3 (Search Infrastructure) without blocking.
 
-**Tasks that can proceed without remaining research:** Phases 0-3 (Setup, Networking, Storage, Search Infrastructure), Phase 5 (API Gateway), Phase 6 (EC2 Compute — except CMP-003 user data details), Phase 7 (Observability).
+**R-5 is now resolved.** LMB-001 UID acceptance criteria updated with bit-buffer encoding algorithm and 5 authoritative test vectors shared with CLI R-7.
+
+**Tasks that can proceed without remaining research:** Phases 0-4 (Setup, Networking, Storage, Search Infrastructure, Lambda Functions — R-5 resolved, R-7 response helpers can be researched inline), Phase 5 (API Gateway), Phase 6 (EC2 Compute — except CMP-003 user data details), Phase 7 (Observability).
 
 ---
 
@@ -713,7 +723,7 @@ _Research items must complete before their dependent implementation phases._
 **Acceptance Criteria:**
 - [ ] **submitKnowledge tests:** valid input → 202, missing title → 400, empty title → 400, long title → 400, missing content → 400, empty content → 400, long content → 400, missing author → 400, empty author → 400, long author → 400, SQS failure → 500, multiple validation errors → single 400 with all errors
 - [ ] **recallKnowledge tests:** valid query → 200 with results, empty query → 400, empty results → 200 with `[]`, coverage trigger (low score) → follow-up query, coverage fallback on error, S3 write failure → still returns results, limit parameter respected
-- [ ] **UID tests:** length=16, valid Crockford alphabet, no I/L/O/U, uniqueness, deterministic encoding of known bytes
+- [ ] **UID tests:** length=16, valid Crockford alphabet, no I/L/O/U, uniqueness, deterministic encoding of 5 shared test vectors from R-5 (matching CLI R-7 Go implementation)
 - [ ] All AWS SDK calls mocked (no real AWS calls in unit tests)
 - [ ] `npm test` passes
 

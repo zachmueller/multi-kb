@@ -125,11 +125,12 @@ Most infrastructure choices are specified directly. The following require target
 - **Key Concern:** The OpenSearch Serverless VPC endpoint has its own network policy requirement (separate from the security group)
 - **Resolution:** Two SGs (EC2 + endpoint). EC2 SG: outbound 443 to endpoint SG. Endpoint SG: inbound 443 from EC2 SG. All 9 interface endpoints share the endpoint SG. Key findings: (1) AOSS uses `opensearchserverless.CfnVpcEndpoint` (L1), not `ec2.InterfaceVpcEndpoint` — takes `securityGroupIds` as `string[]`. (2) Must set `open: false` on `InterfaceVpcEndpoint` to prevent CDK from auto-adding permissive `0.0.0.0/0` ingress. (3) S3 gateway endpoint needs route table association only, no SG. See [research.md R-4](research.md#r-4-vpc-endpoint-security-group-configuration).
 
-#### R-5: Crockford Base32 UID Generation in Node.js
+#### R-5: Crockford Base32 UID Generation in Node.js ✅
 - **Research Task:** Implement or find a library for 16-character Crockford base32 UID generation in the submitKnowledge Lambda
 - **Questions to Answer:** Existing npm package? If not, how to encode 10 random bytes to 16 Crockford base32 characters? Use `crypto.randomBytes(10)` as entropy source.
 - **Success Criteria:** Function that generates collision-resistant 16-char UIDs with the correct alphabet (`0-9A-HJKMNP-TV-Z`, excluding I, L, O, U)
 - **Note:** Must match the CLI's format exactly (CLI plan R-7). Both produce 80-bit entropy encoded as 16 Crockford base32 chars.
+- **Resolution:** Zero-dependency implementation using bit-buffer encoding. `crypto.randomBytes(10)` → bit-buffer extraction (5 bits at a time, MSB first, using `>>>` unsigned right shift) → 16 uppercase Crockford chars. No npm package needed — the encoding is ~12 lines, which is better for Lambda cold starts. `encodeCrockford()` exported separately from `generateUid()` for deterministic testing against 5 shared test vectors (verified identical output with CLI R-7 Go implementation). JavaScript integer safety is not a concern — the bit buffer never exceeds 2^15 (12 bits max accumulation). See [research.md R-5](research.md#r-5-crockford-base32-uid-generation-in-nodejs).
 
 #### R-6: OpenSearch Serverless Network Policy for Dual Access ✅
 - **Research Task:** Configure OpenSearch Serverless network policy to allow access from both VPC (EC2) and from the Bedrock service (for Retrieve API queries)

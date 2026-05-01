@@ -164,11 +164,12 @@ All major technology choices are resolved by the spec (Go, Bedrock, git grep, YA
   5. **Idempotency:** Filename (`multi-kb-recall.md`) is the unique key. Overwrite on re-registration.
   See [research.md R-6](research.md#r-6-notor-hook-registration).
 
-#### R-7: Crockford Base32 UID Generation
+#### R-7: Crockford Base32 UID Generation ✅
 - **Research Task:** Identify or implement Crockford base32 encoding for 16-character UIDs
 - **Questions to Answer:** Existing Go library? If not, what's the input entropy source (crypto/rand)? How to ensure exactly 16 characters?
 - **Success Criteria:** Function that generates collision-resistant 16-char Crockford base32 UIDs
 - **Note:** 16 chars of Crockford base32 = 80 bits of entropy (5 bits per char). Use `crypto/rand` for 10 random bytes, encode to Crockford base32.
+- **Resolution:** Zero-dependency implementation using bit-buffer encoding. `crypto/rand` for 10 bytes → bit-buffer extraction (5 bits at a time, MSB first) → 16 uppercase Crockford chars. No third-party library needed — the encoding is ~15 lines. `EncodeCrockford()` exported separately from `GenerateUID()` for deterministic testing against 5 shared test vectors (verified identical output with CDK R-5 Node.js implementation). See [research.md R-7](research.md#r-7-crockford-base32-uid-generation).
 
 #### R-8: Cross-Platform Cron Registration
 - **Research Task:** Implement crontab registration on macOS/Linux and Task Scheduler on Windows
