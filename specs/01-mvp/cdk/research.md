@@ -438,9 +438,638 @@ ec2Role.addToPolicy(new iam.PolicyStatement({
 
 **Success Criteria:** CDK code that creates a KB + data source, with a service role that has correct permissions for both S3 and OpenSearch.
 
-**Findings:** _(to be populated)_
+**Findings:**
 
-**Decision:** _(to be populated)_
+### 1. L2 vs L1 Constructs for Bedrock
+
+**No L2 constructs exist for Knowledge Base or DataSource.** The `aws-cdk-lib/aws-bedrock` module contains only two L2 constructs:
+
+- `FoundationModel` -- lookup existing Bedrock base foundation models
+- `ProvisionedModel` -- lookup Bedrock provisioned throughput models
+
+The `@aws-cdk/aws-bedrock-alpha` package (v2.252.0-alpha.0) also does NOT contain Knowledge Base or DataSource L2 constructs. It provides L2 constructs only for Agents, Guardrails, Prompts, and Inference Profiles.
+
+**All Knowledge Base / DataSource work must use L1 constructs.**
+
+**Complete list of L1 constructs in `aws-cdk-lib/aws-bedrock`:**
+
+| Construct | CloudFormation Type |
+|-----------|-------------------|
+| `CfnAgent` | `AWS::Bedrock::Agent` |
+| `CfnAgentAlias` | `AWS::Bedrock::AgentAlias` |
+| `CfnApplicationInferenceProfile` | `AWS::Bedrock::ApplicationInferenceProfile` |
+| `CfnAutomatedReasoningPolicy` | `AWS::Bedrock::AutomatedReasoningPolicy` |
+| `CfnAutomatedReasoningPolicyVersion` | `AWS::Bedrock::AutomatedReasoningPolicyVersion` |
+| `CfnBlueprint` | `AWS::Bedrock::Blueprint` |
+| `CfnDataAutomationLibrary` | `AWS::Bedrock::DataAutomationLibrary` |
+| `CfnDataAutomationProject` | `AWS::Bedrock::DataAutomationProject` |
+| **`CfnDataSource`** | **`AWS::Bedrock::DataSource`** |
+| `CfnEnforcedGuardrailConfiguration` | `AWS::Bedrock::EnforcedGuardrailConfiguration` |
+| `CfnFlow` | `AWS::Bedrock::Flow` |
+| `CfnFlowAlias` | `AWS::Bedrock::FlowAlias` |
+| `CfnFlowVersion` | `AWS::Bedrock::FlowVersion` |
+| `CfnGuardrail` | `AWS::Bedrock::Guardrail` |
+| `CfnGuardrailVersion` | `AWS::Bedrock::GuardrailVersion` |
+| `CfnIntelligentPromptRouter` | `AWS::Bedrock::IntelligentPromptRouter` |
+| **`CfnKnowledgeBase`** | **`AWS::Bedrock::KnowledgeBase`** |
+| `CfnPrompt` | `AWS::Bedrock::Prompt` |
+| `CfnPromptVersion` | `AWS::Bedrock::PromptVersion` |
+| `CfnResourcePolicy` | `AWS::Bedrock::ResourcePolicy` |
+
+### 2. CfnKnowledgeBase Properties
+
+**CfnKnowledgeBaseProps interface (from CDK type definitions):**
+
+```typescript
+interface CfnKnowledgeBaseProps {
+  // REQUIRED
+  name: string;                    // Pattern: ^([0-9a-zA-Z][_-]?){1,100}$
+  roleArn: string;                 // IAM role ARN, max 2048 chars
+  knowledgeBaseConfiguration: CfnKnowledgeBase.KnowledgeBaseConfigurationProperty | IResolvable;
+
+  // OPTIONAL
+  description?: string;            // 1-200 chars
+  storageConfiguration?: CfnKnowledgeBase.StorageConfigurationProperty | IResolvable;  // REPLACEMENT if changed
+  tags?: Record<string, string>;
+}
+```
+
+**KnowledgeBaseConfigurationProperty:**
+
+```typescript
+interface KnowledgeBaseConfigurationProperty {
+  type: string;  // 'VECTOR' | 'KENDRA' | 'SQL'
+  vectorKnowledgeBaseConfiguration?: VectorKnowledgeBaseConfigurationProperty | IResolvable;
+  kendraKnowledgeBaseConfiguration?: KendraKnowledgeBaseConfigurationProperty | IResolvable;
+  sqlKnowledgeBaseConfiguration?: SqlKnowledgeBaseConfigurationProperty | IResolvable;
+}
+```
+
+**VectorKnowledgeBaseConfigurationProperty:**
+
+```typescript
+interface VectorKnowledgeBaseConfigurationProperty {
+  embeddingModelArn: string;  // REQUIRED - ARN of the embedding model
+  embeddingModelConfiguration?: EmbeddingModelConfigurationProperty | IResolvable;  // Optional
+  supplementalDataStorageConfiguration?: SupplementalDataStorageConfigurationProperty | IResolvable;  // Optional
+}
+```
+
+**EmbeddingModelConfigurationProperty (for specifying dimensions):**
+
+```typescript
+interface EmbeddingModelConfigurationProperty {
+  bedrockEmbeddingModelConfiguration?: BedrockEmbeddingModelConfigurationProperty | IResolvable;
+}
+
+interface BedrockEmbeddingModelConfigurationProperty {
+  dimensions?: number;            // Override default dimensions (e.g., 1024, 512, 256)
+  embeddingDataType?: string;     // e.g., 'FLOAT32'
+  audio?: AudioConfigurationProperty[];   // Multimodal audio config
+  video?: VideoConfigurationProperty[];   // Multimodal video config
+}
+```
+
+**StorageConfigurationProperty:**
+
+```typescript
+interface StorageConfigurationProperty {
+  type: string;  // REQUIRED: 'OPENSEARCH_SERVERLESS' | 'RDS' | 'PINECONE' | 'MONGO_DB_ATLAS' | 'NEPTUNE_ANALYTICS' | 'S3_VECTORS' | 'OPENSEARCH_MANAGED_CLUSTER'
+
+  // Include the one matching the type:
+  opensearchServerlessConfiguration?: OpenSearchServerlessConfigurationProperty | IResolvable;
+  rdsConfiguration?: RdsConfigurationProperty | IResolvable;
+  pineconeConfiguration?: PineconeConfigurationProperty | IResolvable;
+  mongoDbAtlasConfiguration?: MongoDbAtlasConfigurationProperty | IResolvable;
+  neptuneAnalyticsConfiguration?: NeptuneAnalyticsConfigurationProperty | IResolvable;
+  s3VectorsConfiguration?: S3VectorsConfigurationProperty | IResolvable;
+  opensearchManagedClusterConfiguration?: OpenSearchManagedClusterConfigurationProperty | IResolvable;
+}
+```
+
+**OpenSearchServerlessConfigurationProperty (the one we need):**
+
+```typescript
+interface OpenSearchServerlessConfigurationProperty {
+  collectionArn: string;   // REQUIRED - ARN of the OpenSearch Serverless collection
+  vectorIndexName: string; // REQUIRED - Name of the vector index in the collection
+  fieldMapping: OpenSearchServerlessFieldMappingProperty | IResolvable;  // REQUIRED
+}
+```
+
+**OpenSearchServerlessFieldMappingProperty:**
+
+```typescript
+interface OpenSearchServerlessFieldMappingProperty {
+  vectorField: string;    // REQUIRED - Field name for vector embeddings
+  textField: string;      // REQUIRED - Field name for raw text chunks
+  metadataField: string;  // REQUIRED - Field name for Bedrock-managed metadata
+}
+```
+
+**All three field mappings are REQUIRED.** There is no default naming -- you must explicitly specify each field name.
+
+**Attributes exposed by CfnKnowledgeBase:**
+
+| CDK Attribute | CloudFormation Attribute | Type | Description |
+|---------------|------------------------|------|-------------|
+| `attrKnowledgeBaseId` | `KnowledgeBaseId` | `string` | Unique KB identifier |
+| `attrKnowledgeBaseArn` | `KnowledgeBaseArn` | `string` | Full ARN |
+| `attrStatus` | `Status` | `string` | Status (CREATING, ACTIVE, DELETING, FAILED) |
+| `attrCreatedAt` | `CreatedAt` | `string` | Creation timestamp |
+| `attrUpdatedAt` | `UpdatedAt` | `string` | Last update timestamp |
+| `attrFailureReasons` | `FailureReasons` | `string[]` | Failure reasons if status is FAILED |
+
+### 3. CfnDataSource Properties
+
+**CfnDataSourceProps interface (from CDK type definitions):**
+
+```typescript
+interface CfnDataSourceProps {
+  // REQUIRED
+  name: string;                    // Pattern: ^([0-9a-zA-Z][_-]?){1,100}$
+  knowledgeBaseId: string;         // Pattern: ^[0-9a-zA-Z]{10}$ -- links to KB
+  dataSourceConfiguration: CfnDataSource.DataSourceConfigurationProperty | IResolvable;
+
+  // OPTIONAL
+  description?: string;                     // 1-200 chars
+  dataDeletionPolicy?: string;              // 'RETAIN' | 'DELETE'
+  serverSideEncryptionConfiguration?: CfnDataSource.ServerSideEncryptionConfigurationProperty | IResolvable;
+  vectorIngestionConfiguration?: CfnDataSource.VectorIngestionConfigurationProperty | IResolvable;
+}
+```
+
+**DataSourceConfigurationProperty:**
+
+```typescript
+interface DataSourceConfigurationProperty {
+  type: string;  // REQUIRED: 'S3' | 'CONFLUENCE' | 'SALESFORCE' | 'SHAREPOINT' | 'WEB'
+
+  // Include the one matching the type:
+  s3Configuration?: S3DataSourceConfigurationProperty | IResolvable;
+  confluenceConfiguration?: ConfluenceDataSourceConfigurationProperty | IResolvable;
+  salesforceConfiguration?: SalesforceDataSourceConfigurationProperty | IResolvable;
+  sharePointConfiguration?: SharePointDataSourceConfigurationProperty | IResolvable;
+  webConfiguration?: WebDataSourceConfigurationProperty | IResolvable;
+}
+```
+
+**S3DataSourceConfigurationProperty:**
+
+```typescript
+interface S3DataSourceConfigurationProperty {
+  bucketArn: string;                    // REQUIRED - S3 bucket ARN
+  bucketOwnerAccountId?: string;        // Optional - cross-account bucket owner
+  inclusionPrefixes?: string[];         // Optional - max 1 item, max 300 chars each
+}
+```
+
+**VectorIngestionConfigurationProperty:**
+
+```typescript
+interface VectorIngestionConfigurationProperty {
+  chunkingConfiguration?: ChunkingConfigurationProperty | IResolvable;
+  customTransformationConfiguration?: CustomTransformationConfigurationProperty | IResolvable;
+  parsingConfiguration?: ParsingConfigurationProperty | IResolvable;
+  contextEnrichmentConfiguration?: ContextEnrichmentConfigurationProperty | IResolvable;
+}
+```
+
+**ChunkingConfigurationProperty (for "no chunking"):**
+
+```typescript
+interface ChunkingConfigurationProperty {
+  chunkingStrategy: string;  // REQUIRED: 'NONE' | 'FIXED_SIZE' | 'HIERARCHICAL' | 'SEMANTIC'
+
+  // Only include if chunkingStrategy is NOT 'NONE':
+  fixedSizeChunkingConfiguration?: FixedSizeChunkingConfigurationProperty | IResolvable;
+  hierarchicalChunkingConfiguration?: HierarchicalChunkingConfigurationProperty | IResolvable;
+  semanticChunkingConfiguration?: SemanticChunkingConfigurationProperty | IResolvable;
+}
+```
+
+**"No chunking" configuration is:**
+
+```typescript
+vectorIngestionConfiguration: {
+  chunkingConfiguration: {
+    chunkingStrategy: 'NONE',
+  },
+},
+```
+
+When `chunkingStrategy` is `'NONE'`, all other fields in `ChunkingConfigurationProperty` should be omitted. Each file is treated as a single chunk.
+
+**Attributes exposed by CfnDataSource:**
+
+| CDK Attribute | CloudFormation Attribute | Type | Description |
+|---------------|------------------------|------|-------------|
+| `attrDataSourceId` | `DataSourceId` | `string` | Unique data source identifier |
+| `attrDataSourceStatus` | `DataSourceStatus` | `string` | `Available` or `Deleting` |
+| `attrCreatedAt` | `CreatedAt` | `string` | Creation timestamp |
+| `attrUpdatedAt` | `UpdatedAt` | `string` | Last update timestamp |
+| `attrFailureReasons` | `FailureReasons` | `string[]` | Failure reasons |
+
+### 4. Service Role for Bedrock KB
+
+**Trust policy principal:** `bedrock.amazonaws.com`
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "bedrock.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "<account-id>"
+        },
+        "ArnLike": {
+          "AWS:SourceArn": "arn:aws:bedrock:<region>:<account-id>:knowledge-base/*"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Required permissions (4 policy statements):**
+
+**a) S3 permissions:**
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["s3:ListBucket"],
+  "Resource": ["arn:aws:s3:::<bucket-name>"],
+  "Condition": {
+    "StringEquals": { "aws:ResourceAccount": "<account-id>" }
+  }
+}
+```
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["s3:GetObject"],
+  "Resource": ["arn:aws:s3:::<bucket-name>/*"],
+  "Condition": {
+    "StringEquals": { "aws:ResourceAccount": "<account-id>" }
+  }
+}
+```
+
+**b) OpenSearch Serverless permissions:**
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["aoss:APIAccessAll"],
+  "Resource": ["arn:aws:aoss:<region>:<account-id>:collection/<collection-id>"]
+}
+```
+
+**c) Bedrock model invocation (YES, REQUIRED):**
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:InvokeModel"],
+  "Resource": [
+    "arn:aws:bedrock:<region>::foundation-model/amazon.titan-embed-text-v2:0"
+  ]
+}
+```
+
+The role DOES need `bedrock:InvokeModel` to call the embedding model during ingestion and retrieval. The resource ARN for foundation models uses an empty account ID (the `::` in the ARN) because foundation models are AWS-owned.
+
+**d) Optional but recommended -- model listing:**
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:ListFoundationModels", "bedrock:ListCustomModels"],
+  "Resource": "*"
+}
+```
+
+These are needed if the KB setup validates model availability, but are not strictly required for ingestion/retrieval.
+
+**Summary of required IAM permissions:**
+
+| Action | Resource | Purpose |
+|--------|----------|---------|
+| `s3:ListBucket` | Bucket ARN | List objects in data source bucket |
+| `s3:GetObject` | Bucket ARN/* | Read documents from data source |
+| `aoss:APIAccessAll` | Collection ARN | Read/write OpenSearch Serverless |
+| `bedrock:InvokeModel` | Foundation model ARN | Generate embeddings |
+
+**The role also needs to be listed as a principal in the OpenSearch Serverless data access policy** (see R-1 findings, section 4). The IAM policy (`aoss:APIAccessAll`) and the AOSS data access policy work together -- both must grant access.
+
+### 5. OpenSearch Index Auto-Creation
+
+**Bedrock KB does NOT auto-create the OpenSearch index in all cases.** There are two options:
+
+- **Quick-create flow (console only):** When creating a KB through the AWS Console, Bedrock can auto-create a collection AND index for you. This is a console convenience feature, not available via CloudFormation/CDK.
+
+- **Bring-your-own (CDK/CloudFormation):** When using CDK or CloudFormation, you must pre-create the OpenSearch index before creating the KB. The KB expects the index to already exist with the correct schema.
+
+**For our CDK deployment, we MUST pre-create the index.** This requires a custom resource (Lambda function) that calls the OpenSearch Serverless API to create the index after the collection is available.
+
+**Index name constraints:** The `vectorIndexName` in the KB storage configuration must match the name of the pre-created index. There are no specific naming constraints beyond what OpenSearch allows (lowercase, alphanumeric, hyphens).
+
+### 6. Vector Index Configuration
+
+**The index MUST be pre-created with the correct schema before creating the KB.** The `StartIngestionJob` API does NOT create the index -- it only ingests documents into an existing index.
+
+**Required index schema for OpenSearch Serverless VECTORSEARCH:**
+
+The index must be created via the OpenSearch REST API (PUT to the collection endpoint) with a mapping that includes:
+
+- A `knn_vector` field for embeddings (engine: `faiss` or `nmslib`)
+- A string field for text chunks
+- A string field for metadata
+
+**Example index creation body:**
+
+```json
+{
+  "settings": {
+    "index": {
+      "knn": true
+    }
+  },
+  "mappings": {
+    "properties": {
+      "bedrock-knowledge-base-default-vector": {
+        "type": "knn_vector",
+        "dimension": 1024,
+        "method": {
+          "engine": "faiss",
+          "name": "hnsw",
+          "parameters": {},
+          "space_type": "l2"
+        }
+      },
+      "AMAZON_BEDROCK_TEXT_CHUNK": {
+        "type": "text",
+        "index": true
+      },
+      "AMAZON_BEDROCK_METADATA": {
+        "type": "text",
+        "index": false
+      }
+    }
+  }
+}
+```
+
+**Vector dimensions for `amazon.titan-embed-text-v2:0`:**
+
+| Dimension | Notes |
+|-----------|-------|
+| **1024** | **DEFAULT** |
+| 512 | Reduced dimension option |
+| 256 | Reduced dimension option |
+
+The default is **1024 dimensions**. You can optionally override this via `embeddingModelConfiguration.bedrockEmbeddingModelConfiguration.dimensions` in the KB configuration. The index's `dimension` field must match whatever the KB is configured to use.
+
+**The field names in the index mapping must match the field names specified in the KB's `fieldMapping` configuration.** They can be anything you choose, but they must be consistent between the index schema and the KB configuration.
+
+### 7. Circular Dependency Resolution
+
+The dependency chain is:
+
+```
+Bedrock KB Service Role → needs collection ARN for IAM policy (aoss:APIAccessAll)
+OpenSearch Data Access Policy → needs service role ARN as principal
+CfnKnowledgeBase → needs service role ARN + collection ARN
+```
+
+**This is NOT a circular dependency.** All references are forward references that CDK tokens handle:
+
+1. Create the **Bedrock KB service role** (no dependencies -- the role itself is just a trust policy)
+2. Create the **collection** (depends on encryption policy only)
+3. Add IAM policy to the role with `aoss:APIAccessAll` on `collection.attrArn` (CDK token)
+4. Create the **AOSS data access policy** with `role.roleArn` as principal (CDK token)
+5. Create the **CfnKnowledgeBase** with `role.roleArn` and `collection.attrArn` (CDK tokens)
+6. Create the **CfnDataSource** with `kb.attrKnowledgeBaseId` (CDK token)
+
+CDK tokens for `collection.attrArn`, `role.roleArn`, and `kb.attrKnowledgeBaseId` all resolve to CloudFormation intrinsics (`Fn::GetAtt`, `Fn::Ref`) at synthesis time. CloudFormation resolves the actual values at deploy time and automatically determines the correct creation order via implicit `DependsOn` relationships.
+
+The only manual dependency needed is `collection.addDependency(encryptionPolicy)` (as documented in R-1).
+
+### 8. Complete CDK TypeScript Code for KnowledgeBaseConstruct
+
+```typescript
+import { Construct } from 'constructs';
+import { Stack, Arn } from 'aws-cdk-lib';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+
+export interface KnowledgeBaseConstructProps {
+  /** Name for the knowledge base */
+  knowledgeBaseName: string;
+  /** S3 bucket containing the data source documents */
+  dataBucket: s3.IBucket;
+  /** ARN of the OpenSearch Serverless collection */
+  collectionArn: string;
+  /** Name of the pre-created vector index in the collection */
+  vectorIndexName: string;
+  /** Optional: embedding model ARN (defaults to Titan Embed Text V2) */
+  embeddingModelArn?: string;
+  /** Optional: vector dimensions (default: 1024 for Titan V2) */
+  vectorDimensions?: number;
+  /** Optional: field name for vector embeddings (default: 'bedrock-knowledge-base-default-vector') */
+  vectorField?: string;
+  /** Optional: field name for text chunks (default: 'AMAZON_BEDROCK_TEXT_CHUNK') */
+  textField?: string;
+  /** Optional: field name for metadata (default: 'AMAZON_BEDROCK_METADATA') */
+  metadataField?: string;
+  /** Optional: S3 prefix to scope the data source */
+  s3Prefix?: string;
+}
+
+export class KnowledgeBaseConstruct extends Construct {
+  public readonly knowledgeBase: bedrock.CfnKnowledgeBase;
+  public readonly dataSource: bedrock.CfnDataSource;
+  public readonly serviceRole: iam.Role;
+  public readonly knowledgeBaseId: string;
+  public readonly knowledgeBaseArn: string;
+  public readonly dataSourceId: string;
+
+  constructor(scope: Construct, id: string, props: KnowledgeBaseConstructProps) {
+    super(scope, id);
+
+    const stack = Stack.of(this);
+    const region = stack.region;
+    const account = stack.account;
+
+    const embeddingModelArn =
+      props.embeddingModelArn ??
+      `arn:aws:bedrock:${region}::foundation-model/amazon.titan-embed-text-v2:0`;
+
+    const vectorField = props.vectorField ?? 'bedrock-knowledge-base-default-vector';
+    const textField = props.textField ?? 'AMAZON_BEDROCK_TEXT_CHUNK';
+    const metadataField = props.metadataField ?? 'AMAZON_BEDROCK_METADATA';
+
+    // --- IAM Service Role for Bedrock KB ---
+    this.serviceRole = new iam.Role(this, 'ServiceRole', {
+      assumedBy: new iam.ServicePrincipal('bedrock.amazonaws.com', {
+        conditions: {
+          StringEquals: {
+            'aws:SourceAccount': account,
+          },
+          ArnLike: {
+            'AWS:SourceArn': `arn:aws:bedrock:${region}:${account}:knowledge-base/*`,
+          },
+        },
+      }),
+      description: `Service role for Bedrock Knowledge Base ${props.knowledgeBaseName}`,
+    });
+
+    // S3 permissions: ListBucket on bucket, GetObject on objects
+    this.serviceRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'S3ListBucket',
+        actions: ['s3:ListBucket'],
+        resources: [props.dataBucket.bucketArn],
+        conditions: {
+          StringEquals: {
+            'aws:ResourceAccount': account,
+          },
+        },
+      }),
+    );
+
+    this.serviceRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'S3GetObject',
+        actions: ['s3:GetObject'],
+        resources: [`${props.dataBucket.bucketArn}/*`],
+        conditions: {
+          StringEquals: {
+            'aws:ResourceAccount': account,
+          },
+        },
+      }),
+    );
+
+    // OpenSearch Serverless permissions
+    this.serviceRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'OpenSearchServerlessAccess',
+        actions: ['aoss:APIAccessAll'],
+        resources: [props.collectionArn],
+      }),
+    );
+
+    // Bedrock model invocation permission (required for embeddings)
+    this.serviceRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'BedrockInvokeModel',
+        actions: ['bedrock:InvokeModel'],
+        resources: [embeddingModelArn],
+      }),
+    );
+
+    // --- CfnKnowledgeBase ---
+    this.knowledgeBase = new bedrock.CfnKnowledgeBase(this, 'KnowledgeBase', {
+      name: props.knowledgeBaseName,
+      roleArn: this.serviceRole.roleArn,
+      knowledgeBaseConfiguration: {
+        type: 'VECTOR',
+        vectorKnowledgeBaseConfiguration: {
+          embeddingModelArn: embeddingModelArn,
+          // Optionally specify dimensions if overriding default:
+          ...(props.vectorDimensions
+            ? {
+                embeddingModelConfiguration: {
+                  bedrockEmbeddingModelConfiguration: {
+                    dimensions: props.vectorDimensions,
+                  },
+                },
+              }
+            : {}),
+        },
+      },
+      storageConfiguration: {
+        type: 'OPENSEARCH_SERVERLESS',
+        opensearchServerlessConfiguration: {
+          collectionArn: props.collectionArn,
+          vectorIndexName: props.vectorIndexName,
+          fieldMapping: {
+            vectorField: vectorField,
+            textField: textField,
+            metadataField: metadataField,
+          },
+        },
+      },
+    });
+
+    // --- CfnDataSource (S3, no chunking) ---
+    this.dataSource = new bedrock.CfnDataSource(this, 'DataSource', {
+      name: `${props.knowledgeBaseName}-s3`,
+      knowledgeBaseId: this.knowledgeBase.attrKnowledgeBaseId,
+      dataSourceConfiguration: {
+        type: 'S3',
+        s3Configuration: {
+          bucketArn: props.dataBucket.bucketArn,
+          ...(props.s3Prefix
+            ? { inclusionPrefixes: [props.s3Prefix] }
+            : {}),
+        },
+      },
+      vectorIngestionConfiguration: {
+        chunkingConfiguration: {
+          chunkingStrategy: 'NONE',
+        },
+      },
+      dataDeletionPolicy: 'DELETE',
+    });
+
+    // Expose attributes
+    this.knowledgeBaseId = this.knowledgeBase.attrKnowledgeBaseId;
+    this.knowledgeBaseArn = this.knowledgeBase.attrKnowledgeBaseArn;
+    this.dataSourceId = this.dataSource.attrDataSourceId;
+  }
+}
+```
+
+**Usage example showing integration with SearchConstruct from R-1:**
+
+```typescript
+import * as s3 from 'aws-cdk-lib/aws-s3';
+
+// Assumes SearchConstruct already created the collection
+const dataBucket = new s3.Bucket(this, 'KnowledgeBucket');
+
+const kb = new KnowledgeBaseConstruct(this, 'KnowledgeBase', {
+  knowledgeBaseName: 'my-knowledge-base',
+  dataBucket: dataBucket,
+  collectionArn: search.collectionArn,      // CDK token from SearchConstruct
+  vectorIndexName: 'bedrock-kb-index',       // Must match pre-created index
+});
+
+// The KB service role must also be added to the AOSS data access policy
+// Pass kb.serviceRole.roleArn to SearchConstruct's dataAccessPrincipalArns
+```
+
+**Key imports summary:**
+
+```typescript
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+// CfnKnowledgeBase is at: bedrock.CfnKnowledgeBase
+// CfnDataSource is at: bedrock.CfnDataSource
+// Namespace types: bedrock.CfnKnowledgeBase.OpenSearchServerlessConfigurationProperty, etc.
+```
+
+**Decision:** Use L1 constructs `CfnKnowledgeBase` and `CfnDataSource` from `aws-cdk-lib/aws-bedrock`. The service role needs `bedrock.amazonaws.com` trust, plus `s3:ListBucket`, `s3:GetObject`, `aoss:APIAccessAll`, and `bedrock:InvokeModel` permissions. The OpenSearch index MUST be pre-created (via a CDK custom resource) before the KB is created. Use `chunkingStrategy: 'NONE'` for the data source. The embedding model is `amazon.titan-embed-text-v2:0` with 1024 dimensions by default. Field mappings (`vectorField`, `textField`, `metadataField`) are all required and must match between the index schema and the KB configuration.
 
 ---
 
