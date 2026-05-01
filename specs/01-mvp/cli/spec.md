@@ -248,7 +248,33 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
   - `translation` section optionally overrides summarization model
   - `dream_cycle` section optionally overrides consolidation model
   - `hook` section defines injection timeout
-  - Per-directory routing configuration tracks harness pairings, target KBs, routing modes, and approval modes
+  - `exclusion_rules` array of natural language strings describing content that should never be shared with non-local KBs
+  - `sources` array defines per-directory routing configuration using the following schema:
+    ```yaml
+    sources:
+      - directory: "/Users/zmueller/my-project"
+        harnesses: [claude-code]
+        targets:
+          - kb: local/default        # references a local KB name
+            routing: always           # always | consider
+            approval: auto-approve    # auto-approve | require-manual-approval
+          - kb: my-team-kb            # references a knowledge_bases entry by name
+            routing: consider
+            approval: require-manual-approval
+        overrides:  # optional per-harness or per-persona refinements
+          - harness: notor
+            targets:
+              - kb: architecture-kb
+                routing: always
+                approval: auto-approve
+          - harness: notor
+            persona: "architecture"
+            targets:
+              - kb: architecture-kb
+                routing: always
+                approval: auto-approve
+    ```
+    Each `sources` entry defines a tracked directory, its active harness(es), and a default `targets` list specifying which KBs receive extracted notes with what routing and approval modes. The optional `overrides` array refines routing for specific harness or harness+persona/workflow combinations within that directory — override targets replace (not merge with) the directory-level defaults for matching conversations. The `kb` field in each target references either a local KB name (prefixed with `local/`, e.g., `local/default`) or a remote KB name matching an entry in `knowledge_bases`.
 - **State file (`state.yaml`):**
   - Per-directory `last-processed` timestamps
   - Last dream cycle timestamp
@@ -502,8 +528,10 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 ### Configuration (config.yaml)
 - **Mode:** `client` | `server`
-- **Knowledge bases:** Array of remote KB definitions (name, endpoint, auth, description)
-- **Chat sources:** Per-directory harness pairings with routing rules
+- **Author:** Identity string used for all `submitKnowledge` API calls
+- **Knowledge bases:** Array of remote KB definitions (name, endpoint, auth type, aws_profile, aws_region, description)
+- **Sources:** Array of tracked directories, each with harness list, default targets (kb, routing mode, approval mode), and optional per-harness/per-persona overrides
+- **Exclusion rules:** Array of natural language strings appended to the extraction prompt
 - **Extraction settings:** Model ID, AWS profile, region
 - **Translation settings:** Summarization model override
 - **Dream cycle settings:** Model override
