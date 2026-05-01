@@ -4,7 +4,7 @@
 **Plan:** [plan.md](plan.md)
 **Status:** Open (findings to be populated during Phase 0)
 
-## R-1: Bubbletea Wizard Pattern
+## R-1: Bubbletea Wizard Pattern ✅
 
 **Question:** Which terminal UI library best handles the multi-step setup wizard flow?
 
@@ -21,13 +21,462 @@
 
 **Prototype Task:** Build a 3-step wizard: (1) select from list, (2) text input, (3) confirmation screen. Evaluate all three options.
 
-**Findings:** _(to be populated)_
+**Findings:**
 
-**Decision:** _(to be populated)_
+### Option 1: `bubbletea` + `huh` (Charmbracelet) -- RECOMMENDED
+
+#### What is `huh`?
+
+`huh` is a Go library for building interactive terminal forms and prompts, built on top of `bubbletea`. It provides high-level form components (Input, Select, MultiSelect, Confirm, Text, FilePicker, Note) that compose into multi-step wizard flows using a Group/Form abstraction. Each Group is a "page" in the wizard; the Form manages sequential progression through Groups.
+
+- **Module path:** `charm.land/huh/v2`
+- **Current version:** v2.0.3 (released March 10, 2025)
+- **Status:** Stable (v2 is the current major release)
+- **Stars:** 6.8k GitHub stars
+- **License:** MIT
+- **Parent ecosystem:** Charmbracelet (`bubbletea` at 42k stars)
+
+#### Available Input Types
+
+| Component | Description | Relevant to multi-kb? |
+|-----------|-------------|----------------------|
+| `Select[T]` | Single selection from a list | **Yes** -- harness selection, auth type, routing mode |
+| `MultiSelect[T]` | Multiple selections with optional limit | **Yes** -- harness multi-select (step 1) |
+| `Input` | Single-line text input | **Yes** -- directory path, author identity, KB name |
+| `Text` | Multi-line text input | Maybe -- exclusion rules |
+| `Confirm` | Yes/No prompt | **Yes** -- confirmation screens, "add another KB?" |
+| `FilePicker` | Interactive file/directory browser | **Yes** -- directory selection (supports `DirAllowed(true)`) |
+| `Note` | Read-only informational card | **Yes** -- summary screens, auto-discovery results |
+
+#### Multi-Step Form Flow (Groups)
+
+Forms are organized as a sequence of Groups. Each Group is one "page" of the wizard. The user progresses through Groups sequentially:
+
+```go
+form := huh.NewForm(
+    huh.NewGroup(/* Step 1 fields */),
+    huh.NewGroup(/* Step 2 fields */),
+    huh.NewGroup(/* Step 3 fields */),
+)
+err := form.Run()
+```
+
+Each Group can have its own height, title, description, theme, and visibility function. The Form manages keyboard navigation (Tab/Shift+Tab between fields, Enter to advance).
+
+#### Branching / Conditional Logic
+
+Two mechanisms for branching:
+
+1. **`WithHideFunc` on Groups** -- Dynamically skip entire pages based on prior answers:
+   ```go
+   huh.NewGroup(
+       huh.NewInput().Title("Notor vault path").Value(&notorPath),
+   ).WithHideFunc(func() bool {
+       // Only show if user selected Notor in the harness multi-select
+       return !slices.Contains(selectedHarnesses, "notor")
+   })
+   ```
+
+2. **`TitleFunc` / `OptionsFunc` on Fields** -- Dynamically change field titles and options based on bound variables:
+   ```go
+   huh.NewSelect[string]().
+       TitleFunc(func() string {
+           return fmt.Sprintf("Select province for %s", country)
+       }, &country).
+       OptionsFunc(func() []huh.Option[string] {
+           return getProvincesFor(country)
+       }, &country)
+   ```
+
+Both mechanisms use closure-based callbacks with dependency tracking (pass the address of the variable to watch). The form re-evaluates these functions whenever the bound variable changes.
+
+#### Validation
+
+Fields accept a `Validate` function that returns an error:
+
+```go
+huh.NewInput().
+    Title("Directory path").
+    Value(&dirPath).
+    Validate(func(s string) error {
+        if _, err := os.Stat(s); os.IsNotExist(err) {
+            return fmt.Errorf("directory does not exist: %s", s)
+        }
+        return nil
+    })
+```
+
+Built-in validators: `ValidateNotEmpty()`, `ValidateMinLength(n)`, `ValidateMaxLength(n)`, `ValidateLength(min, max)`, `ValidateOneOf(values...)`.
+
+Errors are displayed inline next to the field. The form prevents advancement until validation passes.
+
+#### Terminal Compatibility
+
+`huh` inherits terminal support from `bubbletea` and `lipgloss`:
+- **macOS Terminal.app:** Full support
+- **iTerm2:** Full support
+- **Windows Terminal:** Full support (bubbletea v2 has explicit Windows support)
+- **WSL:** Full support (uses the Windows terminal emulator)
+- **SSH sessions:** Supported (Charmbracelet has a dedicated `wish` library for SSH TUIs)
+- **Piped stdin/stdout:** NOT supported (requires a TTY) -- this is fine since the wizard is interactive
+
+#### Accessibility
+
+First-class accessible mode:
+```go
+form.WithAccessible(true)
+// Or via environment variable
+form.WithAccessible(os.Getenv("ACCESSIBLE") != "")
+```
+
+Accessible mode replaces the graphical TUI with standard sequential prompts, providing better screen reader dictation and feedback. This is a form-level setting (one toggle covers all fields).
+
+#### Bubbletea Integration
+
+A `huh.Form` implements `tea.Model` (the bubbletea interface). This means:
+- Forms can be embedded inside larger bubbletea applications
+- Custom pre/post-step logic can wrap form steps
+- The form's `Init()`, `Update()`, `View()` methods are standard bubbletea
+- After `form.Run()` completes, all bound variables are populated
+
+This is critical for multi-kb: if any step requires custom logic between form pages (e.g., running auto-discovery after directory input, then showing results), the form can be embedded in a bubbletea app that intercepts completion of specific groups.
+
+#### Realistic 3-Step Wizard Prototype
+
+```go
+package main
+
+import (
+    "fmt"
+    "os"
+    "slices"
+    "charm.land/huh/v2"
+)
+
+func main() {
+    // Step 1 outputs
+    var harnesses []string
+
+    // Step 2 outputs
+    var notorVaultPath string
+    var claudeCodeDirs []string
+
+    // Step 3 outputs
+    var confirmed bool
+
+    form := huh.NewForm(
+        // --- Step 1: Select Harnesses ---
+        huh.NewGroup(
+            huh.NewNote().
+                Title("multi-kb Setup").
+                Description("Welcome! Let's configure your knowledge base pipeline.\n\n"+
+                    "This wizard will walk you through:\n"+
+                    "  1. Selecting your AI harnesses\n"+
+                    "  2. Pointing to your project directories\n"+
+                    "  3. Confirming auto-discovered chat history"),
+            huh.NewMultiSelect[string]().
+                Title("Which AI harnesses do you use?").
+                Options(
+                    huh.NewOption("Notor (Obsidian plugin)", "notor"),
+                    huh.NewOption("Claude Code (CLI/IDE)", "claude-code"),
+                ).
+                Value(&harnesses).
+                Validate(func(s []string) error {
+                    if len(s) == 0 {
+                        return fmt.Errorf("select at least one harness")
+                    }
+                    return nil
+                }),
+        ),
+
+        // --- Step 2a: Notor directory (shown only if Notor selected) ---
+        huh.NewGroup(
+            huh.NewInput().
+                Title("Notor: Obsidian vault path").
+                Description("Enter the path to your Obsidian vault where Notor is installed.").
+                Placeholder("/Users/you/obsidian-vault").
+                Value(&notorVaultPath).
+                Validate(func(s string) error {
+                    info, err := os.Stat(s)
+                    if err != nil {
+                        return fmt.Errorf("path does not exist: %s", s)
+                    }
+                    if !info.IsDir() {
+                        return fmt.Errorf("path is not a directory: %s", s)
+                    }
+                    return nil
+                }),
+        ).WithHideFunc(func() bool {
+            return !slices.Contains(harnesses, "notor")
+        }),
+
+        // --- Step 2b: Claude Code directories (shown only if Claude Code selected) ---
+        huh.NewGroup(
+            huh.NewInput().
+                Title("Claude Code: Project directory").
+                Description("Enter a directory where you use Claude Code.\n"+
+                    "(You can add more directories later with `multi-kb add-source`.)").
+                Placeholder("/Users/you/my-project").
+                Value(&claudeCodeDirs[0]). // simplified; real impl uses a loop
+                Validate(func(s string) error {
+                    info, err := os.Stat(s)
+                    if err != nil {
+                        return fmt.Errorf("path does not exist: %s", s)
+                    }
+                    if !info.IsDir() {
+                        return fmt.Errorf("path is not a directory: %s", s)
+                    }
+                    return nil
+                }),
+        ).WithHideFunc(func() bool {
+            return !slices.Contains(harnesses, "claude-code")
+        }),
+
+        // --- Step 3: Confirmation ---
+        huh.NewGroup(
+            huh.NewNote().
+                Title("Summary").
+                DescriptionFunc(func() string {
+                    summary := "Selected harnesses:\n"
+                    for _, h := range harnesses {
+                        summary += fmt.Sprintf("  - %s\n", h)
+                    }
+                    if slices.Contains(harnesses, "notor") {
+                        summary += fmt.Sprintf("\nNotor vault: %s\n", notorVaultPath)
+                    }
+                    if slices.Contains(harnesses, "claude-code") {
+                        summary += fmt.Sprintf("\nClaude Code dir: %s\n", claudeCodeDirs[0])
+                    }
+                    return summary
+                }, &harnesses, &notorVaultPath),
+            huh.NewConfirm().
+                Title("Proceed with this configuration?").
+                Affirmative("Yes, continue").
+                Negative("No, start over").
+                Value(&confirmed),
+        ),
+    ).WithTheme(huh.ThemeCharm(true))
+
+    if err := form.Run(); err != nil {
+        fmt.Fprintf(os.Stderr, "Setup cancelled: %v\n", err)
+        os.Exit(1)
+    }
+
+    if !confirmed {
+        fmt.Println("Setup cancelled.")
+        os.Exit(0)
+    }
+
+    fmt.Println("Configuration saved!")
+}
+```
+
+**Note:** For the real multi-kb wizard, the form would be embedded in a bubbletea app to run auto-discovery between Steps 2 and 3 (i.e., after the user inputs directories but before showing the confirmation summary). The bubbletea wrapper intercepts the form's group completion, runs discovery logic, then allows the form to proceed to the summary group.
+
+### Option 2: `survey` (AlecAivazis/survey) -- NOT RECOMMENDED
+
+#### Maintenance Status: ARCHIVED
+
+**The `survey` library is archived and no longer maintained.** The repository was archived on April 19, 2024. The maintainer explicitly recommends `bubbletea` as the alternative.
+
+- **Module path:** `github.com/AlecAivazis/survey/v2`
+- **Last release:** v2.3.7 (June 13, 2023)
+- **Stars:** 4.1k GitHub stars
+- **Status:** ARCHIVED -- no bug fixes, no security patches, no new features
+
+#### Input Types
+
+- `Input` (text entry with suggestions)
+- `Multiline` (multi-line text)
+- `Password` (masked input)
+- `Confirm` (yes/no)
+- `Select` (single choice)
+- `MultiSelect` (multiple choice)
+- `Editor` (launches external editor)
+
+No FilePicker.
+
+#### Multi-Step Flows
+
+`survey` uses two functions: `Ask` (batch of questions) and `AskOne` (single question). For branching, the docs say: "for surveys with complicated branching logic, we recommend that you break out your questions into multiple calls to both of these functions to fit your needs." This means manual imperative branching:
+
+```go
+var harness string
+survey.AskOne(&survey.Select{Message: "Harness?", Options: opts}, &harness)
+if harness == "notor" {
+    var path string
+    survey.AskOne(&survey.Input{Message: "Vault path?"}, &path)
+}
+```
+
+This works but produces brittle, deeply nested code for a 9-step wizard.
+
+#### Terminal Compatibility
+
+Supports ANSI terminals on macOS, Linux, and Windows. Does NOT support piped stdin/stdout. Pagination defaults to 7 options (configurable).
+
+#### Why NOT survey
+
+1. **Archived** -- no maintenance, no security patches, no bug fixes
+2. **No declarative branching** -- manual imperative flow for a 9-step wizard would be unwieldy
+3. **No accessibility mode** -- no screen reader support
+4. **No dynamic field updates** -- cannot update options based on prior selections without re-creating prompts
+5. **No FilePicker** -- would need a separate library
+6. **No Charmbracelet ecosystem integration** -- misses lipgloss styling, spinner, etc.
+
+### Option 3: Raw `bubbletea` (No `huh`) -- NOT RECOMMENDED
+
+#### What Would Be Required
+
+Building the 9-step wizard entirely with raw bubbletea would require:
+
+1. **Custom field components** for each input type (text input, single select, multi-select, confirm, file picker). The `bubbles` companion library provides `textinput` and `list` models, but no multi-select, confirm, or file picker.
+2. **Custom group/page navigation** -- managing which "page" of the wizard is active, transitioning between pages, handling back navigation.
+3. **Custom validation display** -- rendering inline errors, preventing advancement on validation failure.
+4. **Custom focus management** -- Tab/Shift+Tab between fields within a page.
+5. **Custom accessibility mode** -- building a fallback sequential prompt mode from scratch.
+
+#### Code Comparison
+
+The bubbletea `isbn-form` example (a simple 2-field form with validation) is ~245 lines of Go. Extrapolating to a 9-step wizard with multi-select, file picker, dynamic options, branching, validation, and accessibility:
+
+| Approach | Estimated Lines | Effort |
+|----------|----------------|--------|
+| `huh` forms | ~200-400 | Low -- declare fields, groups, and callbacks |
+| Raw `bubbletea` | ~1,500-2,500 | High -- build every component, navigation, validation, accessibility |
+
+The raw approach provides maximum control but at 5-8x the code volume and significantly more testing surface. Since `huh` forms ARE bubbletea models, the flexibility of raw bubbletea is always available as an escape hatch when needed.
+
+### Key API Patterns for `huh`
+
+#### Pattern 1: Multi-Step Form with Groups
+
+```go
+form := huh.NewForm(
+    huh.NewGroup(fields...).Title("Step 1"),
+    huh.NewGroup(fields...).Title("Step 2"),
+    huh.NewGroup(fields...).Title("Step 3"),
+)
+err := form.Run()
+```
+
+#### Pattern 2: Conditional Group Display
+
+```go
+huh.NewGroup(fields...).WithHideFunc(func() bool {
+    return !shouldShowThisStep
+})
+```
+
+#### Pattern 3: Dynamic Field Options
+
+```go
+huh.NewSelect[string]().
+    OptionsFunc(func() []huh.Option[string] {
+        return computeOptionsBasedOnPriorAnswers()
+    }, &dependencyVariable)
+```
+
+#### Pattern 4: Embedding in Bubbletea (for inter-step logic)
+
+```go
+type wizardModel struct {
+    form        *huh.Form
+    currentStep int
+    discovering bool
+}
+
+func (m wizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    form, cmd := m.form.Update(msg)
+    if f, ok := form.(*huh.Form); ok {
+        m.form = f
+        if m.form.State == huh.StateCompleted {
+            // Run inter-step logic before creating next form
+        }
+    }
+    return m, cmd
+}
+```
+
+#### Pattern 5: Standalone Field Execution
+
+```go
+// For post-setup subcommands (add-source, add-kb)
+var path string
+huh.NewInput().Title("Directory path").Value(&path).Run()
+```
+
+### Known Limitations and Gotchas
+
+1. **No looping within forms.** If the user needs to add multiple directories (variable count), you cannot loop within a single `huh.Form`. Use either: (a) a fixed maximum number of directory groups with `WithHideFunc`, or (b) break the wizard into multiple sequential forms with a "Add another?" confirm between them.
+
+2. **`WithHideFunc` evaluates on every render.** Keep hide functions cheap (simple boolean checks). Do not perform I/O or expensive computation in hide functions.
+
+3. **FilePicker requires TTY.** The interactive file browser needs a terminal. In CI/headless environments, use `WithAccessible(true)` which falls back to text input.
+
+4. **v2 import path change.** The v2 module uses `charm.land/huh/v2`, not the old `github.com/charmbracelet/huh`. Ensure `go get charm.land/huh/v2`.
+
+5. **Theme functions changed in v2.** Theme constructors now take an `isDark bool` parameter: `huh.ThemeCharm(true)`. The old pointer-based API is gone.
+
+6. **Inter-step logic requires bubbletea embedding.** If you need to run async operations between wizard pages (e.g., auto-discovery after directory input), you must embed the form in a bubbletea program rather than using simple `form.Run()`.
+
+7. **No built-in "list of dynamic items" pattern.** For "add multiple directories" or "add multiple KBs," you need to manage an outer loop yourself.
+
+### Multi-KB Setup Wizard Architecture (Recommended)
+
+Given the 9-step wizard requirements, the recommended architecture is:
+
+```
+[Bubbletea Program]
+  |
+  +-- Phase 1 Form (huh.Form)
+  |     Group 1: Welcome + harness multi-select
+  |     Group 2: Notor vault path (hidden if Notor not selected)
+  |     Group 3: Claude Code dir (hidden if CC not selected)
+  |
+  +-- Auto-Discovery (async, with spinner)
+  |     Scan directories, find chat history, build summary
+  |
+  +-- Phase 2 Form (huh.Form)
+  |     Group 4: Discovery summary (Note) + confirmation
+  |     Group 5: Remote KB addition (endpoint, auth, description)
+  |     Group 6: "Add another KB?" loop
+  |
+  +-- Phase 3 Form (huh.Form)
+  |     Group 7: Routing rules per directory
+  |     Group 8: Approval mode preset
+  |     Group 9: Author identity
+  |     Group 10: Exclusion rules (optional)
+  |
+  +-- Hook Registration + Cron Setup (async, with spinner)
+  |
+  +-- Done (summary output)
+```
+
+This splits the wizard into three sequential `huh.Form` instances managed by a parent bubbletea program. The parent runs auto-discovery and hook registration between form phases, displaying a spinner during async operations. Each form phase is a self-contained multi-group form with `WithHideFunc` for branching.
+
+**Decision:**
+
+1. **Use `charm.land/huh/v2` (v2.0.3+) as the primary setup wizard library.** It provides all required input types (MultiSelect, Input, FilePicker, Confirm, Select, Note), declarative branching via `WithHideFunc`, dynamic fields via `OptionsFunc`/`TitleFunc`, built-in validation, and first-class accessibility.
+
+2. **Embed huh forms in a bubbletea program** to handle inter-step logic (auto-discovery, hook registration, cron setup) between form phases. This provides the flexibility of raw bubbletea where needed while keeping form declaration concise.
+
+3. **Do NOT use `survey`.** It is archived, unmaintained, and explicitly recommends bubbletea as a replacement.
+
+4. **Do NOT build raw bubbletea forms.** The 5-8x code overhead is not justified when `huh` provides all required components and is itself a bubbletea model (so raw bubbletea is always available as an escape hatch).
+
+5. **Minimum Go module dependencies for the wizard:**
+   - `charm.land/huh/v2` (v2.0.3+) -- forms
+   - `charm.land/bubbletea/v2` (v2.0.6+) -- parent program for inter-step logic
+   - `charm.land/lipgloss/v2` -- styling (transitive dependency, also used for output formatting)
+
+6. **Split the wizard into 3 sequential form phases** managed by a parent bubbletea model, with async operations (discovery, hook registration) between phases. This avoids the "no looping in forms" limitation and keeps each form phase manageable.
+
+7. **Use `WithAccessible(true)` gated on an env var or `--accessible` flag** for screen reader support.
 
 ---
 
-## R-2: Bedrock InvokeModel Go SDK Pattern
+## R-2: Bedrock InvokeModel Go SDK Pattern ✅
 
 **Question:** What is the correct Go SDK v2 pattern for calling Bedrock InvokeModel with Claude models?
 
@@ -41,9 +490,773 @@
 
 **Prototype Task:** Make a working InvokeModel call that sends a system prompt + user message and parses a JSON array response.
 
-**Findings:** _(to be populated)_
+**Findings:**
 
-**Decision:** _(to be populated)_
+### 1. SDK Module & Client Setup
+
+#### Go Module Paths
+
+Each AWS service is a separate Go module. The required modules for this project are:
+
+| Module | Import Path | Purpose |
+|--------|-------------|---------|
+| AWS Config | `github.com/aws/aws-sdk-go-v2/config` | Load credentials, region, profile |
+| AWS Core | `github.com/aws/aws-sdk-go-v2/aws` | Shared types (`aws.String()`, `aws.Config`) |
+| Bedrock Runtime | `github.com/aws/aws-sdk-go-v2/service/bedrockruntime` | `InvokeModel` client |
+| Bedrock Runtime Types | `github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types` | Error types (`ThrottlingException`, etc.) |
+| Retry | `github.com/aws/aws-sdk-go-v2/aws/retry` | Custom retry configuration |
+| SSO Credentials | `github.com/aws/aws-sdk-go-v2/credentials/ssocreds` | SSO error types (`InvalidTokenError`) |
+
+**Install command:**
+```bash
+go get github.com/aws/aws-sdk-go-v2/config \
+       github.com/aws/aws-sdk-go-v2/aws \
+       github.com/aws/aws-sdk-go-v2/service/bedrockruntime \
+       github.com/aws/aws-sdk-go-v2/aws/retry \
+       github.com/aws/aws-sdk-go-v2/credentials/ssocreds
+```
+
+#### Creating a Client with Named SSO Profile
+
+```go
+import (
+    "context"
+    "github.com/aws/aws-sdk-go-v2/aws"
+    "github.com/aws/aws-sdk-go-v2/aws/retry"
+    "github.com/aws/aws-sdk-go-v2/config"
+    "github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+)
+
+func NewBedrockClient(ctx context.Context, profile, region string) (*bedrockruntime.Client, error) {
+    // Build config options
+    opts := []func(*config.LoadOptions) error{
+        config.WithRegion(region),
+    }
+    if profile != "" {
+        opts = append(opts, config.WithSharedConfigProfile(profile))
+    }
+
+    // Configure retry: 5 attempts with 20s max backoff (SDK default backoff is exponential jitter)
+    opts = append(opts, config.WithRetryMaxAttempts(5))
+
+    cfg, err := config.LoadDefaultConfig(ctx, opts...)
+    if err != nil {
+        return nil, fmt.Errorf("load AWS config: %w", err)
+    }
+
+    client := bedrockruntime.NewFromConfig(cfg)
+    return client, nil
+}
+```
+
+`config.LoadDefaultConfig` handles all credential resolution automatically, including SSO profiles. When the user specifies `aws_profile: my-sso-profile` in `config.yaml`, the SDK:
+
+1. Reads `~/.aws/config` and finds the `[profile my-sso-profile]` section
+2. Detects `sso_session` or `sso_start_url` configuration
+3. Loads the cached SSO token from `~/.aws/sso/cache/<sha1-hash>.json`
+4. Exchanges the SSO token for temporary IAM credentials via the SSO service
+5. Caches those credentials for the session duration
+
+**No special SSO-specific code is needed** -- `config.WithSharedConfigProfile("my-sso-profile")` handles it transparently.
+
+#### Credential Resolution Chain Order
+
+The SDK resolves credentials in this order (first match wins):
+
+1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`)
+2. Explicit `WithCredentialsProvider()` option
+3. Shared config file `~/.aws/config` -- SSO, assume role, web identity
+4. Shared credentials file `~/.aws/credentials` -- static credentials
+5. Container credentials endpoint (`AWS_CONTAINER_CREDENTIALS_ENDPOINT`)
+6. EC2 Instance Metadata Service (IMDS)
+
+For client mode (user's machine), resolution typically stops at step 3 (SSO profile) or step 4 (static credentials). For server mode (EC2), resolution reaches step 6 (instance role).
+
+### 2. InvokeModel API
+
+#### Function Signature
+
+```go
+func (c *Client) InvokeModel(
+    ctx context.Context,
+    params *InvokeModelInput,
+    optFns ...func(*Options),
+) (*InvokeModelOutput, error)
+```
+
+#### InvokeModelInput Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ModelId` | `*string` | **Yes** | Model ID or ARN (e.g., `"anthropic.claude-sonnet-4-20250514"`) |
+| `Body` | `[]byte` | **Yes** | JSON request body (Claude Messages API format) |
+| `ContentType` | `*string` | **Yes** | Must be `"application/json"` |
+| `Accept` | `*string` | No | Response MIME type. Default: `"application/json"` |
+| `GuardrailIdentifier` | `*string` | No | Guardrail ID (not used by multi-kb) |
+| `GuardrailVersion` | `*string` | No | Guardrail version |
+| `PerformanceConfigLatency` | enum | No | Performance tier |
+| `ServiceTier` | enum | No | Service tier |
+| `Trace` | enum | No | Enable Bedrock trace |
+
+#### InvokeModelOutput Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Body` | `[]byte` | JSON response body (Claude Messages API response format) |
+| `ContentType` | `*string` | Response MIME type |
+| `ResultMetadata` | `middleware.Metadata` | Request metadata |
+
+**Key insight:** The model ID is specified in `InvokeModelInput.ModelId`, NOT in the JSON body. The JSON body contains only the Claude Messages API parameters.
+
+### 3. Claude Messages API Format (within Bedrock)
+
+#### Request Body JSON
+
+```json
+{
+    "anthropic_version": "bedrock-2023-05-31",
+    "max_tokens": 4096,
+    "system": "You are a knowledge extraction engine. Extract knowledge notes as a JSON array.",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Here is the conversation to analyze:\n\n..."
+        }
+    ],
+    "temperature": 0.0,
+    "stop_sequences": []
+}
+```
+
+**`anthropic_version`**: Must be `"bedrock-2023-05-31"`. This is the only supported value for Bedrock. It is different from the direct Anthropic API version string.
+
+#### Request Body Fields
+
+| Field | Type | Required | Default | Constraints |
+|-------|------|----------|---------|-------------|
+| `anthropic_version` | string | **Yes** | -- | Must be `"bedrock-2023-05-31"` |
+| `max_tokens` | int | **Yes** | -- | Model-dependent maximum |
+| `messages` | array | **Yes** | -- | 0-2000 messages; roles alternate user/assistant |
+| `system` | string or array | No | -- | System prompt (string or `[{type: "text", text: "..."}]`) |
+| `temperature` | float | No | 1.0 | Range: 0.0-1.0 |
+| `top_p` | float | No | 0.999 | Range: 0.0-1.0 |
+| `top_k` | int | No | disabled | Range: 0-500 |
+| `stop_sequences` | string[] | No | [] | Max 8191 entries |
+| `tools` | array | No | -- | Tool definitions (not used by multi-kb) |
+| `tool_choice` | object | No | -- | Tool choice control |
+| `anthropic_beta` | string[] | No | -- | Beta feature flags |
+
+**For multi-kb usage:** Set `temperature: 0.0` for deterministic extraction output. Set `max_tokens: 4096` (sufficient for JSON array output). System prompt is passed as a plain string in the `system` field.
+
+#### System Prompt Format
+
+The `system` field accepts either a plain string or an array of content blocks:
+
+```json
+// Simple string (recommended for multi-kb)
+"system": "You are a knowledge extraction engine..."
+
+// Array format (supports cache control markers)
+"system": [
+    {"type": "text", "text": "You are a knowledge extraction engine..."}
+]
+```
+
+**Use the plain string format** -- multi-kb has no need for the array format's cache control features.
+
+#### Messages Array Format
+
+```json
+"messages": [
+    {
+        "role": "user",
+        "content": "The translated conversation content goes here..."
+    }
+]
+```
+
+Content can be a plain string (recommended for multi-kb) or an array of content blocks:
+```json
+"content": [
+    {"type": "text", "text": "..."}
+]
+```
+
+For multi-kb's single-turn extraction calls, a single user message with string content is sufficient.
+
+#### Response Body JSON
+
+```json
+{
+    "id": "msg_bdrk_01XfDUDYJgAACzvnptvVoYEL",
+    "type": "message",
+    "role": "assistant",
+    "model": "anthropic.claude-sonnet-4-20250514",
+    "content": [
+        {
+            "type": "text",
+            "text": "[{\"title\": \"...\", \"content\": \"...\", \"suggested_target_kbs\": [\"...\"]}]"
+        }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+        "input_tokens": 1520,
+        "output_tokens": 450
+    }
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique message ID |
+| `type` | string | Always `"message"` |
+| `role` | string | Always `"assistant"` |
+| `model` | string | Model that generated the response |
+| `content` | array | Content blocks (text, tool_use, etc.) |
+| `stop_reason` | string | Why generation stopped |
+| `stop_sequence` | string or null | Which stop sequence was hit |
+| `usage` | object | Token counts |
+
+#### Stop Reason Values
+
+| Value | Meaning |
+|-------|---------|
+| `end_turn` | Model finished naturally |
+| `max_tokens` | Hit the `max_tokens` limit |
+| `stop_sequence` | Hit a custom stop sequence |
+| `refusal` | Safety policy triggered |
+| `tool_use` | Model invoked a tool |
+
+#### Extracting Text from Response
+
+```go
+type claudeResponse struct {
+    ID         string          `json:"id"`
+    Type       string          `json:"type"`
+    Role       string          `json:"role"`
+    Model      string          `json:"model"`
+    Content    []contentBlock  `json:"content"`
+    StopReason string          `json:"stop_reason"`
+    Usage      usageInfo       `json:"usage"`
+}
+
+type contentBlock struct {
+    Type string `json:"type"`
+    Text string `json:"text"`
+}
+
+type usageInfo struct {
+    InputTokens  int `json:"input_tokens"`
+    OutputTokens int `json:"output_tokens"`
+}
+
+// Parse response and extract text
+var resp claudeResponse
+if err := json.Unmarshal(output.Body, &resp); err != nil {
+    return "", fmt.Errorf("parse response: %w", err)
+}
+
+// Extract all text blocks (typically just one)
+var text string
+for _, block := range resp.Content {
+    if block.Type == "text" {
+        text += block.Text
+    }
+}
+```
+
+### 4. Go Type Definitions for Request/Response
+
+```go
+// claudeRequest represents the Claude Messages API request body for Bedrock.
+type claudeRequest struct {
+    AnthropicVersion string    `json:"anthropic_version"`
+    MaxTokens        int       `json:"max_tokens"`
+    System           string    `json:"system,omitempty"`
+    Messages         []message `json:"messages"`
+    Temperature      float64   `json:"temperature,omitempty"`
+    TopP             float64   `json:"top_p,omitempty"`
+    StopSequences    []string  `json:"stop_sequences,omitempty"`
+}
+
+type message struct {
+    Role    string `json:"role"`
+    Content string `json:"content"`
+}
+
+// claudeResponse represents the Claude Messages API response body from Bedrock.
+type claudeResponse struct {
+    ID         string         `json:"id"`
+    Type       string         `json:"type"`
+    Role       string         `json:"role"`
+    Model      string         `json:"model"`
+    Content    []contentBlock `json:"content"`
+    StopReason string         `json:"stop_reason"`
+    Usage      usageInfo      `json:"usage"`
+}
+
+type contentBlock struct {
+    Type string `json:"type"`
+    Text string `json:"text,omitempty"`
+    // Tool use fields omitted -- not used by multi-kb
+}
+
+type usageInfo struct {
+    InputTokens  int `json:"input_tokens"`
+    OutputTokens int `json:"output_tokens"`
+}
+```
+
+### 5. Complete Working Example: InvokeModel with Claude
+
+```go
+package bedrock
+
+import (
+    "context"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "net/http"
+    "time"
+
+    "github.com/aws/aws-sdk-go-v2/aws"
+    "github.com/aws/aws-sdk-go-v2/aws/retry"
+    "github.com/aws/aws-sdk-go-v2/config"
+    "github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
+    "github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+    brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+)
+
+// Client wraps the Bedrock Runtime client with multi-kb-specific logic.
+type Client struct {
+    runtime *bedrockruntime.Client
+    modelID string
+}
+
+// NewClient creates a Bedrock client configured for the given profile, region, and model.
+func NewClient(ctx context.Context, profile, region, modelID string) (*Client, error) {
+    opts := []func(*config.LoadOptions) error{
+        config.WithRegion(region),
+        config.WithRetryMaxAttempts(5),
+        config.WithHTTPClient(&http.Client{
+            Timeout: 5 * time.Minute, // Long timeout for large context windows
+        }),
+    }
+    if profile != "" {
+        opts = append(opts, config.WithSharedConfigProfile(profile))
+    }
+
+    cfg, err := config.LoadDefaultConfig(ctx, opts...)
+    if err != nil {
+        return nil, fmt.Errorf("load AWS config (profile=%q, region=%q): %w", profile, region, err)
+    }
+
+    runtime := bedrockruntime.NewFromConfig(cfg)
+
+    return &Client{
+        runtime: runtime,
+        modelID: modelID,
+    }, nil
+}
+
+// InvokeModel sends a system prompt + user message to Claude and returns the text response.
+func (c *Client) InvokeModel(ctx context.Context, systemPrompt, userMessage string, maxTokens int) (string, error) {
+    req := claudeRequest{
+        AnthropicVersion: "bedrock-2023-05-31",
+        MaxTokens:        maxTokens,
+        System:           systemPrompt,
+        Messages: []message{
+            {Role: "user", Content: userMessage},
+        },
+        Temperature: 0.0,
+    }
+
+    body, err := json.Marshal(req)
+    if err != nil {
+        return "", fmt.Errorf("marshal request: %w", err)
+    }
+
+    input := &bedrockruntime.InvokeModelInput{
+        ModelId:     aws.String(c.modelID),
+        ContentType: aws.String("application/json"),
+        Accept:      aws.String("application/json"),
+        Body:        body,
+    }
+
+    output, err := c.runtime.InvokeModel(ctx, input)
+    if err != nil {
+        return "", classifyError(err)
+    }
+
+    var resp claudeResponse
+    if err := json.Unmarshal(output.Body, &resp); err != nil {
+        return "", fmt.Errorf("parse response body: %w", err)
+    }
+
+    // Extract text from content blocks
+    var text string
+    for _, block := range resp.Content {
+        if block.Type == "text" {
+            text += block.Text
+        }
+    }
+
+    if text == "" {
+        return "", fmt.Errorf("empty response (stop_reason=%s)", resp.StopReason)
+    }
+
+    return text, nil
+}
+```
+
+### 6. Retry & Error Handling
+
+#### SDK Built-In Retry
+
+The AWS SDK Go v2 has built-in retry with exponential jitter backoff. Default configuration:
+
+| Setting | Default | Recommended for multi-kb |
+|---------|---------|--------------------------|
+| Max attempts | 3 | 5 |
+| Max backoff | 20 seconds | 20 seconds (keep default) |
+| Backoff algorithm | Exponential jitter | Keep default |
+| Retryable errors | HTTP 500/502/503/504, throttling codes, connection errors | Keep defaults |
+
+The SDK automatically retries `ThrottlingException`, `ServiceUnavailableException`, `InternalServerException`, and network errors. **No application-level retry is needed for these.**
+
+**Configuration at the config level:**
+```go
+cfg, err := config.LoadDefaultConfig(ctx,
+    config.WithRetryMaxAttempts(5),
+)
+```
+
+**Configuration at the client level (overrides config):**
+```go
+client := bedrockruntime.NewFromConfig(cfg, func(o *bedrockruntime.Options) {
+    o.Retryer = retry.AddWithMaxAttempts(o.Retryer, 5)
+})
+```
+
+**Custom retry with specific error codes:**
+```go
+client := bedrockruntime.NewFromConfig(cfg, func(o *bedrockruntime.Options) {
+    o.Retryer = retry.NewStandard(func(so *retry.StandardOptions) {
+        so.MaxAttempts = 5
+        so.MaxBackoff = 30 * time.Second
+    })
+})
+```
+
+#### Bedrock-Specific Error Types
+
+All error types are in `github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types`:
+
+| Error Type | Category | SDK Auto-Retries? | Multi-kb Handling |
+|------------|----------|-------------------|-------------------|
+| `ThrottlingException` | Throttle | **Yes** | SDK handles; application-level retry only after SDK exhaustion |
+| `ModelTimeoutException` | Timeout | No (not in default list) | Add to retryable or handle in application |
+| `ServiceUnavailableException` | Server error | **Yes** (503) | SDK handles |
+| `InternalServerException` | Server error | **Yes** (500) | SDK handles |
+| `ModelNotReadyException` | Transient | No | Retry with backoff (model loading) |
+| `AccessDeniedException` | Auth | No | Do not retry; surface credential error |
+| `ValidationException` | Client error | No | Do not retry; fix request |
+| `ModelErrorException` | Model failure | No | Log and skip |
+| `ResourceNotFoundException` | Not found | No | Invalid model ID; do not retry |
+| `ServiceQuotaExceededException` | Quota | No | Log; suggest quota increase |
+
+#### Error Classification Function
+
+```go
+import (
+    "errors"
+    brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+    "github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
+)
+
+// Sentinel errors for multi-kb error handling
+var (
+    ErrThrottled     = errors.New("bedrock: throttled")
+    ErrTimeout       = errors.New("bedrock: model timeout")
+    ErrAuth          = errors.New("bedrock: authentication/authorization failure")
+    ErrValidation    = errors.New("bedrock: validation error")
+    ErrModelError    = errors.New("bedrock: model error")
+    ErrServerError   = errors.New("bedrock: server error")
+    ErrNotFound      = errors.New("bedrock: model not found")
+    ErrQuotaExceeded = errors.New("bedrock: quota exceeded")
+    ErrSSOExpired    = errors.New("bedrock: SSO token expired -- run 'aws sso login --profile <profile>'")
+)
+
+func classifyError(err error) error {
+    if err == nil {
+        return nil
+    }
+
+    // Check for SSO token expiration (wraps deep in credential chain)
+    var ssoErr *ssocreds.InvalidTokenError
+    if errors.As(err, &ssoErr) {
+        return fmt.Errorf("%w: %v", ErrSSOExpired, err)
+    }
+
+    // Check Bedrock-specific error types
+    var throttleErr *brtypes.ThrottlingException
+    if errors.As(err, &throttleErr) {
+        return fmt.Errorf("%w: %s", ErrThrottled, throttleErr.ErrorMessage())
+    }
+
+    var timeoutErr *brtypes.ModelTimeoutException
+    if errors.As(err, &timeoutErr) {
+        return fmt.Errorf("%w: %s", ErrTimeout, timeoutErr.ErrorMessage())
+    }
+
+    var accessErr *brtypes.AccessDeniedException
+    if errors.As(err, &accessErr) {
+        return fmt.Errorf("%w: %s", ErrAuth, accessErr.ErrorMessage())
+    }
+
+    var validationErr *brtypes.ValidationException
+    if errors.As(err, &validationErr) {
+        return fmt.Errorf("%w: %s", ErrValidation, validationErr.ErrorMessage())
+    }
+
+    var modelErr *brtypes.ModelErrorException
+    if errors.As(err, &modelErr) {
+        return fmt.Errorf("%w: %s", ErrModelError, modelErr.ErrorMessage())
+    }
+
+    var notFoundErr *brtypes.ResourceNotFoundException
+    if errors.As(err, &notFoundErr) {
+        return fmt.Errorf("%w: %s", ErrNotFound, notFoundErr.ErrorMessage())
+    }
+
+    var quotaErr *brtypes.ServiceQuotaExceededException
+    if errors.As(err, &quotaErr) {
+        return fmt.Errorf("%w: %s", ErrQuotaExceeded, quotaErr.ErrorMessage())
+    }
+
+    var serverErr *brtypes.InternalServerException
+    if errors.As(err, &serverErr) {
+        return fmt.Errorf("%w: %s", ErrServerError, serverErr.ErrorMessage())
+    }
+
+    var unavailErr *brtypes.ServiceUnavailableException
+    if errors.As(err, &unavailErr) {
+        return fmt.Errorf("%w: %s", ErrServerError, unavailErr.ErrorMessage())
+    }
+
+    var notReadyErr *brtypes.ModelNotReadyException
+    if errors.As(err, &notReadyErr) {
+        return fmt.Errorf("%w: %s", ErrServerError, notReadyErr.ErrorMessage())
+    }
+
+    // Unknown error -- wrap as-is
+    return fmt.Errorf("bedrock: %w", err)
+}
+```
+
+#### Application-Level Retry (for non-SDK-retried errors)
+
+The SDK handles retry for throttling and server errors automatically. Application-level retry is needed for:
+
+1. **Malformed JSON output** -- the LLM returned invalid JSON; retry with a fresh API call
+2. **`ModelTimeoutException`** -- not in the SDK's default retryable set
+3. **`ModelNotReadyException`** -- model is loading; retry after delay
+
+```go
+import (
+    "math"
+    "math/rand"
+    "time"
+)
+
+// RetryWithBackoff retries a function with exponential backoff and jitter.
+// The function should return (result, retryable, error).
+func RetryWithBackoff[T any](ctx context.Context, maxAttempts int, fn func() (T, bool, error)) (T, error) {
+    var zero T
+    var lastErr error
+
+    for attempt := 0; attempt < maxAttempts; attempt++ {
+        if attempt > 0 {
+            backoff := time.Duration(math.Pow(2, float64(attempt-1))) * time.Second
+            jitter := time.Duration(rand.Int63n(int64(backoff / 2)))
+            delay := backoff + jitter
+            if delay > 30*time.Second {
+                delay = 30 * time.Second
+            }
+
+            select {
+            case <-ctx.Done():
+                return zero, ctx.Err()
+            case <-time.After(delay):
+            }
+        }
+
+        result, retryable, err := fn()
+        if err == nil {
+            return result, nil
+        }
+        lastErr = err
+        if !retryable {
+            return zero, err
+        }
+    }
+
+    return zero, fmt.Errorf("exhausted %d attempts: %w", maxAttempts, lastErr)
+}
+```
+
+**Usage for extraction with JSON retry:**
+```go
+notes, err := RetryWithBackoff(ctx, 3, func() ([]Note, bool, error) {
+    text, err := client.InvokeModel(ctx, systemPrompt, userMessage, 4096)
+    if err != nil {
+        // SDK already retried throttle/server errors.
+        // Retry ModelTimeout at application level.
+        if errors.Is(err, ErrTimeout) {
+            return nil, true, err
+        }
+        return nil, false, err
+    }
+
+    notes, err := parseExtractionOutput(text)
+    if err != nil {
+        // Malformed JSON -- retry with fresh API call
+        return nil, true, fmt.Errorf("malformed extraction output: %w", err)
+    }
+
+    return notes, false, nil
+})
+```
+
+### 7. Credential Chain and SSO
+
+#### SSO Profile Configuration (in `~/.aws/config`)
+
+```ini
+[profile my-sso-profile]
+sso_session = my-sso-session
+sso_account_id = 123456789012
+sso_role_name = BedrockAccessRole
+region = us-west-2
+
+[sso-session my-sso-session]
+sso_start_url = https://my-company.awsapps.com/start
+sso_region = us-east-1
+sso_registration_scopes = sso:account:access
+```
+
+#### SSO Login Requirement
+
+**Yes, the user must run `aws sso login --profile <profile>` before the CLI can make Bedrock calls.** The SDK does not perform the interactive browser-based SSO login flow -- it only reads cached tokens from `~/.aws/sso/cache/`.
+
+If the SSO token is expired, the SDK returns an error that wraps `*ssocreds.InvalidTokenError`. The CLI should catch this and display a user-friendly message:
+
+```
+Error: SSO session expired. Please run:
+    aws sso login --profile my-sso-profile
+```
+
+#### Detecting Expired Credentials
+
+```go
+import "github.com/aws/aws-sdk-go-v2/credentials/ssocreds"
+
+func isExpiredCredentials(err error) bool {
+    var ssoErr *ssocreds.InvalidTokenError
+    if errors.As(err, &ssoErr) {
+        return true
+    }
+    var accessErr *brtypes.AccessDeniedException
+    if errors.As(err, &accessErr) {
+        return true
+    }
+    return false
+}
+```
+
+### 8. HTTP Timeout Configuration
+
+**Critical:** AWS SDK Go v2 defaults to a short HTTP read timeout. For Claude models with large context windows (especially extended thinking), responses can take minutes. The SDK documentation warns:
+
+> "60-minute timeout for Claude 3.7 Sonnet and Claude 4 models. AWS SDKs default to 1-minute timeout. Increase `read_timeout` to at least 3600 seconds in your SDK configuration."
+
+For multi-kb, a 5-minute timeout is reasonable (extraction calls process up to 700K tokens):
+
+```go
+import "net/http"
+
+cfg, err := config.LoadDefaultConfig(ctx,
+    config.WithHTTPClient(&http.Client{
+        Timeout: 5 * time.Minute,
+    }),
+)
+```
+
+### 9. InvokeModel vs. Converse API
+
+AWS recommends the **Converse API** as a unified interface across models. However, for multi-kb's use case, **InvokeModel is the correct choice** because:
+
+1. **Direct control over Claude-specific parameters:** `anthropic_version`, `system` as string, etc.
+2. **JSON body passthrough:** The request/response format is well-defined and stable for Claude.
+3. **No abstraction overhead:** Converse adds a Go type layer (`types.Message`, `types.ContentBlock`) that adds complexity without value for single-turn extraction calls.
+4. **System prompt handling:** InvokeModel passes system prompts directly in the JSON body; Converse uses a separate `System` field with content block types.
+
+The Converse API would be preferable for multi-model support or multi-turn conversations, neither of which multi-kb needs.
+
+### 10. Model ID Format
+
+Model IDs for Bedrock follow specific patterns:
+
+| Model | Model ID |
+|-------|----------|
+| Claude Sonnet 4 | `anthropic.claude-sonnet-4-20250514` |
+| Claude Haiku 3 | `anthropic.claude-haiku-3-20240307` or `anthropic.claude-3-haiku-20240307-v1:0` |
+| Claude Sonnet 3.5 v2 | `anthropic.claude-3-5-sonnet-20241022-v2:0` |
+| Claude Opus 4 | `anthropic.claude-opus-4-20250514` |
+
+**Cross-region inference profiles** use a `us.` or `eu.` prefix (e.g., `us.anthropic.claude-sonnet-4-20250514`). These are passed as the model ID directly.
+
+The model ID is set in `InvokeModelInput.ModelId`, not in the JSON body.
+
+**Decision:**
+
+1. **Use InvokeModel (not Converse).** InvokeModel gives direct control over the Claude Messages API format, which is simpler for single-turn extraction/summarization/keyword calls. The JSON body format is well-documented and stable.
+
+2. **Use `"bedrock-2023-05-31"` as the `anthropic_version` string.** This is the only supported value for Bedrock and is different from the direct Anthropic API version.
+
+3. **SDK-level retry handles throttling and server errors.** Configure `config.WithRetryMaxAttempts(5)` for a total of 5 attempts. The SDK's built-in exponential jitter backoff is appropriate.
+
+4. **Application-level retry handles malformed JSON and ModelTimeout.** Use a generic `RetryWithBackoff` function with 3 attempts for extraction calls. This catches: (a) LLM returning invalid JSON (retry with fresh call), (b) `ModelTimeoutException` (not in SDK's default retryable set).
+
+5. **SSO profile support via `config.WithSharedConfigProfile()`.** No special SSO-specific code needed. The SDK handles the entire SSO credential flow transparently. Detect expired tokens via `errors.As(err, &ssocreds.InvalidTokenError{})` and surface a user-friendly `aws sso login` message.
+
+6. **HTTP timeout: 5 minutes.** Configure via `config.WithHTTPClient(&http.Client{Timeout: 5 * time.Minute})`. This is generous enough for large extraction calls without risking indefinite hangs.
+
+7. **Error classification with sentinel errors.** Use `errors.As()` to match Bedrock error types and wrap them with sentinel errors for clean upstream handling. The `classifyError` function maps Bedrock types to multi-kb error categories.
+
+8. **Go module dependencies:**
+   - `github.com/aws/aws-sdk-go-v2/config` -- credential/region loading
+   - `github.com/aws/aws-sdk-go-v2/aws` -- shared types
+   - `github.com/aws/aws-sdk-go-v2/service/bedrockruntime` -- InvokeModel client
+   - `github.com/aws/aws-sdk-go-v2/aws/retry` -- custom retry (optional, only if overriding per-client)
+   - `github.com/aws/aws-sdk-go-v2/credentials/ssocreds` -- SSO error type detection
+
+9. **Request body structure for all four multi-kb use cases:**
+
+   | Use Case | System Prompt | User Message | max_tokens | temperature |
+   |----------|---------------|--------------|------------|-------------|
+   | Extraction | Hardcoded + exclusion rules + append file | Translated conversation JSONL | 4096 | 0.0 |
+   | Translation summarization | "Summarize this tool interaction in 1-2 sentences" | Tool call + result content | 256 | 0.0 |
+   | Keyword derivation | "Extract 3-5 search keywords as JSON array" | User's first message | 128 | 0.0 |
+   | Dream cycle consolidation | Consolidation prompt from PRM-002 | Pending note + related notes | 4096 | 0.0 |
+
+   All four use cases follow the identical InvokeModel pattern -- only the system prompt, user message, and max_tokens differ.
+
+10. **File placement:** `internal/bedrock/client.go` for the Client struct and InvokeModel wrapper; `internal/bedrock/models.go` for request/response Go types; `internal/bedrock/errors.go` for error classification.
 
 ---
 
@@ -1149,7 +2362,7 @@ Crockford Base32 defines case-insensitive decoding with error correction (mappin
 
 ---
 
-## R-8: Cross-Platform Cron Registration
+## R-8: Cross-Platform Cron Registration ✅
 
 **Question:** How to safely register scheduled tasks on macOS/Linux (crontab) and Windows (Task Scheduler)?
 
@@ -1173,6 +2386,687 @@ Crockford Base32 defines case-insensitive decoding with error correction (mappin
 
 **Prototype Task:** Implement register/unregister/check on macOS. Implement register/unregister/check on Windows (if available).
 
-**Findings:** _(to be populated)_
+**Findings:**
 
-**Decision:** _(to be populated)_
+### macOS/Linux -- crontab
+
+#### 1. Reading Existing Crontab (`crontab -l`)
+
+**Behavior on empty crontab varies by platform:**
+
+- **Linux (most distros):** `crontab -l` prints `no crontab for <user>` to **stderr** and exits with code **1** when no crontab exists.
+- **macOS:** `crontab -l` prints `crontab: no crontab for <user>` to **stderr** and exits with code **1**.
+- **Some systems (e.g., older FreeBSD):** May return exit code 0 with empty output.
+
+**Go handling pattern:**
+
+```go
+cmd := exec.Command("crontab", "-l")
+out, err := cmd.Output()
+if err != nil {
+    // Check if it's just "no crontab" (exit code 1)
+    if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+        // No existing crontab -- treat as empty
+        out = []byte{}
+    } else {
+        return fmt.Errorf("failed to read crontab: %w", err)
+    }
+}
+existing := string(out)
+```
+
+The key insight: exit code 1 with stderr containing "no crontab" is the normal case for a user who has never set a crontab. The Go code must handle this gracefully rather than treating it as a fatal error.
+
+#### 2. Safe Appending Pattern
+
+The canonical pattern for appending without clobbering is:
+
+```bash
+(crontab -l 2>/dev/null; echo "*/30 * * * * /path/to/multi-kb run --config ~/.multi-kb/config.yaml # multi-kb scheduled run") | crontab -
+```
+
+**In Go, this translates to:**
+
+```go
+func installCrontab(cronExpr, binaryPath, configPath string) error {
+    // 1. Read existing crontab
+    existing, err := readCrontab()
+    if err != nil {
+        return err
+    }
+
+    // 2. Build the new entry
+    marker := "# multi-kb scheduled run"
+    entry := fmt.Sprintf("%s %s run --config %s >> ~/.multi-kb/logs/cron.log 2>&1 %s",
+        cronExpr, binaryPath, configPath, marker)
+
+    // 3. Check idempotency -- remove old entry if present
+    lines := strings.Split(strings.TrimRight(existing, "\n"), "\n")
+    var filtered []string
+    for _, line := range lines {
+        if !strings.Contains(line, marker) {
+            filtered = append(filtered, line)
+        }
+    }
+
+    // 4. Append new entry
+    filtered = append(filtered, entry)
+    newCrontab := strings.Join(filtered, "\n") + "\n"
+
+    // 5. Write back via crontab -
+    cmd := exec.Command("crontab", "-")
+    cmd.Stdin = strings.NewReader(newCrontab)
+    if out, err := cmd.CombinedOutput(); err != nil {
+        return fmt.Errorf("failed to write crontab: %s: %w", string(out), err)
+    }
+    return nil
+}
+```
+
+**Critical:** `crontab -` reads the **entire** new crontab from stdin and **replaces** the current crontab atomically. The read-modify-write pattern (read existing, modify in memory, write back) is the only safe approach. Never use `echo "..." >> /var/spool/cron/...` -- crontab files are not directly user-writable and the path varies by OS.
+
+#### 3. Marker Comment Reliability
+
+Using `# multi-kb scheduled run` as a trailing comment is **highly reliable** for idempotency:
+
+- Cron treats everything after `#` as a comment on that line (standard POSIX behavior).
+- The marker is embedded in the cron entry line itself, not on a separate line, which avoids issues with line reordering.
+- String matching with `strings.Contains(line, marker)` is deterministic and fast.
+- Alternative approach: use a **dedicated comment line above the entry** (e.g., `# BEGIN multi-kb` / `# END multi-kb` block markers). This is more complex but supports multi-line entries. For a single cron entry, the inline marker is sufficient.
+
+**Recommendation:** Use the inline marker `# multi-kb scheduled run` appended to the cron entry line. This is the simplest approach and matches patterns used by tools like `certbot` and `conda`.
+
+#### 4. Idempotency
+
+**Before appending, filter out any existing line containing the marker:**
+
+```go
+func isMultiKBEntry(line string) bool {
+    return strings.Contains(line, "# multi-kb scheduled run")
+}
+```
+
+This handles both the "first install" case (no existing marker) and the "update schedule" case (marker exists, replace with new expression). The read-filter-append-write pattern guarantees exactly one multi-kb entry in the crontab regardless of how many times setup is run.
+
+#### 5. Removal
+
+**Filter out lines with the marker and write back:**
+
+```go
+func uninstallCrontab() error {
+    existing, err := readCrontab()
+    if err != nil {
+        return err
+    }
+
+    lines := strings.Split(strings.TrimRight(existing, "\n"), "\n")
+    var filtered []string
+    for _, line := range lines {
+        if !strings.Contains(line, "# multi-kb scheduled run") {
+            filtered = append(filtered, line)
+        }
+    }
+
+    newCrontab := strings.Join(filtered, "\n")
+    if len(filtered) > 0 {
+        newCrontab += "\n"
+    }
+
+    cmd := exec.Command("crontab", "-")
+    cmd.Stdin = strings.NewReader(newCrontab)
+    if out, err := cmd.CombinedOutput(); err != nil {
+        return fmt.Errorf("failed to write crontab: %s: %w", string(out), err)
+    }
+    return nil
+}
+```
+
+**Edge case:** If removing the multi-kb entry results in an empty crontab, pipe an empty string (or just a newline) to `crontab -`. Some systems accept this; others may require `crontab -r` to fully remove the crontab. The safest approach: if `filtered` is empty, call `crontab -r` instead of piping an empty string.
+
+#### 6. Cron Expression Format
+
+| Schedule | Expression | Description |
+|----------|-----------|-------------|
+| Every 30 minutes | `*/30 * * * *` | Runs at :00 and :30 of every hour |
+| Every hour | `0 * * * *` | Runs at :00 of every hour |
+| Every 2 hours | `0 */2 * * *` | Runs at :00 every 2 hours |
+| Daily at midnight | `0 0 * * *` | Runs once at 00:00 |
+| Daily at 8 AM | `0 8 * * *` | Runs once at 08:00 |
+
+The five fields are: `minute hour day-of-month month day-of-week`. The `*/N` syntax means "every N units" and is POSIX-standard.
+
+For the CLI's configurable schedule, the user provides a frequency (e.g., "every 30 minutes") during setup, and the CLI maps it to the appropriate cron expression. The cron expression is stored in `config.yaml` for reference and used directly in the crontab entry.
+
+#### 7. PATH Issues in Cron
+
+**Cron runs with a minimal PATH** -- typically `/usr/bin:/bin` on Linux and `/usr/bin:/bin:/usr/sbin:/sbin` on macOS. The `multi-kb` binary will almost certainly NOT be on the cron PATH unless the user installed it to `/usr/local/bin`.
+
+**Solution: Always use the absolute path to the binary in the cron entry.**
+
+**Determining the binary's absolute path from within Go:**
+
+```go
+import (
+    "os"
+    "path/filepath"
+)
+
+func getBinaryPath() (string, error) {
+    exe, err := os.Executable()
+    if err != nil {
+        return "", fmt.Errorf("could not determine executable path: %w", err)
+    }
+    // Resolve symlinks to get the canonical path
+    resolved, err := filepath.EvalSymlinks(exe)
+    if err != nil {
+        return "", fmt.Errorf("could not resolve symlink: %w", err)
+    }
+    return resolved, nil
+}
+```
+
+`os.Executable()` returns the path to the currently running binary. `filepath.EvalSymlinks()` resolves any symlinks (important for Homebrew installations where the binary is symlinked from a Cellar path). The resolved absolute path is used in the crontab entry.
+
+**Caveat:** If the user moves or deletes the binary after setup, the cron entry will fail. This is acceptable -- `multi-kb status` can detect this by checking if the path in the crontab entry exists.
+
+#### 8. Output Redirection
+
+**Cron entries should redirect output to prevent cron from sending mail:**
+
+```
+*/30 * * * * /usr/local/bin/multi-kb run --config ~/.multi-kb/config.yaml >> ~/.multi-kb/logs/cron.log 2>&1 # multi-kb scheduled run
+```
+
+- `>> ~/.multi-kb/logs/cron.log` -- appends stdout to the log file (using `>>` not `>` to preserve history)
+- `2>&1` -- redirects stderr to the same log file
+- Without redirection, cron sends email to the user's local mailbox (usually `/var/mail/<user>`), which is rarely checked and fills up silently
+
+**The CLI should ensure `~/.multi-kb/logs/` exists** before registering the crontab entry (create it during setup).
+
+**Note:** `~` expansion works in crontab on both Linux and macOS because the shell that cron invokes expands it. However, for maximum portability, consider using the expanded absolute path (e.g., `/Users/zmueller/.multi-kb/logs/cron.log`). The Go code can expand `~` at registration time using `os.UserHomeDir()`.
+
+#### 9. macOS-Specific Considerations
+
+**Is crontab supported on modern macOS?** Yes, but with caveats:
+
+- **cron is fully functional** on macOS Ventura, Sonoma, Sequoia, and later. It is NOT deprecated, despite Apple's preference for launchd.
+- **Apple recommends launchd** (`launchctl` + plist files) for persistent scheduled tasks. However, crontab remains a supported, working mechanism for user-level cron jobs.
+- **First-time crontab use on macOS:** The system may prompt for "Full Disk Access" or "Automation" permissions in System Preferences > Security & Privacy. If the terminal app (Terminal.app, iTerm2) has appropriate permissions, crontab works without issue. This is a one-time permission grant.
+- **macOS power management:** Cron jobs do NOT wake a sleeping Mac. If the Mac is asleep when the cron job is scheduled to run, the job is simply skipped -- no catch-up execution occurs. This is acceptable for multi-kb (the next run will pick up any missed work).
+- **launchd alternative:** A launchd plist could be used instead of crontab on macOS, offering power-aware scheduling (wake from sleep to run) and more reliable execution. However, this would require a macOS-specific code path. For MVP, crontab is sufficient -- the simplicity of a cross-platform cron approach outweighs the power management benefit.
+
+**Recommendation:** Use crontab for MVP on both macOS and Linux. The `multi-kb status` output should note if the system was recently asleep (detectable by comparing wall clock time to expected cron intervals), but this is a post-MVP enhancement.
+
+#### 10. Go Implementation
+
+**Shell out via `os/exec`** to `crontab -l` and `crontab -`. This is the standard approach used by Go CLIs that manage crontab entries.
+
+**Complete implementation pattern:**
+
+```go
+package scheduler
+
+import (
+    "fmt"
+    "os/exec"
+    "strings"
+)
+
+const cronMarker = "# multi-kb scheduled run"
+
+// readCrontab reads the current user's crontab.
+// Returns empty string if no crontab exists.
+func readCrontab() (string, error) {
+    cmd := exec.Command("crontab", "-l")
+    out, err := cmd.Output()
+    if err != nil {
+        if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+            return "", nil // No existing crontab
+        }
+        return "", fmt.Errorf("reading crontab: %w", err)
+    }
+    return string(out), nil
+}
+
+// writeCrontab replaces the current user's crontab with the given content.
+func writeCrontab(content string) error {
+    cmd := exec.Command("crontab", "-")
+    cmd.Stdin = strings.NewReader(content)
+    if out, err := cmd.CombinedOutput(); err != nil {
+        return fmt.Errorf("writing crontab: %s: %w", string(out), err)
+    }
+    return nil
+}
+
+// Install adds or updates the multi-kb cron entry.
+func Install(cronExpr, binaryPath, configPath, logPath string) error {
+    existing, err := readCrontab()
+    if err != nil {
+        return err
+    }
+
+    entry := fmt.Sprintf("%s %s run --config %s >> %s 2>&1 %s",
+        cronExpr, binaryPath, configPath, logPath, cronMarker)
+
+    lines := strings.Split(strings.TrimRight(existing, "\n"), "\n")
+    var filtered []string
+    for _, line := range lines {
+        if line == "" && len(filtered) == 0 {
+            continue // Skip leading empty lines from split
+        }
+        if !strings.Contains(line, cronMarker) {
+            filtered = append(filtered, line)
+        }
+    }
+    filtered = append(filtered, entry)
+
+    return writeCrontab(strings.Join(filtered, "\n") + "\n")
+}
+
+// Uninstall removes the multi-kb cron entry.
+func Uninstall() error {
+    existing, err := readCrontab()
+    if err != nil {
+        return err
+    }
+
+    lines := strings.Split(strings.TrimRight(existing, "\n"), "\n")
+    var filtered []string
+    for _, line := range lines {
+        if !strings.Contains(line, cronMarker) {
+            filtered = append(filtered, line)
+        }
+    }
+
+    if len(filtered) == 0 {
+        // No entries left -- remove crontab entirely
+        cmd := exec.Command("crontab", "-r")
+        cmd.Run() // Ignore error (may fail if already removed)
+        return nil
+    }
+
+    return writeCrontab(strings.Join(filtered, "\n") + "\n")
+}
+
+// IsInstalled checks if a multi-kb cron entry exists and returns the cron expression if found.
+func IsInstalled() (bool, string, error) {
+    existing, err := readCrontab()
+    if err != nil {
+        return false, "", err
+    }
+
+    for _, line := range strings.Split(existing, "\n") {
+        if strings.Contains(line, cronMarker) {
+            // Extract the cron expression (first 5 space-separated fields)
+            fields := strings.Fields(line)
+            if len(fields) >= 5 {
+                cronExpr := strings.Join(fields[:5], " ")
+                return true, cronExpr, nil
+            }
+        }
+    }
+    return false, "", nil
+}
+```
+
+---
+
+### Windows -- Task Scheduler
+
+#### 1. `schtasks.exe` Usage
+
+**Creating a task that runs every 30 minutes:**
+
+```
+schtasks.exe /Create /SC MINUTE /MO 30 /TN "multi-kb-run" /TR "\"C:\Users\user\bin\multi-kb.exe\" run --config \"%USERPROFILE%\.multi-kb\config.yaml\"" /F
+```
+
+Key parameters:
+- `/SC MINUTE` -- schedule type is minute-based
+- `/MO 30` -- modifier: every 30 minutes
+- `/TN "multi-kb-run"` -- task name (unique identifier)
+- `/TR "..."` -- the command to run (fully qualified path). Paths with spaces must be quoted with escaped inner quotes.
+- `/F` -- force: create or overwrite if the task already exists (provides idempotency)
+
+**Other schedule examples:**
+
+| Schedule | Command |
+|----------|---------|
+| Every 30 min | `/SC MINUTE /MO 30` |
+| Every hour | `/SC HOURLY /MO 1` |
+| Every 2 hours | `/SC HOURLY /MO 2` |
+| Daily at midnight | `/SC DAILY /ST 00:00` |
+| Daily at 8 AM | `/SC DAILY /ST 08:00` |
+
+#### 2. Permissions
+
+**Creating a task for the current user does NOT require admin/elevated permissions.** The current user can create tasks that run under their own account without elevation.
+
+- `/RU` parameter defaults to the current user if not specified.
+- `/RL LIMITED` (default) runs with standard user privileges -- this is what multi-kb needs.
+- `/RL HIGHEST` would require the user to be an administrator and would trigger UAC elevation.
+- Running as `SYSTEM` requires admin privileges.
+
+**For multi-kb:** No special permissions are needed. The task runs as the current user with standard privileges.
+
+**Note:** `schtasks.exe` may prompt for the user's password on some Windows versions when creating a task. Use `/NP` (no password stored) to avoid this -- the task then runs only when the user is logged in, which is acceptable for multi-kb (a personal tool).
+
+#### 3. Idempotency
+
+**Option A (recommended): Use `/F` flag on create.** The `/F` flag suppresses warnings if the task already exists and overwrites it. This makes create idempotent -- running it multiple times produces the same result.
+
+```
+schtasks.exe /Create /SC MINUTE /MO 30 /TN "multi-kb-run" /TR "..." /F
+```
+
+**Option B: Check existence first, then create or change.**
+
+Check existence:
+```
+schtasks.exe /Query /TN "multi-kb-run" 2>NUL
+```
+
+- **Exit code 0:** Task exists.
+- **Exit code 1 (ERROR_FILE_NOT_FOUND):** Task does not exist. The error message is printed to stderr: `ERROR: The system cannot find the file specified.`
+
+Then create (if not found) or change (if found):
+```
+schtasks.exe /Change /TN "multi-kb-run" /TR "..." /SC MINUTE /MO 30
+```
+
+**Recommendation:** Use `/F` on create. It is simpler and achieves the same result without needing a separate existence check.
+
+#### 4. Removal
+
+```
+schtasks.exe /Delete /TN "multi-kb-run" /F
+```
+
+- `/F` suppresses the confirmation prompt ("Are you sure? Y/N").
+- If the task does not exist, the command exits with code 1 and prints an error to stderr. The Go code should treat exit code 1 as "task not found" and return success (already removed).
+
+#### 5. Task Name Convention
+
+**Use `multi-kb-run`** as the task name. Convention notes:
+
+- Task names are case-insensitive on Windows.
+- Names can include backslashes to organize into folders: `\multi-kb\run` would create the task in a `multi-kb` folder in Task Scheduler. However, folder creation adds complexity. A flat name is simpler for MVP.
+- The task name is the unique identifier -- no marker comment needed (unlike crontab).
+
+#### 6. Working Directory
+
+`schtasks.exe /Create` does **not** have a direct parameter for working directory. Options:
+
+- **Wrap in a cmd.exe call:** `/TR "cmd /c cd /d \"%USERPROFILE%\" && multi-kb.exe run --config ..."`
+- **Use XML task definition:** XML allows setting `<WorkingDirectory>` explicitly.
+- **Not needed for multi-kb:** The CLI reads all paths from config and uses absolute paths internally. No working directory dependency.
+
+**Recommendation:** Do not set a working directory. Use absolute paths for everything (binary path, config path, log path).
+
+#### 7. User Context
+
+By default, the task runs under the current user's account. Key behaviors:
+
+- The task runs **whether or not the user is logged in** (unless `/IT` is specified for interactive-only).
+- `/NP` prevents password prompting but restricts execution to when the user is logged in.
+- For multi-kb: use the default (current user, runs whether logged in or not). If password prompting is problematic, fall back to `/NP`.
+
+#### 8. Go Implementation
+
+**Shell out to `schtasks.exe` via `os/exec`:**
+
+```go
+package scheduler
+
+import (
+    "fmt"
+    "os/exec"
+    "strings"
+)
+
+const taskName = "multi-kb-run"
+
+// Install creates or updates the Windows scheduled task.
+func Install(scheduleType, modifier, binaryPath, configPath, logPath string) error {
+    // Build the command string with output redirection
+    // Note: schtasks /TR doesn't support >> natively, so wrap in cmd.exe
+    tr := fmt.Sprintf(`cmd /c ""%s" run --config "%s" >> "%s" 2>&1"`,
+        binaryPath, configPath, logPath)
+
+    cmd := exec.Command("schtasks.exe",
+        "/Create",
+        "/SC", scheduleType,
+        "/MO", modifier,
+        "/TN", taskName,
+        "/TR", tr,
+        "/F",    // Force overwrite if exists
+        "/RL", "LIMITED",
+    )
+    if out, err := cmd.CombinedOutput(); err != nil {
+        return fmt.Errorf("creating scheduled task: %s: %w", string(out), err)
+    }
+    return nil
+}
+
+// Uninstall removes the Windows scheduled task.
+func Uninstall() error {
+    cmd := exec.Command("schtasks.exe",
+        "/Delete",
+        "/TN", taskName,
+        "/F",
+    )
+    out, err := cmd.CombinedOutput()
+    if err != nil {
+        // Ignore "task not found" errors
+        if strings.Contains(string(out), "cannot find") {
+            return nil
+        }
+        return fmt.Errorf("deleting scheduled task: %s: %w", string(out), err)
+    }
+    return nil
+}
+
+// IsInstalled checks if the scheduled task exists.
+func IsInstalled() (bool, error) {
+    cmd := exec.Command("schtasks.exe",
+        "/Query",
+        "/TN", taskName,
+    )
+    err := cmd.Run()
+    if err != nil {
+        if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+            return false, nil // Task not found
+        }
+        return false, fmt.Errorf("querying scheduled task: %w", err)
+    }
+    return true, nil
+}
+
+// GetSchedule retrieves the schedule details for the task in XML format.
+func GetSchedule() (string, error) {
+    cmd := exec.Command("schtasks.exe",
+        "/Query",
+        "/TN", taskName,
+        "/XML",
+    )
+    out, err := cmd.Output()
+    if err != nil {
+        return "", fmt.Errorf("querying task XML: %w", err)
+    }
+    return string(out), nil
+}
+```
+
+**Windows output redirection caveat:** `schtasks.exe /TR` does not natively support shell redirection (`>>`, `2>&1`). The workaround is wrapping the command in `cmd /c "..."`. This is the standard approach used by Windows tools that need output capture from scheduled tasks.
+
+---
+
+### Cross-Platform Architecture
+
+#### 1. Cron Expression Parsing for `multi-kb status` Next-Run Display
+
+**Recommended library: `github.com/robfig/cron/v3`**
+
+This is the de facto standard Go library for cron expression parsing, used by Kubernetes CronJobs, HashiCorp Nomad, and many other production systems.
+
+**Key API for next-occurrence computation:**
+
+```go
+import (
+    "fmt"
+    "time"
+
+    "github.com/robfig/cron/v3"
+)
+
+// ComputeNextRun parses a standard 5-field cron expression and returns
+// the next occurrence after the given time.
+func ComputeNextRun(cronExpr string, after time.Time) (time.Time, error) {
+    schedule, err := cron.ParseStandard(cronExpr)
+    if err != nil {
+        return time.Time{}, fmt.Errorf("invalid cron expression %q: %w", cronExpr, err)
+    }
+    return schedule.Next(after), nil
+}
+
+// Usage example:
+// next, _ := ComputeNextRun("*/30 * * * *", time.Now())
+// fmt.Printf("Next run: %s\n", next.Format("2006-01-02 15:04"))
+// Output: "Next run: 2026-05-01 14:30"
+```
+
+**The `Schedule` interface:**
+
+```go
+type Schedule interface {
+    Next(time.Time) time.Time
+}
+```
+
+`Next()` returns the next activation time strictly after the given time. This is exactly what `multi-kb status` needs to compute the next scheduled run.
+
+**Parser details:**
+- `cron.ParseStandard()` accepts standard 5-field cron expressions (minute hour dom month dow)
+- Also accepts descriptors: `@hourly`, `@daily`, `@weekly`, `@monthly`, `@every 30m`
+- The parser returns a `*SpecSchedule` implementing `Schedule`, which uses bit-packed field representations for efficient next-time computation
+- No seconds field by default (6-field expressions require `cron.NewParser(cron.Second | ...)`)
+
+**For Windows Task Scheduler:** There is no direct cron expression to parse. The approach for `multi-kb status` is:
+
+- Store the cron expression in `config.yaml` as the canonical schedule representation (even on Windows, the CLI translates the cron expression to `schtasks` parameters at registration time).
+- `multi-kb status` always uses the cron expression from config to compute next run, regardless of OS.
+- Alternatively, parse the task XML from `schtasks /Query /TN "multi-kb-run" /XML` to extract the `<Triggers>` element, but this is complex and unnecessary if the cron expression is stored in config.
+
+**Recommendation:** Store the cron expression in `config.yaml`. Use `robfig/cron/v3` to compute next occurrence on all platforms. Do not attempt to read back the schedule from the OS scheduler.
+
+#### 2. Build Tags for Cross-Platform Compilation
+
+**File structure:**
+
+```
+internal/scheduler/
+    scheduler.go          # Common interface and types (no build constraint)
+    scheduler_unix.go     # Unix (macOS + Linux) crontab implementation
+    scheduler_windows.go  # Windows Task Scheduler implementation
+```
+
+**Common interface (`scheduler.go`):**
+
+```go
+package scheduler
+
+// Schedule represents a registered OS-level scheduled task.
+type Schedule struct {
+    CronExpr   string // Standard 5-field cron expression
+    BinaryPath string // Absolute path to the multi-kb binary
+    ConfigPath string // Absolute path to config.yaml
+    LogPath    string // Absolute path to cron log file
+}
+
+// Scheduler manages OS-level scheduled task registration.
+// Implementation is platform-specific (crontab on Unix, Task Scheduler on Windows).
+type Scheduler interface {
+    Install(s Schedule) error
+    Uninstall() error
+    IsInstalled() (bool, string, error) // returns (installed, cronExpr, error)
+}
+```
+
+**Unix implementation (`scheduler_unix.go`):**
+
+```go
+//go:build unix
+
+package scheduler
+
+// ... crontab-based implementation (see macOS/Linux section above)
+```
+
+**Windows implementation (`scheduler_windows.go`):**
+
+```go
+//go:build windows
+
+package scheduler
+
+// ... schtasks-based implementation (see Windows section above)
+```
+
+**Build tag details:**
+- `//go:build unix` matches Linux, macOS (darwin), FreeBSD, and other Unix-like systems. This is a **predefined build tag** in Go that covers all POSIX platforms.
+- `//go:build windows` matches Windows.
+- File naming convention `_unix.go` and `_windows.go` provides an additional implicit constraint that matches the explicit `//go:build` directive. Both layers are used for maximum clarity.
+- The `scheduler.go` file with the interface definition has no build constraint, so it compiles on all platforms.
+- The `New()` factory function is defined in each platform-specific file and returns the platform-appropriate `Scheduler` implementation. The compiler selects the correct file at build time.
+
+---
+
+### Known Gotchas and Platform-Specific Issues
+
+#### macOS
+
+1. **TCC (Transparency, Consent, and Control):** First crontab edit may trigger a macOS permission dialog. The terminal app must have "Full Disk Access" or at minimum "Developer Tools" access. If denied, `crontab -l` returns a permission error.
+2. **Sleep/wake:** Cron jobs missed during sleep are NOT retroactively executed. The next scheduled occurrence runs normally.
+3. **SIP (System Integrity Protection):** Does not affect user-level crontab operations. Only system crontab (`/etc/crontab`) and system directories are protected.
+
+#### Linux
+
+1. **cron daemon must be running:** On some minimal Linux installs (containers, minimal VMs), `crond` may not be installed or running. The CLI should verify: `systemctl is-active cron` or `pgrep cron` (but this check is best-effort -- the CLI should not fail setup if it cannot verify cron is active).
+2. **SELinux:** On SELinux-enforcing systems, crontab operations may be restricted if the SELinux policy does not allow the user's context to modify cron spool files. This is rare for standard user accounts.
+3. **User crontab location:** Varies by distro (`/var/spool/cron/crontabs/<user>` on Debian/Ubuntu, `/var/spool/cron/<user>` on RHEL/CentOS). The `crontab` command abstracts this -- never access the files directly.
+
+#### Windows
+
+1. **Password prompting:** `schtasks /Create` may prompt for the user's password. Use `/NP` if this is problematic, accepting that the task only runs when the user is logged in.
+2. **Antivirus interference:** Some endpoint protection software may block `schtasks.exe` from creating tasks for unknown executables. The CLI should provide a clear error message suggesting the user whitelist the binary.
+3. **Task Scheduler service:** The "Task Scheduler" Windows service must be running (`Schedule` service). It is enabled by default on all Windows editions but could be disabled by group policy in enterprise environments.
+4. **Long path support:** Windows paths may exceed 260 characters. Use `\\?\` prefix for long paths, or ensure install location is short.
+5. **Output redirection in `/TR`:** `schtasks` does not interpret shell redirection natively. The `cmd /c "..."` wrapper is required for `>>` and `2>&1` to work.
+
+#### Cross-Platform
+
+1. **Binary relocation:** If the user moves the binary after setup, scheduled tasks will fail silently. `multi-kb status` should validate that the binary path in the scheduled task still exists.
+2. **Config file relocation:** Same concern as binary relocation. The config path is baked into the scheduled task command.
+3. **Concurrent registration:** If the user runs setup simultaneously from two terminals, the crontab read-modify-write cycle has a TOCTOU race condition. This is extremely unlikely and acceptable for an interactive setup command. No mitigation needed for MVP.
+
+**Decision:**
+
+1. **Use `crontab` on Unix (macOS + Linux) and `schtasks.exe` on Windows.** These are the standard OS-native mechanisms, require no additional dependencies, and are well-understood by users who need to inspect or modify the scheduled tasks.
+
+2. **Platform abstraction via Go build tags.** Define a `Scheduler` interface in `internal/scheduler/scheduler.go`, with platform-specific implementations in `scheduler_unix.go` (`//go:build unix`) and `scheduler_windows.go` (`//go:build windows`). The `New()` factory function returns the platform-appropriate implementation.
+
+3. **Absolute binary path via `os.Executable()` + `filepath.EvalSymlinks()`.** Resolve the full canonical path to the multi-kb binary at setup time and embed it in the crontab entry / schtasks command. This avoids PATH issues in cron's minimal environment.
+
+4. **Cron expression as canonical schedule representation.** Store the cron expression in `config.yaml` regardless of OS. On Unix, use it directly in the crontab entry. On Windows, translate it to `schtasks` parameters at registration time. `multi-kb status` uses the stored cron expression to compute next run via `robfig/cron/v3`.
+
+5. **`github.com/robfig/cron/v3` for next-run computation.** Use `cron.ParseStandard(expr)` to parse the 5-field expression, then `schedule.Next(time.Now())` to compute the next occurrence. This is used by `multi-kb status` on all platforms.
+
+6. **Idempotency via marker comment (Unix) and `/F` flag (Windows).** On Unix, the inline `# multi-kb scheduled run` marker identifies the multi-kb entry for update/removal. On Windows, the `/F` flag on `schtasks /Create` overwrites the existing task by name. Both approaches ensure repeated setup runs produce the same result.
+
+7. **Output redirection to `~/.multi-kb/logs/cron.log`.** Append stdout and stderr to a log file to prevent cron mail on Unix and capture errors for debugging. Expand `~` to the absolute home directory path at registration time.
+
+8. **No launchd support for MVP.** macOS crontab is fully functional and provides cross-platform consistency with Linux. launchd plist support (for power-aware scheduling) is a post-MVP enhancement.
+
+9. **Error handling:** Handle empty crontab (exit code 1 on `crontab -l`), task-not-found on uninstall (exit code 1 on `schtasks /Delete`), and permission errors with user-friendly messages guiding the user to resolve the issue.
+
+10. **Cron expression choices offered during setup:** Default to `*/30 * * * *` (every 30 minutes). Also offer `0 * * * *` (hourly) and `0 */2 * * *` (every 2 hours) as presets. Advanced users can provide a custom cron expression. The expression is validated via `cron.ParseStandard()` before registration.

@@ -112,11 +112,12 @@ Most infrastructure choices are specified directly. The following require target
   3. **Field mappings required:** All three field mappings (`vectorField`, `textField`, `metadataField`) are required and must match between index schema and KB configuration.
   See [research.md R-2](research.md#r-2-bedrock-knowledge-base-cdk-construct).
 
-#### R-3: EC2 User Data Script Best Practices
+#### R-3: EC2 User Data Script Best Practices ✅
 - **Research Task:** Design the user data script for Amazon Linux 2023 that installs the CLI binary, CloudWatch agent, clones CodeCommit, and starts the systemd unit
 - **Questions to Answer:** Correct ordering of operations? How to configure the CloudWatch agent for structured JSON log shipping? How to template the config.yaml for server mode (inject CDK outputs)? How to handle user data script failures (signal ASG)?
 - **Success Criteria:** Working user data script that boots a fresh instance to running state with the CLI process active
 - **Key Concern:** The systemd unit, config.yaml, and CloudWatch agent config must all be templated with CDK-resolved values (SQS URL, repo name, bucket name, etc.)
+- **Resolution:** Complete 8-step bash script designed and CDK TypeScript code pattern documented. Key findings: (1) Use `UserData.forLinux()` + `addCommands()` (not `CloudFormationInit`). (2) `Stack.toJsonString()` for CloudWatch agent JSON config with CDK tokens (regular `JSON.stringify()` breaks tokens). (3) `addSignalOnExitCommand()` + `Signals.waitForAll({ timeout: 15min })` for ASG CreationPolicy integration. (4) systemd `StandardOutput=append:` (requires systemd 240+; AL2023 has 252+) to write to log file for CloudWatch agent. (5) `git config --system` (not `--global`) for credential helper. (6) `dnf install -y amazon-cloudwatch-agent` is the only required package (git, aws-cli, SSM agent pre-installed on AL2023). (7) `requireImdsv2: true` on launch template. (8) 10 known gotchas documented. See [research.md R-3](research.md#r-3-ec2-user-data-script-best-practices).
 
 #### R-4: VPC Endpoint Security Group Configuration ✅
 - **Research Task:** Determine the security group rules for 9 interface VPC endpoints + 1 gateway endpoint
@@ -139,10 +140,11 @@ Most infrastructure choices are specified directly. The following require target
 - **Key Concern:** If the network policy is VPC-only, Bedrock Retrieve API (called by Lambda, which is NOT in the VPC) may not be able to reach OpenSearch. Need dual-access network policy.
 - **Resolution:** **IMPORTANT CHANGE:** Do NOT use `AllowFromPublic: true` — it silently overrides `SourceVPCEs` and `SourceServices`, making the collection fully public. Instead use `AllowFromPublic: false` with `SourceVPCEs: [<vpce-id>]` + `SourceServices: ["bedrock.amazonaws.com"]`. Bedrock accesses OpenSearch via AWS internal service-to-service networking (not the customer's VPC). The correct field name is `SourceVPCEs` (not `SourceVPCEndpoints`). This provides three-layer security: network origin + data access policy + IAM. See [research.md R-6](research.md#r-6-opensearch-serverless-network-policy-for-dual-access).
 
-#### R-7: Lambda Proxy Integration Response Format
+#### R-7: Lambda Proxy Integration Response Format ✅
 - **Research Task:** Confirm the exact response format required by API Gateway Lambda proxy integration for each status code
 - **Questions to Answer:** What is the required response shape (`statusCode`, `headers`, `body`)? How to return structured JSON errors? How does API Gateway handle Lambda errors vs. Lambda-returned error status codes?
 - **Success Criteria:** Both Lambda handlers return correctly formatted responses for all status codes (200, 202, 400, 401, 403, 500)
+- **Resolution:** Full REST API v1 proxy integration response format documented. Key findings: (1) `statusCode` (number) and `body` (string) are REQUIRED — missing either causes 502. (2) `body` must be JSON.stringify'd string, not an object. (3) Lambda crash → 502; Lambda returns 500 → 500 — wrap handlers in try/catch. (4) HTTP 401/403 handled by API Gateway before Lambda for `AWS_IAM` auth. (5) Four helper functions: `success()`, `error()`, `validationError()`, `internalError()`. (6) `@types/aws-lambda` dev dependency for `APIGatewayProxyResult` type. See [research.md R-7](research.md#r-7-lambda-proxy-integration-response-format).
 
 ### Research Deliverables
 - `research.md` — Consolidated findings for R-1 through R-7

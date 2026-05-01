@@ -331,20 +331,27 @@ _Corresponds to plan.md Phase B. Builds harness-specific conversation translator
 _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 
 ### EXT-001: Bedrock Client Wrapper
-**Description:** Implement reusable Bedrock InvokeModel client with retry, backoff, and credential profile resolution per research.md R-2.
+**Description:** Implement reusable Bedrock InvokeModel client with retry, backoff, and credential profile resolution per [research.md R-2](research.md#r-2-bedrock-invokemodel-go-sdk-pattern).
 **Files:**
 - `internal/bedrock/client.go` — Client struct: NewClient (profile, region, model), InvokeModel (system prompt, user message → string response)
-- `internal/bedrock/models.go` — Request/response types for Claude Messages API format
+- `internal/bedrock/models.go` — Request/response types for Claude Messages API format (R-2 Section 4)
+- `internal/bedrock/errors.go` — Error classification with sentinel errors (R-2 Section 6)
+- `internal/bedrock/retry.go` — Application-level RetryWithBackoff generic function (R-2 Section 6)
 - `internal/bedrock/client_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Creates AWS config with named SSO profile support (`aws_profile` from config)
-- [ ] Configures BedrockRuntime client for specified region
-- [ ] InvokeModel sends system prompt + user message in Claude Messages API format
-- [ ] Parses response to extract text content from response body
-- [ ] Retry logic: 3 retries with exponential backoff for throttling, timeout, network errors
-- [ ] Supports configurable model ID
-- [ ] Test cases: successful invocation (mocked), retry on throttle, retry exhaustion, profile resolution
+- [ ] Creates AWS config with named SSO profile support via `config.WithSharedConfigProfile()` (R-2 Section 1)
+- [ ] Configures BedrockRuntime client for specified region via `config.WithRegion()`
+- [ ] Sets HTTP client timeout to 5 minutes via `config.WithHTTPClient()` (R-2 Section 8 — Claude models can take minutes for large context windows)
+- [ ] InvokeModel sends `anthropic_version: "bedrock-2023-05-31"` + system prompt + user message in Claude Messages API format (R-2 Section 3)
+- [ ] Model ID set in `InvokeModelInput.ModelId`, NOT in the JSON body; `ContentType` set to `"application/json"` (R-2 Section 2)
+- [ ] Parses response body JSON, extracts text from `content` array blocks where `type == "text"` (R-2 Section 3)
+- [ ] SDK-level retry: 5 attempts via `config.WithRetryMaxAttempts(5)` — handles ThrottlingException, ServiceUnavailableException, InternalServerException, network errors automatically (R-2 Section 6)
+- [ ] Application-level retry: generic `RetryWithBackoff[T]` function for malformed JSON output and ModelTimeoutException (R-2 Section 6)
+- [ ] Error classification via `classifyError()` using `errors.As()` to match 12 Bedrock error types + SSO `InvalidTokenError` and wrap with sentinel errors (R-2 Section 6)
+- [ ] Detects expired SSO credentials (`ssocreds.InvalidTokenError`) and surfaces user-friendly "run `aws sso login`" message (R-2 Section 7)
+- [ ] Supports configurable model ID (e.g., `anthropic.claude-sonnet-4-20250514`, cross-region `us.anthropic.claude-sonnet-4-20250514`)
+- [ ] Test cases: successful invocation (mocked), retry on throttle, retry exhaustion, profile resolution, SSO expired detection, malformed JSON retry, ModelTimeout retry
 
 ### EXT-002: Extraction System Prompt Construction
 **Description:** Build the extraction system prompt from hardcoded base + exclusion rules + optional append file per contracts/extraction-output.md.
@@ -665,34 +672,45 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 
 ### WIZ-001: Terminal Wizard — Harness Selection and Source Discovery
-**Description:** Implement the first portion of the setup wizard: select harnesses, point to directories, discover sources per spec FR-2.
+**Description:** Implement the first portion of the setup wizard: select harnesses, point to directories, discover sources per spec FR-2 and [research.md R-1](research.md#r-1-bubbletea-wizard-pattern).
 **Files:**
-- `internal/cmd/setup.go` — partial implementation (wizard flow part 1)
+- `internal/cmd/setup.go` — partial implementation (wizard flow Phase 1 form + async discovery)
 **Dependencies:** ENV-002, FND-001
 **Acceptance Criteria:**
-- [ ] Uses bubbletea + huh for interactive terminal forms
-- [ ] Step 1: Multi-select harnesses (Notor, Claude Code)
-- [ ] Step 2: For each harness, prompt for directory path(s)
-- [ ] Step 3: Auto-discovers chat history locations:
-  - Claude Code: reads from `~/.claude/projects/`, matches user-pointed directory to project subdirectory, presents summary
-  - Notor: checks `{vault}/notor/history/` exists, presents summary
-- [ ] User confirms discovered sources
-- [ ] Test cases: single harness selection, both harnesses, directory validation, source discovery
+- [ ] **Uses `charm.land/huh/v2` + `charm.land/bubbletea/v2` (R-1).** Form components from `huh`, parent bubbletea program manages inter-step async logic.
+- [ ] **Phase 1 Form** — `huh.NewForm` with Groups:
+  - Group 1: `huh.NewNote` welcome + `huh.NewMultiSelect` for harness selection (Notor, Claude Code)
+  - Group 2 (conditional via `WithHideFunc`): Claude Code directory path input (`huh.NewInput` with path validation via `Validate(func(s string) error {...})`)
+  - Group 3 (conditional via `WithHideFunc`): Notor vault path input (`huh.NewInput` or `huh.NewFilePicker` with `DirAllowed(true)`)
+- [ ] **Conditional group visibility (R-1):** Use `WithHideFunc` closures watching the `selectedHarnesses` variable — only show Claude Code directory group if Claude Code selected, only show Notor group if Notor selected
+- [ ] **Async discovery step** (between Phase 1 and Phase 2 forms): Run inside bubbletea parent program with spinner. Auto-discovers chat history locations:
+  - Claude Code: reads from `~/.claude/projects/`, matches user-pointed directory to project subdirectory (R-3 path mapping), presents summary via `huh.NewNote`
+  - Notor: reads `{vault}/.obsidian/plugins/notor/data.json` for `history_path` (R-4), checks path exists, presents summary
+- [ ] User confirms discovered sources via `huh.NewConfirm`
+- [ ] **Accessibility (R-1):** Support `WithAccessible(true)` for screen readers (falls back to sequential prompts)
+- [ ] Test cases: single harness selection, both harnesses, directory validation, source discovery, conditional group hiding
 
 ### WIZ-002: Terminal Wizard — KB Configuration and Routing
-**Description:** Implement the second portion: local KB creation, remote KB addition, routing configuration, approval mode, author, exclusion rules per spec FR-2.
+**Description:** Implement the second and third portions: local KB creation, remote KB addition, routing configuration, approval mode, author, exclusion rules per spec FR-2 and [research.md R-1](research.md#r-1-bubbletea-wizard-pattern).
 **Files:**
-- `internal/cmd/setup.go` — partial implementation (wizard flow part 2)
+- `internal/cmd/setup.go` — partial implementation (wizard flow Phases 2 and 3)
 **Dependencies:** WIZ-001, FND-005
 **Acceptance Criteria:**
+- [ ] **Phase 2 Form** (R-1 — `huh.NewForm`):
+  - `huh.NewConfirm` for discovery summary
+  - `huh.NewConfirm` to add remote KB (loop via sequential forms — "Add another?" pattern)
+  - For each remote KB: `huh.NewInput` (name, endpoint URL), `huh.NewSelect` (auth type: iam/federate), conditional `huh.NewInput` (AWS profile, shown via `WithHideFunc` only when auth=iam), `huh.NewInput` (region, description)
+  - `huh.NewSelect` per directory-KB pair for routing mode (always/consider) and approval mode presets (`huh.NewSelect` with 3 presets: auto-approve always, always require manual, select per group)
+- [ ] **Phase 3 Form** (R-1 — `huh.NewForm`):
+  - `huh.NewInput` for author identity string with `ValidateNotEmpty()` + `ValidateMaxLength(100)`
+  - `huh.NewText` for exclusion rules (multi-line, optional — user can leave empty)
+  - `huh.NewNote` showing setup summary
+  - `huh.NewConfirm` to finalize
+- [ ] **Dynamic fields (R-1):** Use `OptionsFunc` for routing target selection — options regenerate based on configured KBs
 - [ ] Creates default local KB automatically (`~/.multi-kb/local/default/`)
-- [ ] Prompts to add remote KBs: endpoint URL, auth type (iam/federate), AWS profile (if iam), region, description
-- [ ] Configures routing rules per directory: which KBs, routing mode (always/consider), approval mode
-- [ ] Simplified presets: auto-approve always, always require manual approval, select per group
-- [ ] Prompts for author identity string
-- [ ] Prompts for exclusion rules (optional, can skip)
 - [ ] Writes complete `config.yaml` and initial empty `state.yaml`
-- [ ] Test cases: minimal setup (local only), with remote KB, with overrides, with exclusion rules
+- [ ] **No looping within single form (R-1 gotcha):** "Add another KB?" uses sequential form invocations, not in-form loops
+- [ ] Test cases: minimal setup (local only), with remote KB, with overrides, with exclusion rules, accessible mode
 
 ### WIZ-003: Hook Auto-Registration During Setup
 **Description:** During setup, automatically register hooks for each selected harness per spec FR-2.
@@ -708,35 +726,42 @@ _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 - [ ] Test cases: single harness hook registration, both harnesses, pre-existing hooks preserved
 
 ### WIZ-004: Cron Registration
-**Description:** Implement OS-native cron registration for `multi-kb run` per research.md R-8 and spec FR-3.
+**Description:** Implement OS-native cron registration for `multi-kb run` per [research.md R-8](research.md#r-8-cross-platform-cron-registration) and spec FR-3.
 **Files:**
-- `internal/schedule/cron_unix.go` — RegisterCron, UnregisterCron, ReadCronEntry (macOS/Linux)
-- `internal/schedule/cron_windows.go` — RegisterCron, UnregisterCron, ReadScheduledTask (Windows)
+- `internal/schedule/cron_unix.go` — Install, Uninstall, IsInstalled (macOS/Linux) — build tag `//go:build unix`
+- `internal/schedule/cron_windows.go` — Install, Uninstall, IsInstalled (Windows) — build tag `//go:build windows`
 - `internal/schedule/cron_unix_test.go`
 - `internal/schedule/cron_windows_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] macOS/Linux: reads existing crontab, appends entry with marker comment `# multi-kb scheduled run`, writes back
-- [ ] Windows: uses `schtasks.exe /Create` to register task
-- [ ] Idempotent: re-running doesn't duplicate entries (checks for marker/task name)
-- [ ] Configurable interval (e.g., every 30 minutes)
-- [ ] Entry runs `multi-kb run` with `--config` pointing to the config file
-- [ ] UnregisterCron removes only the multi-kb entry
-- [ ] Test cases: register fresh, idempotent re-register, unregister, existing crontab preserved
+- [ ] **macOS/Linux crontab (R-8):** Read-modify-write pattern via `crontab -l` → modify in memory → `crontab -` (stdin replacement). Never directly edit crontab files.
+- [ ] **Empty crontab handling (R-8):** `crontab -l` exits code 1 on empty crontab — treat as empty (not error). Check `exitErr.ExitCode() == 1`.
+- [ ] **Inline marker (R-8):** Append `# multi-kb scheduled run` as trailing comment on the cron entry line. Use `strings.Contains(line, marker)` for idempotency detection.
+- [ ] **Idempotency (R-8):** Before appending, filter out any existing line containing the marker. Read-filter-append-write guarantees exactly one multi-kb entry regardless of how many times setup runs.
+- [ ] **Absolute binary path (R-8):** Use `os.Executable()` + `filepath.EvalSymlinks()` to resolve the binary's absolute path. Cron runs with minimal PATH — binary may not be found otherwise.
+- [ ] **Output redirection (R-8):** Append `>> ~/.multi-kb/logs/cron.log 2>&1` to prevent cron mail accumulation. Expand `~` to absolute path at registration time via `os.UserHomeDir()`.
+- [ ] **Cron entry format:** `{cronExpr} {absPath} run --config {absConfigPath} >> {absLogPath} 2>&1 # multi-kb scheduled run`
+- [ ] **Uninstall (R-8):** Filter out marker line and write back. If result is empty, use `crontab -r`.
+- [ ] **Windows Task Scheduler (R-8):** `schtasks.exe /Create /SC MINUTE /MO {interval} /TN "multi-kb-run" /TR "cmd /c \"{absPath} run --config {configPath} >> {logPath} 2>&1\"" /F /NP /RL LIMITED`. `/F` provides idempotency. `/NP` prevents password prompting. No admin needed.
+- [ ] **Windows uninstall:** `schtasks.exe /Delete /TN "multi-kb-run" /F`
+- [ ] **Build tags:** `//go:build unix` and `//go:build windows` with file naming convention `_unix.go` / `_windows.go`
+- [ ] **Scheduler interface:** Define `Scheduler` interface with `Install(cronExpr, binaryPath, configPath)`, `Uninstall()`, `IsInstalled()` — platform-specific `New()` factory
+- [ ] Test cases: register fresh, idempotent re-register, unregister, existing crontab preserved, empty crontab edge case
 
 ### WIZ-005: Cron Expression Parsing for Status Display
-**Description:** Parse the crontab entry to compute and display the next scheduled run time per spec FR-11.
+**Description:** Parse the crontab entry to compute and display the next scheduled run time per spec FR-11 and [research.md R-8](research.md#r-8-cross-platform-cron-registration).
 **Files:**
 - `internal/schedule/parse.go` — ParseNextRun function (reads crontab, finds multi-kb entry, computes next occurrence)
 - `internal/schedule/parse_test.go`
 **Dependencies:** WIZ-004
 **Acceptance Criteria:**
-- [ ] Reads user's crontab, finds the `multi-kb run` entry by marker comment
-- [ ] Parses the cron expression (e.g., `*/30 * * * *`)
-- [ ] Computes next occurrence from current time
+- [ ] **macOS/Linux (R-8):** Reads user's crontab via `crontab -l`, finds the `multi-kb run` entry by marker comment `# multi-kb scheduled run`, extracts the cron expression (first 5 space-separated fields)
+- [ ] **Next-run computation (R-8):** Uses `github.com/robfig/cron/v3` library — `cron.ParseStandard(expr).Next(time.Now())` to compute next occurrence
+- [ ] **Windows (R-8):** Reads schedule via `schtasks.exe /Query /TN "multi-kb-run" /FO CSV /NH`, parses the next run time from the CSV output
 - [ ] Returns absolute timestamp (e.g., "2026-05-01 14:30:00")
-- [ ] Returns nil/error if no cron entry found
-- [ ] Test cases: common intervals (every 30 min, hourly, daily), next occurrence calculation, missing entry
+- [ ] Returns nil/error if no cron entry or scheduled task found
+- [ ] **Go dependency:** `github.com/robfig/cron/v3` (well-maintained, 15k+ stars, supports standard 5-field expressions)
+- [ ] Test cases: common intervals (every 30 min, hourly, daily), next occurrence calculation, missing entry, Windows CSV parsing
 
 ### WIZ-006 [P]: Standalone Subcommands — add-source and add-kb
 **Description:** Implement post-setup subcommands for adding sources and KBs per spec FR-2.
@@ -1049,17 +1074,24 @@ _Research items must complete before their dependent implementation phases._
 
 | Research | Must Complete Before | Blocks | Status |
 |----------|---------------------|--------|--------|
-| **R-2:** Bedrock KB metadata extraction | CDK Phase 4 (Lambda Functions) | LMB-004, PRM-003 | Open |
+| **R-1:** Bubbletea wizard pattern | CLI Phase 6 (Setup Wizard) | WIZ-001, WIZ-002 | **✅ Complete** |
+| **R-2:** Bedrock InvokeModel Go SDK | CLI Phase 3 (Extraction Pipeline) | EXT-001 | **✅ Complete** |
 | **R-3:** Claude Code conversation format | CLI Phase 2 (Translation Layer) | TRN-002 | **✅ Complete** |
 | **R-4:** Notor conversation format | CLI Phase 2 (Translation Layer) | TRN-003 | **✅ Complete** |
 | **R-5:** Claude Code hook registration | CLI Phase 4 (Hook Injection) | HKI-001, HKI-007 | **✅ Complete** |
 | **R-6:** Notor hook registration | CLI Phase 4 (Hook Injection) | HKI-002 | **✅ Complete** |
+| **R-7:** Crockford base32 UID generation | CLI Phase 1 (Foundation) | FND-004 | **✅ Complete** |
+| **R-8:** Cross-platform cron registration | CLI Phase 6 (Setup Wizard) | WIZ-004, WIZ-005 | **✅ Complete** |
 
-**Remaining research:** R-2 (highest priority — blocks CDK Lambda tasks).
+**All research is now complete (R-1 through R-8).** All implementation phases can proceed without blocking on research.
 
-**R-3, R-4, R-5, R-6, and R-7 are complete.** Their findings reshape TRN-002, TRN-003, HKI-001, HKI-002, HKI-006, HKI-007, and FND-004 — see updated task descriptions. R-7 findings added bit-buffer encoding algorithm, test vector table, and `EncodeCrockford` export guidance to FND-004.
-
-**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation — R-7 resolved, FND-004 reshaped), Phase 2 (R-3 and R-4 complete), Phase 3 (Extraction), Phase 4 (R-5 and R-6 complete), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
+**Research findings that reshaped tasks:**
+- **R-1:** WIZ-001/WIZ-002 — use `charm.land/huh/v2` with declarative branching, 3-phase form architecture with bubbletea embedding for async inter-step logic.
+- **R-2:** EXT-001 — InvokeModel (not Converse), `anthropic_version: "bedrock-2023-05-31"`, two-layer retry, 5-minute HTTP timeout, SSO error detection, `errors.go`/`retry.go` added.
+- **R-3/R-4:** TRN-002/TRN-003 — per-message timestamps available on both harnesses.
+- **R-5/R-6:** HKI-001/HKI-002/HKI-006/HKI-007 — structured JSON output for Claude Code, automation file for Notor.
+- **R-7:** FND-004 — bit-buffer encoding algorithm, 5 shared test vectors, `EncodeCrockford` export.
+- **R-8:** WIZ-004/WIZ-005 — crontab read-modify-write with inline marker, absolute binary path, `robfig/cron/v3` for next-run, Windows `schtasks.exe`, build tags.
 
 ---
 

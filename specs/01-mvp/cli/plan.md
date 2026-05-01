@@ -99,17 +99,36 @@ The following points were verified against the CDK spec to ensure CLI/CDK alignm
 
 All major technology choices are resolved by the spec (Go, Bedrock, git grep, YAML, etc.). The following items require targeted investigation before implementation begins:
 
-#### R-1: Bubbletea Wizard Pattern Research
+#### R-1: Bubbletea Wizard Pattern Research ✅
 - **Research Task:** Evaluate `bubbletea` vs `survey` for the multi-step setup wizard (FR-2)
 - **Questions to Answer:** Which library better handles the branching flow (select harness → discover sources → add KBs → configure routing → set approval mode)? How do they handle terminal compatibility across macOS/Linux/Windows?
 - **Success Criteria:** Working prototype of a 3-step wizard flow with selection menus and text inputs
-- **Recommendation:** Start with `bubbletea` + `huh` (Charmbracelet's form library built on bubbletea) — designed specifically for multi-step form flows
+- **Resolution:** Use `charm.land/huh/v2` + `charm.land/bubbletea/v2`. Key findings:
+  1. **`survey` is archived** (April 2024) — maintainer recommends bubbletea. No new features, no bug fixes.
+  2. **`huh` v2 provides all 7 required input types** out of the box: MultiSelect (harness selection), Select (routing mode), Input (directory paths), FilePicker (directory browser with `DirAllowed(true)`), Confirm (proceed/cancel), Text (exclusion rules), Note (summary screens).
+  3. **Declarative branching** via `WithHideFunc` on Groups — closure callbacks watch bound variables, allowing entire wizard pages to be shown/hidden based on prior answers (e.g., show Notor config only if Notor selected).
+  4. **Dynamic fields** via `OptionsFunc`/`TitleFunc` — field options recompute when dependency variables change. Handles cascading selections.
+  5. **Built-in validation** with `Validate(func(T) error)` — inline error display, prevents advancement until valid. Built-in validators: `ValidateNotEmpty()`, `ValidateMinLength(n)`, etc.
+  6. **Accessibility** via `WithAccessible(true)` — replaces TUI with standard sequential prompts for screen readers.
+  7. **Bubbletea escape hatch** — `huh.Form` implements `tea.Model`, so inter-step async logic (auto-discovery, hook registration) works via bubbletea embedding.
+  8. **Recommended architecture:** 3 sequential `huh.Form` phases managed by a parent bubbletea program (Phase 1: harness + dirs → async discovery → Phase 2: KB + routing → Phase 3: approval + author + exclusions → async hooks/cron).
+  9. **Raw bubbletea rejected:** Estimated 5-8x code overhead (~1,500-2,500 lines vs ~200-400 with huh).
+  10. **Module paths:** `charm.land/huh/v2` (v2.0.3+), `charm.land/bubbletea/v2` (v2.0.6+).
+  See [research.md R-1](research.md#r-1-bubbletea-wizard-pattern).
 
-#### R-2: Bedrock InvokeModel Go SDK Pattern
+#### R-2: Bedrock InvokeModel Go SDK Pattern ✅
 - **Research Task:** Establish the Go SDK pattern for calling Bedrock `InvokeModel` with Claude models
 - **Questions to Answer:** How to configure model ID, pass system prompt + user content, parse JSON response? How does credential chain resolution work with named SSO profiles?
 - **Success Criteria:** Working extraction call that returns parsed JSON array of notes
-- **Deliverable:** Reusable `bedrock.Client` wrapper with retry + backoff
+- **Resolution:** Use InvokeModel (not Converse API). Key findings:
+  1. **`anthropic_version` must be `"bedrock-2023-05-31"`** — Bedrock-specific, different from direct Anthropic API.
+  2. **Model ID goes in `InvokeModelInput.ModelId`**, not in the JSON body. `ContentType` set to `"application/json"`.
+  3. **SSO profile support** via `config.WithSharedConfigProfile(profile)` — no SSO-specific code needed. Detect expired tokens via `errors.As(err, &ssocreds.InvalidTokenError{})`.
+  4. **Two-layer retry:** SDK-level (5 attempts, auto-retries ThrottlingException/server errors) + application-level (3 attempts for malformed JSON and ModelTimeoutException).
+  5. **HTTP timeout: 5 minutes** — SDK defaults too short for large Claude context windows.
+  6. **Error classification** via `errors.As()` to match 12 Bedrock error types, wrapped with sentinel errors.
+  7. **Go modules:** `github.com/aws/aws-sdk-go-v2/{config,aws,service/bedrockruntime,aws/retry,credentials/ssocreds}`.
+  See [research.md R-2](research.md#r-2-bedrock-invokemodel-go-sdk-pattern).
 
 #### R-3: Claude Code Conversation Format ✅
 - **Research Task:** Document the exact JSONL schema of Claude Code conversation files in `~/.claude/projects/<project>/<session>.jsonl`
@@ -171,10 +190,17 @@ All major technology choices are resolved by the spec (Go, Bedrock, git grep, YA
 - **Note:** 16 chars of Crockford base32 = 80 bits of entropy (5 bits per char). Use `crypto/rand` for 10 random bytes, encode to Crockford base32.
 - **Resolution:** Zero-dependency implementation using bit-buffer encoding. `crypto/rand` for 10 bytes → bit-buffer extraction (5 bits at a time, MSB first) → 16 uppercase Crockford chars. No third-party library needed — the encoding is ~15 lines. `EncodeCrockford()` exported separately from `GenerateUID()` for deterministic testing against 5 shared test vectors (verified identical output with CDK R-5 Node.js implementation). See [research.md R-7](research.md#r-7-crockford-base32-uid-generation).
 
-#### R-8: Cross-Platform Cron Registration
+#### R-8: Cross-Platform Cron Registration ✅
 - **Research Task:** Implement crontab registration on macOS/Linux and Task Scheduler on Windows
 - **Questions to Answer:** How to safely append a crontab entry without clobbering existing entries? How to use `schtasks.exe` on Windows? How to make the entry idempotent (re-running setup doesn't duplicate)?
 - **Success Criteria:** `multi-kb setup` can register and `multi-kb status` can read the scheduled entry on all platforms
+- **Resolution:** Complete Go implementations for both platforms documented. Key findings:
+  1. **macOS/Linux crontab:** `crontab -l` exits code 1 on empty crontab — handle gracefully. Read-modify-write via `crontab -` (stdin replacement). Inline marker `# multi-kb scheduled run` for idempotency (filter existing before appending). Always use absolute binary path via `os.Executable()` + `filepath.EvalSymlinks()`. Redirect output to `~/.multi-kb/logs/cron.log 2>&1`. macOS cron is fully functional (not deprecated) but does NOT wake from sleep.
+  2. **Windows Task Scheduler:** `schtasks.exe /Create /SC MINUTE /MO 30 /TN "multi-kb-run" /TR "..." /F /NP` — no admin needed for current-user tasks. `/F` flag provides idempotency (force overwrite). Removal: `/Delete /TN "multi-kb-run" /F`. Output redirection requires `cmd /c "..."` wrapper.
+  3. **Next-run computation:** `github.com/robfig/cron/v3` — `cron.ParseStandard(expr).Next(time.Now())`. For Windows, read schedule via `schtasks.exe /Query /TN "multi-kb-run" /FO CSV /NH`.
+  4. **Build tags:** `//go:build unix` and `//go:build windows` with file naming `_unix.go` / `_windows.go`.
+  5. **Go implementation:** Complete `Install()`, `Uninstall()`, `IsInstalled()` functions for both platforms documented.
+  See [research.md R-8](research.md#r-8-cross-platform-cron-registration).
 
 ### Research Deliverables
 - `research.md` — Consolidated findings for all R-1 through R-8 items (generated below)

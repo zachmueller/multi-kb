@@ -11,7 +11,7 @@
 **Phases:** 9 (Setup → Networking → Storage → Search → Lambda → API → Compute → Observability → Quality)
 **Estimated Complexity:** High
 **Parallel Execution Opportunities:** 12 task groups
-**Research Status:** R-1, R-2, R-4, R-5, R-6 resolved; R-3, R-7 open
+**Research Status:** R-1 through R-7 all resolved
 
 ## Dependency Legend
 
@@ -386,7 +386,9 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - [ ] Uses bit-buffer encoding algorithm (R-5): accumulate 8 bits per byte, extract 5-bit groups MSB-first via `(buf >>> bits) & 0x1F` (unsigned right shift)
 - [ ] Zero npm dependencies — uses only Node.js built-in `crypto`
 - [ ] `encodeCrockford(Buffer)` exported separately from `generateUid()` for deterministic testing
-- [ ] **Response helpers:** `success(statusCode, body)`, `error(statusCode, body)` — wrap in Lambda proxy format `{ statusCode, headers: {"Content-Type": "application/json"}, body: JSON.stringify(...) }`
+- [ ] **Response helpers (R-7):** Four functions in `lambda/shared/response.ts`: `success(statusCode, body)` for 200/202 responses, `error(statusCode, body)` for arbitrary errors, `validationError(errors: Record<string, string>)` convenience for HTTP 400 `{ errors: { field: reason } }`, `internalError()` convenience for HTTP 500 with generic message. All auto-stringify body and set `Content-Type: application/json` via shared `JSON_HEADERS` constant. Body parameter is `unknown` (helper calls `JSON.stringify()` internally). Uses `APIGatewayProxyResult` type from `@types/aws-lambda` (dev dependency — erased at compile time).
+- [ ] **Handler wrapper pattern (R-7):** Both Lambda handlers wrap logic in top-level try/catch returning `internalError()`. This guarantees well-formed responses (never 502 from malformed response) and preserves 500 vs 502 distinction for debugging. Guard `event.body` with `JSON.parse(event.body ?? '{}')` — catch `SyntaxError` to return 400.
+- [ ] **HTTP 401/403 not handled by Lambda (R-7):** API Gateway handles auth errors before Lambda invocation for `AWS_IAM` auth. Lambda does not need 401/403 response paths.
 - [ ] **Validation:** `validateSubmitKnowledge(body)` returns `{ valid: true, data }` or `{ valid: false, errors: {} }`; validates title (present, non-empty, ≤255), content (present, non-empty, ≤100K), author (present, non-empty, ≤100)
 - [ ] Test: UID deterministic encoding of 5 shared test vectors from R-5:
   - `Buffer.from([0x00 × 10])` → `"0000000000000000"`
@@ -567,21 +569,23 @@ _Corresponds to plan.md Phase F._
 **Description:** Implement the EC2 user data script that bootstraps the instance per spec FR-4 and research.md R-3.
 **Files:**
 - `lib/constructs/compute.ts` — user data script generation
-**Dependencies:** CMP-001, STR-001, STR-002, STR-003, SRC-001, KBS-001, KBS-003, ENV-002
+**Dependencies:** CMP-001, CMP-004 (for `addSignalOnExitCommand`), STR-001, STR-002, STR-003, SRC-001, KBS-001, KBS-003, ENV-002, OBS-001 (log group name)
 **Contract:** [server-config.md](contracts/server-config.md) — defines the exact config.yaml fields to template and their CDK output sources
 **Acceptance Criteria:**
-- [ ] Uses `UserData.forLinux()` with `set -euxo pipefail`
-- [ ] Step 1: Install packages (`dnf install -y amazon-cloudwatch-agent git`)
-- [ ] Step 2: Download CLI binary from S3 (`aws s3 cp ${cliBinaryS3Uri} /usr/local/bin/multi-kb && chmod +x`)
-- [ ] Step 3: Configure git credential helper for CodeCommit (`git config --global credential.helper '!aws codecommit credential-helper $@'`)
-- [ ] Step 4: Clone CodeCommit repo to working directory (`git clone https://git-codecommit.{region}.amazonaws.com/v1/repos/{repoName} /opt/multi-kb/repo`)
-- [ ] Step 5: Template `config.yaml` for server mode — interpolate all CDK-resolved values (SQS URL, repo name, bucket, OpenSearch endpoint, KB ID, data source ID, tick interval, dream cycle interval, consolidation model ID)
-- [ ] Step 6: Configure CloudWatch agent (structured JSON log shipping from CLI stdout/stderr)
-- [ ] Step 7: Create systemd unit file for `multi-kb` server process (restart on failure, working dir, env vars)
-- [ ] Step 8: Start services (`systemctl enable --now amazon-cloudwatch-agent multi-kb`)
-- [ ] All `${...}` values resolved from CDK construct outputs at synthesis time
-- [ ] Script is idempotent (safe for ASG instance replacement)
-- [ ] CDK assertion test: user data is non-empty (specific content hard to assert in CDK tests)
+- [ ] Uses `UserData.forLinux()` with `set -euxo pipefail` as first command
+- [ ] Step 1: Install packages — `dnf install -y amazon-cloudwatch-agent` (git is pre-installed on AL2023; do NOT install git separately to avoid ambiguity)
+- [ ] Step 2: Download CLI binary — `aws s3 cp ${cliBinaryS3Uri} /usr/local/bin/multi-kb && chmod +x /usr/local/bin/multi-kb` (raw `addCommands`, NOT `addS3DownloadCommand` — S3 URI is a string prop, not an `IBucket` reference)
+- [ ] Step 3: Git credential helper — `git config --system credential.helper '!aws codecommit credential-helper $@'` and `git config --system credential.UseHttpPath true` (use `--system` not `--global` so it applies to all users)
+- [ ] Step 4: Clone CodeCommit repo — `git clone https://git-codecommit.{region}.amazonaws.com/v1/repos/{repoName} /opt/multi-kb/repo` with `|| { git init ... }` fallback for empty repos on first deploy
+- [ ] Step 5: Template `config.yaml` at `/opt/multi-kb/config.yaml` — interpolate all CDK-resolved values per [server-config.md](contracts/server-config.md) field mapping table. Use line-by-line `addCommands()` with heredoc and template literal interpolation for CDK tokens.
+- [ ] Step 6: Configure CloudWatch agent — use `Stack.toJsonString()` to safely serialize JSON config containing CDK token (`logGroupName`). Config at `/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json`. Log stream name uses `{instance_id}` (CloudWatch agent variable, NOT a CDK token). Start agent with `amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:...`.
+- [ ] Step 7: Create systemd unit file at `/etc/systemd/system/multi-kb.service` — `Type=simple`, `Restart=on-failure`, `RestartSec=5`, `WorkingDirectory=/opt/multi-kb/repo`, `StandardOutput=append:/var/log/multi-kb/server.log`, `StandardError=append:/var/log/multi-kb/server.log`, `Environment=AWS_REGION={region}`, `Environment=HOME=/root`. Create `/var/log/multi-kb/` directory first.
+- [ ] Step 8: Start services — `systemctl daemon-reload`, start CloudWatch agent via `amazon-cloudwatch-agent-ctl`, then `systemctl enable --now multi-kb`
+- [ ] **cfn-signal integration:** Call `userData.addSignalOnExitCommand(asg)` AFTER all other `addCommands()` calls. ASG uses `Signals.waitForAll({ timeout: Duration.minutes(15) })`.
+- [ ] All `${...}` values resolved from CDK construct outputs at synthesis time via template literal interpolation in `addCommands()`
+- [ ] Launch template sets `requireImdsv2: true` (security best practice; AWS CLI v2 on AL2023 supports IMDSv2)
+- [ ] Process runs as root for MVP (no dedicated user)
+- [ ] CDK assertion test: user data is non-empty; launch template has IMDSv2 enforced
 
 ### CMP-004: Auto Scaling Group
 **Description:** Create the ASG with min/max/desired=1, pinned to single AZ per spec FR-4.
@@ -595,7 +599,8 @@ _Corresponds to plan.md Phase F._
 - [ ] Uses launch template from CMP-002
 - [ ] Health check: EC2 status checks (default)
 - [ ] Instance replacement on termination: ASG launches new instance, user data re-bootstraps
-- [ ] CDK assertion test: ASG with min=max=desired=1; subnet specified
+- [ ] **Signals integration (R-3):** `signals: Signals.waitForAll({ timeout: Duration.minutes(15) })` — CloudFormation waits for cfn-signal from user data script before marking resource as created. On script failure, stack rolls back.
+- [ ] CDK assertion test: ASG with min=max=desired=1; subnet specified; CreationPolicy present with 15-minute timeout
 
 ### CMP-005: Stack Output — Compute
 **Description:** Add CloudFormation output for EC2 instance.
@@ -685,14 +690,18 @@ _Research items must complete before their dependent implementation phases._
 | **R-1:** OpenSearch Serverless CDK setup | ✅ Resolved | Phase 3 (Search Infrastructure) | SRC-001, SRC-002, SRC-003, SRC-004 (L1 constructs, policy formats, dependency ordering) |
 | **R-2:** Bedrock KB CDK construct | ✅ Resolved | Phase 3 (Search Infrastructure) + Phase 4 (Lambda Functions) | KBS-001, KBS-002, KBS-003, SRC-006 (field mappings, service role permissions, index pre-creation) + LMB-004 (uid/title extraction from Retrieve results) |
 | **R-5:** Crockford base32 UID | ✅ Resolved | Phase 4 (Lambda Functions) | LMB-001 (UID generation — reshaped with bit-buffer algorithm and 5 shared test vectors) |
-| **R-7:** Lambda proxy integration format | Open | Phase 4 (Lambda Functions) | LMB-001 (response helpers) |
-| **R-3:** EC2 user data script | Open | Phase 6 (EC2 Compute) | CMP-003 (user data script) |
+| **R-7:** Lambda proxy integration format | ✅ Resolved | Phase 4 (Lambda Functions) | LMB-001 (response helpers — 4 helper functions: `success()`, `error()`, `validationError()`, `internalError()`) |
+| **R-3:** EC2 user data script | ✅ Resolved | Phase 6 (EC2 Compute) | CMP-003 (user data script — full bash script, CDK TypeScript code pattern, CloudWatch agent config, systemd unit, cfn-signal integration) |
 
 **All Phase 3 research is resolved.** Implementation can now proceed through Phase 3 (Search Infrastructure) without blocking.
 
 **R-5 is now resolved.** LMB-001 UID acceptance criteria updated with bit-buffer encoding algorithm and 5 authoritative test vectors shared with CLI R-7.
 
-**Tasks that can proceed without remaining research:** Phases 0-4 (Setup, Networking, Storage, Search Infrastructure, Lambda Functions — R-5 resolved, R-7 response helpers can be researched inline), Phase 5 (API Gateway), Phase 6 (EC2 Compute — except CMP-003 user data details), Phase 7 (Observability).
+**R-7 is now resolved.** LMB-001 response helper acceptance criteria updated with 4 helper functions (`success()`, `error()`, `validationError()`, `internalError()`), handler wrapper pattern, and `@types/aws-lambda` dev dependency for the `APIGatewayProxyResult` type.
+
+**R-3 is now resolved.** CMP-003 and CMP-004 acceptance criteria updated with: `UserData.forLinux()` + `addCommands()` pattern, `Stack.toJsonString()` for CloudWatch agent JSON, `addSignalOnExitCommand()` + `Signals.waitForAll()` for ASG integration, systemd unit with `StandardOutput=append:`, `requireImdsv2: true`, and 10 known gotchas documented.
+
+**All research is now resolved (R-1 through R-7).** All phases (0-8) can proceed without blocking on research.
 
 ---
 
