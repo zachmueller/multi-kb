@@ -264,21 +264,24 @@ _Corresponds to plan.md Phase B. Builds harness-specific conversation translator
 - [ ] Test cases: serialize header, serialize messages with tool uses, round-trip parse
 
 ### TRN-002: Claude Code Translator
-**Description:** Implement translator that reads Claude Code conversation files from `~/.claude/projects/` and produces intermediate format per spec FR-4.
+**Description:** Implement translator that reads Claude Code conversation files from `~/.claude/projects/` and produces intermediate format per spec FR-4. Schema fully documented in [research.md R-3](research.md#r-3-claude-code-conversation-format).
 **Files:**
 - `internal/translate/claudecode.go` — ClaudeCodeTranslator: discover sessions, translate messages, flag previously_processed
 - `internal/translate/claudecode_test.go`
 **Dependencies:** TRN-001, FND-002
 **Acceptance Criteria:**
-- [ ] Reads from `~/.claude/projects/<project>/` where `<project>` is derived from the user-configured directory path
-- [ ] Discovers all `.jsonl` session files in the project directory
-- [ ] Parses Claude Code JSONL format: handles message roles, content block arrays, tool call/result pairs
+- [ ] **Project directory mapping (R-3):** Converts user-configured directory path to project directory name by replacing `/` with `-` (e.g., `/Volumes/workplace/multi-kb` → `-Volumes-workplace-multi-kb`). Reads from `~/.claude/projects/<encoded-path>/`.
+- [ ] Discovers all `.jsonl` session files in the project directory (filenames are UUIDs, one file = one conversation)
+- [ ] Filters JSONL lines by `type` field: processes only `user`, `assistant`, and selectively `attachment` lines. Ignores `queue-operation`, `permission-mode`, `file-history-snapshot`, `last-prompt`, `ai-title`.
+- [ ] **Reassembles split assistant messages (R-3):** Groups consecutive `type: "assistant"` lines with the same `message.id` into a single logical assistant message (Claude Code splits one content block per JSONL line)
+- [ ] Parses content block arrays (always arrays, never bare strings): `text` blocks → plain text, `thinking` blocks → omit or summarize, `tool_use` blocks → pair with results
 - [ ] Flattens content block arrays to plain text strings (images → `[Image]` placeholder)
+- [ ] **Tool call/result pairing (R-3):** Matches `tool_use` blocks (on assistant lines) to `tool_result` blocks (on `type: "user"` lines) via `tool_use_id`. Uses `toolUseResult` outer field for richer summarization metadata when available.
 - [ ] Collapses tool call/result pairs into `tool_uses` entries on assistant messages
-- [ ] Sets `previously_processed` flag at file level: if conversation was previously processed (file mtime ≤ `last_processed`), all prior messages flagged true
-- [ ] Uses file last-modified time as timestamp for all messages
+- [ ] **Per-message timestamps (R-3 — CHANGED from spec):** Uses the `timestamp` field present on every message line (ISO 8601 with ms precision). Compares each message's `timestamp` to `last_processed` to set `previously_processed` flag individually — NOT at file level. This is the same approach as Notor, replacing the file-level fallback.
 - [ ] Populates conversation header with source_harness="claude-code", source_path, project_dir
-- [ ] Test cases: single conversation, re-processed conversation, tool calls, content blocks, project path mapping
+- [ ] **Subagent files (R-3):** Skips `<session-uuid>/subagents/` companion directories in MVP. Agent tool results are already captured in the parent conversation's tool result.
+- [ ] Test cases: single conversation, re-processed conversation with per-message timestamps, assistant message reassembly across split lines, tool call/result pairing via tool_use_id, content block flattening, project path mapping
 
 ### TRN-003 [P]: Notor Translator
 **Description:** Implement translator that reads Notor chat history from `{vault}/notor/history/` and produces intermediate format per spec FR-4.
@@ -443,18 +446,31 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 _Corresponds to plan.md Phase D. Builds harness hook system._
 
 ### HKI-001: Claude Code Hook Registration
-**Description:** Implement programmatic registration of a `user_prompt_submit` hook in Claude Code per research.md R-5 and spec FR-7.
+**Description:** Implement programmatic registration of a `UserPromptSubmit` hook in Claude Code per [research.md R-5](research.md#r-5-claude-code-hook-registration) and spec FR-7.
 **Files:**
 - `internal/hook/claudecode.go` — RegisterClaudeCodeHook, UnregisterClaudeCodeHook
 - `internal/hook/claudecode_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Locates Claude Code hook configuration file
-- [ ] Registers `user_prompt_submit` hook that invokes `multi-kb hook --harness claude-code`
-- [ ] Appends alongside any pre-existing hooks (never overwrites)
-- [ ] Registration is idempotent (re-running doesn't duplicate)
-- [ ] UnregisterClaudeCodeHook removes only the multi-kb hook entry
-- [ ] Test cases: register fresh, register alongside existing, idempotent re-register, unregister
+- [ ] **Settings file (R-5):** Reads and writes `~/.claude/settings.json` using JSON read-modify-write. Handles cases: file doesn't exist, `hooks` key absent, `UserPromptSubmit` key absent.
+- [ ] **Hook entry format (R-5):** Adds entry to `hooks.UserPromptSubmit` array:
+  ```json
+  {
+    "matcher": "*",
+    "hooks": [
+      {
+        "type": "command",
+        "command": "multi-kb hook --harness claude-code",
+        "timeout": 10
+      }
+    ]
+  }
+  ```
+- [ ] Appends alongside any pre-existing hooks in the `UserPromptSubmit` array (never overwrites other entries)
+- [ ] **Idempotency (R-5):** Before appending, scans existing entries for a command containing `multi-kb hook`. If found, updates the existing entry rather than duplicating.
+- [ ] UnregisterClaudeCodeHook removes only the multi-kb hook entry from the array
+- [ ] Preserves all other settings in the file (permissions, env, model, other hook events)
+- [ ] Test cases: register to empty settings, register alongside existing hooks, idempotent re-register, unregister, file doesn't exist yet, malformed settings file
 
 ### HKI-002 [P]: Notor Hook Registration
 **Description:** Implement programmatic registration of a conversation-start hook in Notor per research.md R-6 and spec FR-7.
@@ -511,35 +527,37 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - [ ] Test cases: equal-length lists, unequal lengths, single KB, no results, duplicate UIDs, more than 10 total
 
 ### HKI-006: Markdown Injection Formatting
-**Description:** Format recalled notes as Markdown for stdout injection, including pending notice per spec FR-7.
+**Description:** Format recalled notes for injection into harness hook output, including pending notice per spec FR-7.
 **Files:**
-- `internal/recall/format.go` — FormatInjection function
+- `internal/recall/format.go` — FormatInjection function (returns Markdown string), FormatHookOutput function (wraps for harness-specific output)
 - `internal/recall/format_test.go`
 **Dependencies:** FND-008
 **Acceptance Criteria:**
-- [ ] Outputs raw Markdown (no JSON wrapper)
-- [ ] Each note includes: title (as heading), source KB name, full content
+- [ ] FormatInjection produces a Markdown string with each note's title (as heading), source KB name, and full content
 - [ ] When pending queue is non-empty: includes notice at the end (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
-- [ ] Empty results produce no output (silent — no "no results found" message)
-- [ ] Test cases: multiple notes from multiple KBs, single note, pending notice, no pending, empty results
+- [ ] Empty results produce empty string (silent — no "no results found" message)
+- [ ] **Claude Code output format (R-5):** FormatHookOutput for `claude-code` harness wraps the Markdown in a JSON object: `{"systemMessage": "<markdown>"}`. The `systemMessage` field is what Claude Code injects into the system context.
+- [ ] **Notor output format:** FormatHookOutput for `notor` harness outputs raw Markdown to stdout (Notor's hook contract TBD by R-6).
+- [ ] Test cases: multiple notes from multiple KBs, single note, pending notice, no pending, empty results, Claude Code JSON wrapping, Notor raw output
 
 ### HKI-007: Hook Entry Point Command (`multi-kb hook`)
-**Description:** Wire up the hook subcommand that orchestrates the full injection flow per spec FR-7.
+**Description:** Wire up the hook subcommand that orchestrates the full injection flow per spec FR-7. Behavior reshaped by [research.md R-5](research.md#r-5-claude-code-hook-registration) findings.
 **Files:**
 - `internal/cmd/hook.go` — full implementation replacing stub
 - `internal/hook/inject.go` — core injection orchestrator
 **Dependencies:** FND-001, FND-007, FND-009, HKI-003, HKI-004, HKI-005, HKI-006
 **Acceptance Criteria:**
 - [ ] Accepts `--harness` flag (claude-code or notor)
-- [ ] Claude Code: implements first-message guard — checks for absence of prior assistant messages; if not first message, exits immediately with no output. **Note:** The exact detection mechanism depends on R-5 research findings (what data does the hook receive?). Defer implementation approach until R-5 completes.
-- [ ] Reads user's first message (from stdin or hook context)
+- [ ] **Claude Code stdin parsing (R-5):** Reads JSON from stdin containing `user_prompt`, `session_id`, `transcript_path`, `cwd`. Parses the `user_prompt` field as the query text. Uses `cwd` (or `$CLAUDE_PROJECT_DIR` env var) to identify the current directory for routing config.
+- [ ] **First-message guard (R-5):** For Claude Code, reads the `transcript_path` file and checks for prior `user`-type entries. If prior user messages exist, this is not the first message — exit immediately with code 0 and no stdout output. If no prior user messages (or transcript is empty/missing), proceed with injection.
 - [ ] Identifies target KBs for the current directory from config
 - [ ] Queries all target KBs concurrently (local via git grep with LLM keywords, remote via recallKnowledge)
 - [ ] Merges results via rank-based interleaving → top 10
-- [ ] Formats as Markdown and writes to stdout
+- [ ] **Output format (R-5):** For Claude Code, writes JSON to stdout: `{"systemMessage": "<formatted markdown>"}`. For Notor, writes raw Markdown to stdout (per R-6 TBD). Exit code 0 on success.
 - [ ] Enforces configurable timeout (default 8s) — partial results from responsive KBs used if others time out
-- [ ] On complete timeout (no KBs respond): no output, warning logged to `hook-errors.jsonl`
-- [ ] Test cases: full injection path (mocked), first-message guard (pass/block), timeout handling, partial results
+- [ ] On complete timeout (no KBs respond): exit code 0 with no stdout output, warning logged to `hook-errors.jsonl`
+- [ ] **Error handling (R-5):** On fatal error, exit with non-0/non-2 code (non-blocking error — Claude Code proceeds without injection). Never exit with code 2 (blocking error) to avoid halting the user's conversation.
+- [ ] Test cases: full injection path (mocked), first-message guard via transcript (pass/block), stdin JSON parsing, JSON output format for Claude Code, timeout handling, partial results, error exit codes
 
 ---
 
@@ -1011,16 +1029,19 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 
 _Research items must complete before their dependent implementation phases._
 
-| Research | Must Complete Before | Blocks |
-|----------|---------------------|--------|
-| **R-2:** Bedrock KB metadata extraction | CDK Phase 4 (Lambda Functions) | LMB-004, PRM-003 |
-| **R-4:** Notor conversation format | CLI Phase 2 (Translation Layer) | TRN-003 |
-| **R-5:** Claude Code hook registration | CLI Phase 4 (Hook Injection) | HKI-001, HKI-007 |
-| **R-6:** Notor hook registration | CLI Phase 4 (Hook Injection) | HKI-002 |
+| Research | Must Complete Before | Blocks | Status |
+|----------|---------------------|--------|--------|
+| **R-2:** Bedrock KB metadata extraction | CDK Phase 4 (Lambda Functions) | LMB-004, PRM-003 | Open |
+| **R-3:** Claude Code conversation format | CLI Phase 2 (Translation Layer) | TRN-002 | **✅ Complete** |
+| **R-4:** Notor conversation format | CLI Phase 2 (Translation Layer) | TRN-003 | Open |
+| **R-5:** Claude Code hook registration | CLI Phase 4 (Hook Injection) | HKI-001, HKI-007 | **✅ Complete** |
+| **R-6:** Notor hook registration | CLI Phase 4 (Hook Injection) | HKI-002 | Open |
 
-**Recommended start order:** R-5 and R-2 are highest priority (block the most downstream tasks). R-4 and R-6 can follow.
+**Remaining research:** R-2 (highest priority — blocks CDK Lambda tasks), R-4 and R-6 (block Notor translation and hook tasks).
 
-**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 3 (Extraction — uses Claude Code only for initial testing), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
+**R-3 and R-5 are complete.** Their findings reshape TRN-002, HKI-001, HKI-006, and HKI-007 — see updated task descriptions below.
+
+**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 2 TRN-002 (R-3 complete), Phase 3 (Extraction), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
 
 ---
 

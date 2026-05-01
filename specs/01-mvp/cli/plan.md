@@ -111,20 +111,36 @@ All major technology choices are resolved by the spec (Go, Bedrock, git grep, YA
 - **Success Criteria:** Working extraction call that returns parsed JSON array of notes
 - **Deliverable:** Reusable `bedrock.Client` wrapper with retry + backoff
 
-#### R-3: Claude Code Conversation Format
+#### R-3: Claude Code Conversation Format ✅
 - **Research Task:** Document the exact JSONL schema of Claude Code conversation files in `~/.claude/projects/<project>/<session>.jsonl`
 - **Questions to Answer:** What are the message roles? How are tool calls/results structured? How to identify project subdirectory from a user-provided path? How to detect first-message vs. continued conversation from the hook context?
 - **Success Criteria:** Working translator that reads a real Claude Code conversation and produces intermediate format
+- **Resolution:** Full schema documented. Key findings that reshape implementation:
+  1. **Per-message timestamps ARE available** — ISO 8601 with ms precision on every message line. The spec's assumption that Claude Code lacks per-message timestamps is wrong. The translator can use per-message `previously_processed` flagging (same as Notor), not the file-level fallback.
+  2. **Project directory naming:** Absolute path with `/` → `-` (e.g., `/Volumes/workplace/multi-kb` → `-Volumes-workplace-multi-kb`).
+  3. **One file = one conversation.** Filename is a UUID.
+  4. **Content is always an array of blocks**, never a bare string.
+  5. **Assistant messages split one-block-per-JSONL-line** sharing the same `message.id`. Translator must reassemble.
+  6. **Tool results delivered as `type: "user"` lines** with `tool_result` content blocks + rich `toolUseResult` metadata.
+  7. **Subagent conversations** in companion directories — skip in MVP (result captured in parent conversation's tool result).
+  See [research.md R-3](research.md#r-3-claude-code-conversation-format).
 
 #### R-4: Notor Conversation Format
 - **Research Task:** Document the Notor chat history format at `{vault}/notor/history/`
 - **Questions to Answer:** File format (JSON, JSONL, other)? Message schema? Per-message timestamps available? Persona/workflow metadata available?
 - **Success Criteria:** Working translator that reads a real Notor conversation and produces intermediate format
 
-#### R-5: Claude Code Hook Registration
+#### R-5: Claude Code Hook Registration ✅
 - **Research Task:** Document how to programmatically register a `user_prompt_submit` hook in Claude Code
 - **Questions to Answer:** Where is the hook config file? What is the registration format? Can multiple hooks coexist at the same trigger point? What context (env vars, stdin, args) does the hook receive? How to detect first-message from within the hook?
 - **Success Criteria:** CLI can register a hook that fires on conversation start and injects a test string into the system context
+- **Resolution:** Three findings that reshape Phase D (Hook Injection):
+  1. **Hook output is structured JSON, not raw Markdown.** The spec assumed hooks write raw Markdown to stdout. In reality, the CLI must output `{"systemMessage": "<formatted markdown>"}`. The `systemMessage` value is injected into Claude's system context.
+  2. **First-message detection via transcript.** The hook receives `transcript_path` on stdin (JSON). Parse the transcript file and check for prior user messages — if none, this is the first message. No session state files needed.
+  3. **Hook input is JSON on stdin**, containing `user_prompt`, `session_id`, `transcript_path`, `cwd`. The CLI must parse stdin JSON, not read args or env vars for the prompt.
+  4. **Registration:** Write to `~/.claude/settings.json` under `hooks.UserPromptSubmit`. Use read-modify-write JSON editing. Multiple hooks coexist via the array structure.
+  5. **Timeout:** Set hook timeout to 10s (above CLI's 8s internal timeout).
+  See [research.md R-5](research.md#r-5-claude-code-hook-registration).
 
 #### R-6: Notor Hook Registration
 - **Research Task:** Document how to programmatically register a conversation-start hook in Notor
