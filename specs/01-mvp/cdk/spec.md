@@ -87,8 +87,8 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - Instance runs Amazon Linux 2023
-- Instance has git, the CLI binary, and the CloudWatch agent pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint; installs CloudWatch agent via `dnf install amazon-cloudwatch-agent`; clones the CodeCommit repository via the git-codecommit VPC endpoint)
-- CLI binary runs in server mode as a single long-running process managed by a systemd unit. The process uses a single periodic tick (configurable, default 5 minutes). On each tick, it checks whether a dream cycle is due (time since last dream cycle exceeds `dream_cycle.interval`, default 3 hours); if so, it runs a dream cycle; otherwise, it processes SQS ingestion and recall logs. No system crontab, no concurrent activities.
+- Instance has git, the CLI binary, and the CloudWatch agent pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint; installs CloudWatch agent via `dnf install amazon-cloudwatch-agent`; clones the CodeCommit repository via the git-codecommit VPC endpoint). User data script implements retry logic for network-dependent operations: S3 binary download and CodeCommit clone each retry up to 3 attempts with exponential backoff (1s, 2s, 4s). On persistent failure after all retries, the script signals cfn-signal failure, triggering ASG health check → instance termination → ASG replacement. The replacement instance retries user data from scratch.
+- CLI binary runs in server mode as a single long-running process managed by a systemd unit. The process uses a single periodic tick (configurable, default 5 minutes). On each tick: (1) check if dream cycle is due (time since last dream cycle exceeds `dream_cycle.interval`, default 3 hours); (2a) if yes, run dream cycle — all pending notes are consolidated, then status→active, then S3 sync; SQS messages remain in queue during dream cycle; (2b) if no, process SQS batch (up to 10 messages → git commit → S3 sync), then check if recall log processing is due. Dream cycle takes priority over SQS ingestion to ensure consolidation completes before new notes arrive. Lock file prevents concurrent execution. No system crontab, no concurrent activities.
 - Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket + `s3:GetObject` on the `cliBinaryS3Uri` object ARN for binary download), OpenSearch Serverless (data plane access for direct queries during dream cycle), Bedrock (InvokeModel for dream cycle LLM calls, StartIngestionJob/GetIngestionJob for triggering KB data source sync), SSM (Session Manager access for operator debugging)
 - Instance polls SQS, batches ~5–10 messages, and commits them as Markdown files to CodeCommit in a single git commit per batch
 - After each commit, instance syncs changed files to S3 (incremental, not full repo)
@@ -127,7 +127,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Bucket is created by the CDK stack with a configurable name prefix
 - Only changed files are synced from CodeCommit (not full repo clone on each commit)
 - Files deleted from CodeCommit are also deleted from S3
-- Bucket also stores recall logs under `recall-logs/<YYYY-MM-DD>/<request-id>.json`
+- Bucket also stores recall logs under `recall-logs/<YYYY-MM-DD>/<request-id>.json` (date partition is UTC, derived from the recall log's ISO 8601 timestamp)
 - Bucket has versioning disabled (CodeCommit provides version history)
 - Bucket has server-side encryption enabled (SSE-S3)
 
@@ -179,7 +179,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Acceptance Criteria:**
 - Dream cycle runs when the periodic tick (default every 5 minutes) determines that `dream_cycle.interval` (default 3 hours) has elapsed since the last dream cycle
 - Since the single-tick model ensures only one activity runs at a time, there is no lock contention between ingestion and dream cycles
-- A lock file with heartbeat (60-second update interval, 30-minute TTL) prevents overlapping process instances; stale locks are force-acquired
+- A lock file with heartbeat (60-second update interval, 30-minute TTL) prevents overlapping process instances; stale locks are force-acquired (see data-model.md "Dream Cycle Lock File" for path, format, and lifecycle details)
 - Phase 0: Syncs CodeCommit → S3, triggers Bedrock KB data source sync (`StartIngestionJob`), polls `GetIngestionJob` for completion, waits up to 10 minutes
 - Phase 1: Queries OpenSearch directly (via VPC endpoint, using OpenSearch query DSL) for `status: pending` notes, groups by similarity (max 10 per batch)
 - Phase 2: For each batch, queries OpenSearch directly for related `status: active` notes (max 10 per batch)
@@ -194,7 +194,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - Runs once per day during a non-dream-cycle tick (tracked by last-run timestamp; executed during the first eligible tick after the daily threshold is crossed)
-- Scans S3 objects under the previous day's `recall-logs/` prefix
+- Scans S3 objects under the previous day's `recall-logs/<YYYY-MM-DD>/` prefix (date is UTC, matching the Lambda's UTC-based partition key)
 - Collects all recalled UIDs
 - Updates `last-recalled` frontmatter on each referenced note in CodeCommit
 - Silently skips UIDs for notes that no longer exist (deleted during consolidation)

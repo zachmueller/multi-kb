@@ -147,7 +147,7 @@ const recallLog = {
 
 await s3.putObject({
   Bucket: BUCKET_NAME,
-  Key: `recall-logs/${dateStr}/${requestId}.json`,
+  Key: `recall-logs/${dateStr}/${requestId}.json`, // dateStr = UTC date (YYYY-MM-DD)
   Body: JSON.stringify(recallLog),
   ContentType: 'application/json'
 });
@@ -182,7 +182,7 @@ const response = await bedrockAgent.retrieve({
 | `retrievalResults[].metadata.uid` | `uid` | From note frontmatter |
 | `retrievalResults[].metadata.title` | `title` | From note frontmatter |
 
-Note: Bedrock KB extracts metadata from Markdown frontmatter. The field mapping depends on how Bedrock KB parses the notes — verify during R-2 research.
+**ASSUMPTION (verify in Phase 0):** Bedrock KB extracts YAML frontmatter fields as queryable metadata when indexing Markdown files from S3. The `uid` and `title` fields must appear in `retrievalResults[].metadata` for this mapping to work. If Bedrock does not extract frontmatter as metadata, a fallback approach is needed (e.g., parse the S3 object directly to extract frontmatter). A Phase 0 verification task must deploy a minimal KB, submit a note with frontmatter, call Retrieve, and confirm these field paths.
 
 ### IAM Permissions
 
@@ -198,6 +198,18 @@ Note: Bedrock KB extracts metadata from Markdown frontmatter. The field mapping 
 |----------|--------|-------------|
 | `KNOWLEDGE_BASE_ID` | CDK construct | Bedrock KB ID for Retrieve API |
 | `BUCKET_NAME` | CDK construct | S3 bucket for recall logs |
-| `COVERAGE_MODEL_ID` | CDK context | LLM model for coverage assessment |
+| `COVERAGE_MODEL_ID` | CDK context | LLM model for coverage assessment (short-form model ID) |
 | `COVERAGE_SCORE_THRESHOLD` | CDK context | Score threshold for coverage (default: `0.3`) |
 | `EXCLUDE_PENDING` | CDK context | Whether to filter pending notes (default: `true`) |
+
+### Coverage Model ARN Construction
+
+The Lambda constructs the Bedrock model ARN at runtime from environment variables:
+
+```
+arn:aws:bedrock:${AWS_REGION}::foundation-model/${COVERAGE_MODEL_ID}
+```
+
+- The account ID field is empty (`::`) because foundation models are AWS-owned resources
+- Example: given `COVERAGE_MODEL_ID=anthropic.claude-haiku-3-20240307` and `AWS_REGION=us-east-1`, the ARN is `arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-3-20240307`
+- IAM permission `bedrock:InvokeModel` must be granted on this constructed ARN

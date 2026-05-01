@@ -143,12 +143,13 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Intermediate format uses JSONL with a conversation header line followed by message lines
 - Roles are normalized to `user`, `assistant`, `system`
 - Tool call/result pairs are collapsed into `tool_uses` entries on the assistant message
-- Small tool interactions (<~1K tokens) use mechanical summary templates without an LLM call
-- Large tool interactions (≥~1K tokens) are summarized via a fast, cheap LLM (configurable `translation.summarization_model_id`)
+- Small tool interactions (<1,024 tokens, estimated via `chars / 4` heuristic) use mechanical summary templates without an LLM call
+- Large tool interactions (≥1,024 tokens) are summarized via a fast, cheap LLM (configurable `translation.summarization_model_id`)
 - Content block arrays are flattened to plain text strings
-- Previously processed messages are flagged with `previously_processed: true` based on the directory's `last-processed` timestamp. For harnesses with per-message timestamps (Notor), each message's timestamp is compared individually. For harnesses without reliable per-message timestamps (Claude Code), the flag is applied at the file level: if the conversation file was previously processed, all messages from the prior processing are flagged `previously_processed: true` (the entire conversation is re-translated, with the extraction prompt relying on the flag to focus on new content).
-- Per-harness translator modules exist for Notor and Claude Code
-- Claude Code translator reads from the fixed location `~/.claude/projects/<project>/<session>.jsonl`, where `<project>` is derived from the user-configured directory path
+- Previously processed messages are flagged with `previously_processed: true` based on the directory's `last-processed` timestamp. Both Notor and Claude Code include ISO 8601 timestamps (with millisecond precision) on every message line, allowing per-message `previously_processed` flagging: each message's timestamp is compared individually to the directory's `last-processed` value.
+- Per-harness translator modules exist for Notor and Claude Code, each handling format-specific nuances (see plan.md R-3 and R-4 for authoritative harness format details):
+  - **Claude Code:** Reads from `~/.claude/projects/<project>/<session>.jsonl`, where `<project>` is the absolute directory path with `/` replaced by `-`. Content field is always an array of blocks (never a bare string). Assistant messages are split one-block-per-JSONL-line sharing the same `message.id` — translator must reassemble blocks into a single message. Tool results are delivered as `type: "user"` lines with `tool_result` content blocks.
+  - **Notor:** Reads from `{vault}/.obsidian/plugins/notor/history/` (path discoverable via `history_path` in `{vault}/.obsidian/plugins/notor/data.json`). Uses six message roles: `user`, `assistant`, `tool_call`, `tool_result`, `system`, `extension_block` — tool calls and results are dedicated JSONL lines (not content blocks within user/assistant messages), paired via `tool_call.id`. Content field may be a string or ContentBlock array (must handle both). Persona/workflow metadata is on the conversation header only (`workflow_name`, `persona_name`). Skip `extension_block` messages and sub-agent files (filename contains `_subagent_`).
 
 ### FR-5: Extraction Sub-Agent
 
@@ -163,7 +164,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Output is a JSON array of objects with `title`, `content`, and `suggested_target_kbs` fields
 - For re-processed conversations, extraction focuses on `previously_processed: false` messages while using the full conversation for context
 - Respects the user's global exclusion rules: the array of exclusion strings from `config.yaml` is appended to the extraction system prompt as a bulleted list under a "Content exclusion rules — never include in notes destined for non-local KBs" heading
-- Conversations exceeding ~800K tokens (measured after translation to intermediate format; implementation uses a conservative 700K threshold to account for token estimation error) are split at message boundaries and processed iteratively with summarized context carried forward. Each processed chunk is summarized to ~10–20K tokens before being prepended to the next chunk as contextual preamble. Chunk summarization uses the extraction model (`extraction.model_id`) with a summarization-specific prompt — not the cheaper translation model — to ensure high-quality context preservation across chunks.
+- Conversations exceeding 700,000 tokens (measured after translation to intermediate format via `chars / 4` heuristic; this threshold provides a safety margin below the model's context limit) are split at message boundaries and processed iteratively with summarized context carried forward. Each processed chunk is summarized to 10,000–20,000 tokens before being prepended to the next chunk as contextual preamble. Chunk summarization uses the extraction model (`extraction.model_id`) with a summarization-specific prompt — not the cheaper translation model — to ensure high-quality context preservation across chunks.
 
 ### FR-6: Extraction Error Handling
 
@@ -210,7 +211,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Knowledge recall against local KBs uses `git grep` against the working tree — no separate search index, no vector embeddings. Results are filtered to `status: active` notes only by default (matching remote KB behavior), excluding `pending` notes that haven't been through a dream cycle.
 - `last-recalled` is present in the local KB frontmatter schema for consistency with remote KBs but is not updated by any local process in MVP. Local hook injection does not track which notes were recalled. This is an accepted MVP limitation — the field exists to maintain schema parity and may be populated in a future iteration.
 - For hook-based recall (FR-7), the CLI first calls the translation summarization model (`translation.summarization_model_id`) to derive 3–5 search keywords from the user's natural language query, then runs `git grep` per keyword. For dream cycle Phase 2 recall, keywords are derived mechanically from the note's title and key terms (no LLM call).
-- Local recall results are ranked by match count (number of query term matches per note, with title matches weighted at 3x body matches) to produce a coarse relevance ordering for interleaving with remote KB results
+- Local recall results are ranked by match count with title matches weighted at 3× body matches, using case-insensitive whole-word matching (`\b{keyword}\b`), with ties broken by recency (see `contracts/recall-ranking.md` for precise formula and interleaving semantics)
 - Local dream cycles run as part of the combined `multi-kb run` command (capture processing then dream cycle sequentially) on the OS-native cron schedule, or via manual trigger with `multi-kb dream-cycle`
 - Local dream cycles use the same Phase 1–4 logic as server mode with the following local adaptations: Phase 0 is a no-op (local git repo is always current); Phase 1 skips similarity grouping entirely — each pending note is processed as a singleton batch; Phase 2 uses keyword-based `git grep` queries (derived from the note's title and key terms) to find related existing notes; Phase 4 is git commit + update dream cycle timestamp + release lock (no S3 sync or OpenSearch reindex)
 - No dream cycle manifest for MVP — if a dream cycle fails mid-processing, already-committed batches are preserved (notes flipped to `status: active`), and remaining `status: pending` notes are simply re-processed from scratch on the next dream cycle run. This may result in some re-work but avoids manifest complexity.
@@ -274,7 +275,11 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
                 routing: always
                 approval: auto-approve
     ```
-    Each `sources` entry defines a tracked directory, its active harness(es), and a default `targets` list specifying which KBs receive extracted notes with what routing and approval modes. The optional `overrides` array refines routing for specific harness or harness+persona/workflow combinations within that directory — override targets replace (not merge with) the directory-level defaults for matching conversations. The `kb` field in each target references either a local KB name (prefixed with `local/`, e.g., `local/default`) or a remote KB name matching an entry in `knowledge_bases`.
+    Each `sources` entry defines a tracked directory, its active harness(es), and a default `targets` list specifying which KBs receive extracted notes with what routing and approval modes. The optional `overrides` array refines routing for specific harness or harness+persona/workflow combinations within that directory. Override resolution rules:
+    - **Override targets replace** (not merge with) the directory-level defaults for matching conversations
+    - **Precedence (most-specific wins):** `harness + persona` > `harness-only` > `directory-level defaults`. When multiple overrides could match, the most specific match applies exclusively.
+    - **Zero-target fallback:** If a matching override results in an empty targets list (or all targets are removed), the conversation falls back to `local/default` KB with `routing: always` and `approval: auto-approve` to ensure no knowledge is silently dropped.
+    The `kb` field in each target references either a local KB name (prefixed with `local/`, e.g., `local/default`) or a remote KB name matching an entry in `knowledge_bases`.
 - **State file (`state.yaml`):**
   - Per-directory `last-processed` timestamps
   - Last dream cycle timestamp
@@ -464,10 +469,10 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 ### Alternative Flow: Oversized Conversation Processing
 
-1. A conversation exceeds the chunking threshold (~800K tokens nominal; 700K implementation threshold) after translation
+1. A conversation exceeds the 700,000-token chunking threshold after translation
 2. CLI splits near the threshold on a message boundary
 3. First chunk is processed through extraction, yielding knowledge notes
-4. First chunk is summarized to ~10-20K tokens
+4. First chunk is summarized to 10,000–20,000 tokens
 5. Summary is prepended to the next chunk as context
 6. Next chunk is processed, yielding additional notes
 7. Process repeats until all chunks are processed
@@ -513,7 +518,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Users can go from binary download to first successful knowledge capture in under 10 minutes of setup time
 - Knowledge from AI conversations is captured without any manual user action after initial setup (zero ongoing effort for auto-approved flows)
 - Relevant team knowledge surfaces in new AI conversations within the hook timeout window (default 8 seconds)
-- The system handles conversations of any length (including those exceeding the ~800K token chunking threshold) without silent data loss
+- The system handles conversations of any length (including those exceeding the 700,000-token chunking threshold) without silent data loss
 - Manual approval workflow enables users to review and filter knowledge before it reaches team KBs, with a clear queue and simple approve/reject interaction
 - A single CLI binary serves both local development use and server-mode deployment without code divergence
 

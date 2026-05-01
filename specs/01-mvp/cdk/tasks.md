@@ -350,6 +350,7 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - [ ] Lambda security group: same EC2 SG or a separate SG with outbound 443 to endpoint SG
 - [ ] Lambda IAM role: `aoss:APIAccessAll` on collection ARN
 - [ ] Lambda role must be listed in AOSS data access policy (SRC-004) principals
+- [ ] **Dependency ordering:** The Lambda IAM role is created as part of this construct (before the custom resource executes). The role ARN is passed to SRC-004 for inclusion in the data access policy. The custom resource execution (`CustomResource` node) must depend on SRC-004 being created — use `customResource.node.addDependency(dataAccessPolicy)` to ensure the policy grants access before the Lambda attempts to create the index.
 - [ ] On Create: creates the index; on Update: no-op (index schema is immutable); on Delete: optionally deletes the index
 - [ ] Idempotent: if index already exists, succeeds without error
 - [ ] Vector dimension (1024) matches the embedding model configuration in KBS-001
@@ -359,11 +360,12 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 **Description:** Add CloudFormation outputs for search infrastructure.
 **Files:**
 - `lib/multi-kb-stack.ts` — CfnOutput additions
-**Dependencies:** SRC-001, KBS-001
+**Dependencies:** SRC-001, KBS-001, KBS-003 (data source ID)
 **Acceptance Criteria:**
 - [ ] Output `CollectionEndpoint`: OpenSearch Serverless collection endpoint
 - [ ] Output `KnowledgeBaseId`: Bedrock KB ID
-- [ ] CDK assertion test: outputs exist
+- [ ] Output `DataSourceId`: Bedrock KB data source ID (from KBS-003) — required by EC2 config.yaml per [server-config.md](contracts/server-config.md)
+- [ ] CDK assertion test: outputs exist (including `DataSourceId`)
 
 ---
 
@@ -447,7 +449,8 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
   - If gap detected: follow-up Retrieve query
   - Deduplicates by UID, sorts by score, truncates to `limit`
   - On any coverage failure: falls back to original results silently
-- [ ] Writes recall log to S3 synchronously: `recall-logs/<YYYY-MM-DD>/<request-id>.json`
+- [ ] Coverage model ARN construction: `arn:aws:bedrock:${AWS_REGION}::foundation-model/${COVERAGE_MODEL_ID}` (empty account ID for AWS-owned foundation models; see [contracts/recall-knowledge.md](contracts/recall-knowledge.md#coverage-model-arn-construction))
+- [ ] Writes recall log to S3 synchronously: `recall-logs/<YYYY-MM-DD>/<request-id>.json` (date partition is UTC)
   - Best-effort: S3 failure logged but doesn't affect response
 - [ ] Returns HTTP 200 with results array (or empty array)
 - [ ] Reads env vars: `KNOWLEDGE_BASE_ID`, `BUCKET_NAME`, `COVERAGE_MODEL_ID`, `COVERAGE_SCORE_THRESHOLD`, `EXCLUDE_PENDING`
@@ -464,7 +467,7 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - [ ] Runtime: `nodejs22.x`, architecture: ARM64
 - [ ] Memory: 1024 MB, timeout: 30 seconds
 - [ ] Environment variables: `KNOWLEDGE_BASE_ID`, `BUCKET_NAME`, `COVERAGE_MODEL_ID`, `COVERAGE_SCORE_THRESHOLD`, `EXCLUDE_PENDING`
-- [ ] IAM: `bedrock:Retrieve` on KB ARN; `bedrock:InvokeModel` on coverage model ARN; `s3:PutObject` on `{bucket-arn}/recall-logs/*`
+- [ ] IAM: `bedrock:Retrieve` on KB ARN; `bedrock:InvokeModel` on `arn:aws:bedrock:{region}::foundation-model/{coverageModelId}` (empty account ID for AWS-owned foundation models); `s3:PutObject` on `{bucket-arn}/recall-logs/*`
 - [ ] Lambda is NOT VPC-attached (calls public Bedrock endpoints)
 - [ ] Exports: Lambda function (for API Gateway integration)
 - [ ] CDK assertion test: Lambda runtime, memory, timeout; IAM with three permission sets scoped to specific ARNs; environment variables; NOT in VPC
@@ -575,9 +578,9 @@ _Corresponds to plan.md Phase F._
 **Acceptance Criteria:**
 - [ ] Uses `UserData.forLinux()` with `set -euxo pipefail` as first command
 - [ ] Step 1: Install packages — `dnf install -y amazon-cloudwatch-agent` (git is pre-installed on AL2023; do NOT install git separately to avoid ambiguity)
-- [ ] Step 2: Download CLI binary — `aws s3 cp ${cliBinaryS3Uri} /usr/local/bin/multi-kb && chmod +x /usr/local/bin/multi-kb` (raw `addCommands`, NOT `addS3DownloadCommand` — S3 URI is a string prop, not an `IBucket` reference)
+- [ ] Step 2: Download CLI binary — wrap in retry loop (3 attempts, exponential backoff: 1s/2s/4s): `aws s3 cp ${cliBinaryS3Uri} /usr/local/bin/multi-kb && chmod +x /usr/local/bin/multi-kb` (raw `addCommands`, NOT `addS3DownloadCommand` — S3 URI is a string prop, not an `IBucket` reference)
 - [ ] Step 3: Git credential helper — `git config --system credential.helper '!aws codecommit credential-helper $@'` and `git config --system credential.UseHttpPath true` (use `--system` not `--global` so it applies to all users)
-- [ ] Step 4: Clone CodeCommit repo — `git clone https://git-codecommit.{region}.amazonaws.com/v1/repos/{repoName} /opt/multi-kb/repo` with `|| { git init ... }` fallback for empty repos on first deploy
+- [ ] Step 4: Clone CodeCommit repo — wrap in retry loop (3 attempts, exponential backoff: 1s/2s/4s): `git clone https://git-codecommit.{region}.amazonaws.com/v1/repos/{repoName} /opt/multi-kb/repo` with `|| { git init ... }` fallback for empty repos on first deploy
 - [ ] Step 5: Template `config.yaml` at `/opt/multi-kb/config.yaml` — interpolate all CDK-resolved values per [server-config.md](contracts/server-config.md) field mapping table. Use line-by-line `addCommands()` with heredoc and template literal interpolation for CDK tokens.
 - [ ] Step 6: Configure CloudWatch agent — use `Stack.toJsonString()` to safely serialize JSON config containing CDK token (`logGroupName`). Config at `/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json`. Log stream name uses `{instance_id}` (CloudWatch agent variable, NOT a CDK token). Start agent with `amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:...`.
 - [ ] Step 7: Create systemd unit file at `/etc/systemd/system/multi-kb.service` — `Type=simple`, `Restart=on-failure`, `RestartSec=5`, `WorkingDirectory=/opt/multi-kb/repo`, `StandardOutput=append:/var/log/multi-kb/server.log`, `StandardError=append:/var/log/multi-kb/server.log`, `Environment=AWS_REGION={region}`, `Environment=HOME=/root`. Create `/var/log/multi-kb/` directory first.
@@ -771,6 +774,19 @@ _Research items must complete before their dependent implementation phases._
 - [ ] **CloudWatch:** Verify Lambda logs, EC2 CLI logs, and API access logs visible in CloudWatch
 - [ ] **Alarms:** Verify DLQ alarm fires when a test message is sent to DLQ
 - [ ] All validation within 30-minute success criterion (single `cdk deploy` → working KB)
+
+### QAT-006: Bedrock KB Metadata Extraction Verification
+**Description:** Verify that Bedrock KB correctly extracts YAML frontmatter fields (`uid`, `title`) from Markdown notes as queryable metadata in the Retrieve API response. This is a critical assumption that must be validated before implementation proceeds past Phase 0.
+**Dependencies:** KBS-003 (data source created), STR-001 (S3 bucket)
+**Acceptance Criteria:**
+- [ ] Deploy a minimal Bedrock KB with the CDK stack's data source configuration (S3 bucket + OpenSearch collection)
+- [ ] Upload a test Markdown note with YAML frontmatter containing `uid` and `title` fields to S3
+- [ ] Trigger a data source sync (`StartIngestionJob`) and wait for completion
+- [ ] Call `bedrock-agent-runtime:Retrieve` with a query matching the test note content
+- [ ] Confirm `retrievalResults[].metadata.uid` contains the expected UID value
+- [ ] Confirm `retrievalResults[].metadata.title` contains the expected title value
+- [ ] If metadata extraction does NOT work as expected, document the actual response structure and update `contracts/recall-knowledge.md` field mapping accordingly
+- [ ] Document findings in research.md R-2
 
 ---
 

@@ -102,18 +102,23 @@ sources:
         routing: consider
         approval: require-manual-approval
     overrides:                   # Optional per-harness/persona refinements
-      - harness: notor
+      - harness: notor           # Harness-only override (mid precedence)
         targets:
           - kb: architecture-kb
             routing: always
             approval: auto-approve
-      - harness: notor
+      - harness: notor           # Harness+persona override (highest precedence)
         persona: "architecture"
         targets:
           - kb: architecture-kb
             routing: always
             approval: auto-approve
 ```
+
+**Override Resolution:**
+- Override targets **replace** (not merge with) directory-level defaults for matching conversations
+- Precedence (most-specific wins): `harness + persona` > `harness-only` > `directory-level`
+- If a matching override results in zero targets, fall back to `local/default` with `routing: always`, `approval: auto-approve`
 
 **Validation Rules:**
 - `mode` must be `client` or `server`

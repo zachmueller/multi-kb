@@ -101,7 +101,7 @@ When configuring DynamoDB Global Tables, the IAM role needs...
 
 ### 3. Recall Log (S3 Object)
 
-**Path:** `recall-logs/<YYYY-MM-DD>/<request-id>.json`
+**Path:** `recall-logs/<YYYY-MM-DD>/<request-id>.json` (date partition is UTC, derived from the `timestamp` field)
 
 ```json
 {
@@ -342,3 +342,26 @@ Bedrock Knowledge Base
 | EC2 Instance Role | `sqs:ReceiveMessage`+`sqs:DeleteMessage` on queue ARN, `codecommit:GitPull`+`codecommit:GitPush` on repo ARN, `s3:GetObject`+`s3:PutObject`+`s3:DeleteObject`+`s3:ListBucket` on bucket ARN, `s3:GetObject` on CLI binary S3 URI, `aoss:APIAccessAll` on collection ARN, `bedrock:InvokeModel` on consolidation model ARN, `bedrock-agent:StartIngestionJob`+`bedrock-agent:GetIngestionJob` on KB/data source, `ssm:*` (Session Manager) | EC2 instance |
 | Bedrock KB Service Role | `s3:GetObject`+`s3:ListBucket` on bucket ARN, `aoss:APIAccessAll` on collection ARN, **`bedrock:InvokeModel` on embedding model ARN** (R-2) | Bedrock KB data source sync (ingestion + retrieval) |
 | Index Creation Lambda Role | `aoss:APIAccessAll` on collection ARN (also listed in AOSS data access policy) | Custom resource Lambda for OpenSearch index pre-creation (R-2) |
+
+## Dream Cycle Lock File
+
+The EC2 CLI process uses a lock file to prevent overlapping instances (e.g., if ASG replaces the instance while a dream cycle is running, or if systemd restarts the process).
+
+**Path:** `/opt/multi-kb/multi-kb.lock`
+
+**Format (JSON):**
+```json
+{
+  "pid": 12345,
+  "hostname": "ip-10-0-1-42",
+  "started_at": "2026-05-01T10:00:00Z",
+  "heartbeat": "2026-05-01T10:05:00Z"
+}
+```
+
+**Lifecycle:**
+1. **Acquire:** On process start, attempt to create lock file. If file exists, check `heartbeat` field.
+2. **Heartbeat:** While running, update the `heartbeat` field every 60 seconds.
+3. **Stale detection:** If `heartbeat` is older than 30 minutes, the lock is considered stale and may be force-acquired (overwrite with new lock).
+4. **Release:** On graceful shutdown (SIGTERM from systemd), delete the lock file.
+5. **Crash recovery:** If the process crashes without releasing the lock, the next process start detects the stale heartbeat and force-acquires after the 30-minute TTL expires.
