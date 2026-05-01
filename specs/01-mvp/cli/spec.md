@@ -22,7 +22,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: How are harness hooks (for knowledge injection) installed — automatically during setup or manually by the user? → A: CLI auto-registers hooks during setup. For each selected harness, the CLI writes the necessary hook configuration entries automatically. This keeps the "under 10 minutes" success criterion achievable and avoids error-prone manual configuration.
 - Q: Where does the CLI get the `author` identity for `submitKnowledge` API calls? → A: Single `author` field configured in `config.yaml` during initial setup (one identity across all KBs). For `federate` auth this would typically be the Amazon alias; for `iam`/open-source it's a free-form string the user provides.
 - Q: What happens if a scheduled capture processing run overlaps with a still-running previous run? → A: Lock file with heartbeat TTL (same pattern as dream cycles) — if a previous run still holds the lock, the new run skips. Consistent with the existing dream cycle concurrency control.
-- Q: What do local dream cycle Phases 0 and 4 look like concretely, given there's no S3/OpenSearch locally? → A: Phase 0 is a no-op (local git repo is always current). Phase 4 is just git commit + update timestamps + clear manifest + release lock. No sync or reindex steps.
+- Q: What do local dream cycle Phases 0 and 4 look like concretely, given there's no S3/OpenSearch locally? → A: Phase 0 is a no-op (local git repo is always current). Phase 4 is just git commit + update timestamps + release lock. No sync or reindex steps. No manifest tracking in MVP — remaining `status: pending` notes are re-processed from scratch on failure.
 - Q: Should per-directory `last-processed` timestamps and other mutable runtime state live in `config.yaml` or a separate file? → A: Separate state file (`~/.multi-kb/state.yaml`) — config is user-editable intent, state is CLI-managed runtime data. Separating them avoids read-modify-write conflicts if the user edits config while the CLI is running, and keeps config validation simple.
 - Q: What interaction model should the setup wizard (FR-2) use? → A: Interactive terminal wizard using guided prompts and menus (e.g., Go libraries like `bubbletea` or `survey`). Keeps the single-binary promise, requires no web UI dependency for setup, and is idiomatic for CLI tools.
 - Q: What specific full text search mechanism should local KB recall use? → A: `git grep` directly against the working tree — no separate search index. Zero-maintenance, no additional dependencies, and fast enough for expected MVP local KB sizes (hundreds to low thousands of notes).
@@ -36,14 +36,14 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: Should scheduled capture processing and local dream cycles run as separate cron entries or a single combined command? → A: Single combined command (`multi-kb run`) that performs capture processing then dream cycle sequentially under one lock acquisition. Avoids skip-contention between two independent cron entries competing for the shared lock. Manual triggers (`multi-kb process`, `multi-kb dream-cycle`) remain available as standalone subcommands.
 - Q: Which model handles chunk summarization when oversized conversations (>800K tokens) are split across multiple extraction passes? → A: The extraction model (`extraction.model_id`) with a summarization-specific prompt. High-quality context preservation is essential for later chunks to extract knowledge correctly, and this is a rare edge case so cost is negligible.
 - Q: How does `multi-kb approve` detect that the user is done and shut down the web server? → A: Idle timeout — server shuts down after a configurable period (default: 5 minutes) with no browser activity. Also shuts down immediately when all pending notes are resolved. Ctrl+C always works as an explicit kill.
-- Q: Should the CLI validate the configured `author` field against the current AWS caller identity before submitting to remote KBs? → A: No — author verification is purely a server-side concern. The CLI sends whatever is configured; the backend rejects mismatches for `federate` auth. For `iam` auth there's no reliable local mapping from AWS profile to human identity string.
+- Q: Should the CLI validate the configured `author` field against the current AWS caller identity before submitting to remote KBs? → A: No — the `author` field is trust-based in MVP. The CLI sends whatever is configured; the backend performs no identity matching. For `iam` auth there's no reliable local mapping from AWS profile to human identity string, and `federate` auth identity validation is deferred to post-MVP.
 - Q: How should the Claude Code translator derive per-message timestamps for the `previously_processed` flag, given Claude Code's native format lacks reliable per-message timestamps? → A: File-level ordering — use the conversation file's last-modified time as the effective timestamp for all messages. If a conversation was previously processed and is modified, all prior messages are flagged `previously_processed: true` and the full conversation is re-translated. The extraction prompt's focus on `previously_processed: false` messages handles the rest. Avoids fragile per-message timestamp inference.
 - Q: How should the CLI decompose a natural language first-message query into effective `git grep` searches for local KB recall? → A: LLM-derived keywords — use the translation summarization model (`translation.summarization_model_id`, e.g., Claude Haiku) to generate 3–5 search keywords from the user's natural language query, then `git grep` each keyword. Results are ranked by match count as already specified. This adds one fast, cheap LLM call to the hook injection path but produces much better keyword selection than mechanical stop-word removal.
 - Q: How should the approval web UI (FR-9) assets be packaged and served, given the single-binary constraint? → A: Embed static HTML/CSS/JS assets in the Go binary via `embed.FS`. The UI is a simple approve/reject interface, so a single-page app bundled at compile time keeps the single-binary promise intact with zero runtime file dependencies. Assets are served from memory at runtime by the built-in HTTP server.
 - Q: Should standalone manual subcommands (`multi-kb process`, `multi-kb dream-cycle`) respect the same lock file as the combined `multi-kb run`, or bypass it since they're user-initiated? → A: Respect the same lock — manual subcommands use the identical lock acquisition logic. If the lock is already held, the CLI prints a user-friendly message identifying what holds the lock and when the heartbeat was last updated, then exits immediately. This prevents concurrent writes to shared state/KB files regardless of trigger source.
 - Q: What specific Claude Code hook mechanism should the CLI use for knowledge injection? → A: User-prompt-submit hook with first-message guard — the CLI registers a Claude Code `user_prompt_submit` hook during setup. The hook fires on every user message, but the CLI checks whether this is the first message in the conversation (e.g., by checking for the absence of prior assistant messages in the session context provided by the hook). If it is not the first message, the CLI exits immediately with no output. If it is the first message, the CLI performs knowledge recall and outputs the injected context block. This reuses a well-defined, stable Claude Code hook event while preserving the "conversation-start only" injection constraint.
 - Q: What weight multiplier should title matches receive relative to body matches in local KB recall ranking? → A: 3x — a title match counts as 3 body matches when computing match-count rank scores. Simple, meaningful signal boost without over-dominating results.
-- Q: How are individual conversations keyed in `state.yaml` for tracking processing status (`partially-processed`, `failed`)? → A: Source file path (e.g., `~/.claude/projects/my-project/abc123.jsonl`). Available pre-parse so the CLI can skip failed conversations without re-reading them. Accepted trade-off: entries become stale if a conversation file is renamed or moved, but this is rare in practice.
+- Q: How are individual conversations keyed in `state.yaml` for tracking processing status? → A: Per-conversation processing state is not tracked in MVP. The CLI tracks only per-directory `last-processed` timestamps. Failed conversations are logged to `extraction-errors.jsonl` but not marked in state — they may be re-processed if the file is modified again, with dream cycle consolidation handling any resulting duplicates.
 - Q: What happens when the extraction LLM returns an empty `suggested_target_kbs` array for a note and there are no `always`-mode KBs configured for the current directory? → A: Fallback to local `default` KB — the note is written to the local default KB to prevent silent data loss. The local default KB acts as a safety net so no extracted knowledge is ever discarded. This aligns with the "zero tribal knowledge" goal.
 - Q: Can users edit a note's title or content during the approval flow, or is it strictly approve/reject? → A: Approve/reject with optional inline edit — the approval UI allows users to modify a note's title and content before approving. This handles the common "almost right but needs a tweak" case (e.g., fixing LLM hallucinations, redacting sensitive content). Rejected notes are still simply deleted with no editing step.
 - Q: What should the lock file heartbeat TTL and update frequency be for the CLI? → A: 30-minute TTL with 60-second heartbeat updates — matches the server-side value from the design doc. Generous for local runs (which typically complete in minutes) but provides ample headroom for large conversation backlogs or slow LLM responses without spurious stale-lock recovery.
@@ -91,7 +91,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - User can define global exclusion rules describing content that should never be shared with non-local KBs
 - Simplified onboarding presets are available for approval mode: auto-approve always, always require manual approval, or select per group
 - CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code `user_prompt_submit` hook with first-message guard), appending the multi-kb hook alongside any pre-existing hooks at the same trigger points (never overwriting existing hooks)
-- User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls. The CLI performs no local validation of this value against the AWS caller identity — author verification is purely a server-side concern (backend rejects mismatches for `federate` auth).
+- User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls. The CLI performs no validation of this value — the `author` field is trust-based in MVP. The backend validates only presence, non-empty, and length (≤100 characters). Identity matching (e.g., against Federate-authenticated caller) is deferred to post-MVP.
 
 ### FR-3: Conversation Scanning and Capture Processing
 
@@ -114,8 +114,24 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - For `consider`-mode KBs, the LLM's routing recommendations are respected (suggestions that don't match a configured KB name are silently dropped)
 - If a note has no routed targets after applying all routing rules (i.e., empty `suggested_target_kbs` and no `always`-mode KBs for the directory), the note falls back to the local `default` KB to prevent silent data loss
 - Auto-approved notes are submitted directly via the target KB's `submitKnowledge` API (or written to the local KB)
-- Manual-approval notes are staged as individual JSON files in `~/.multi-kb/pending/` (one file per note, containing title, content, target KB name, source conversation path, and extraction timestamp)
+- Manual-approval notes are staged as individual JSON files in `~/.multi-kb/pending/` (one file per note). Each pending JSON file uses the following schema:
+  ```json
+  {
+    "title": "Note title",
+    "content": "Full Markdown content",
+    "author": "configured-author-identity",
+    "target_kbs": ["kb-name-1", "kb-name-2"],
+    "source_conversation": "~/.claude/projects/my-project/abc123.jsonl",
+    "extracted_at": "2026-05-01T10:30:00Z"
+  }
+  ```
+  No `uid` field — UIDs are generated at submission time (server-side for remote KBs, locally for local KBs). No `status` field — existence in the directory means pending; deletion means resolved. `target_kbs` is an array because a single note can route to multiple KBs; the approval UI presents each target for review.
 - Remote submissions are self-throttled to a maximum of 10 requests per second per target KB
+- The CLI expects HTTP 202 with `{ "uid": "<UID>", "request_id": "<request-id>" }` on successful submission. The returned UID is not stored or tracked by the CLI in MVP (fire-and-forget); it exists for potential future use.
+- On `submitKnowledge` failure, the CLI applies error-type-specific handling:
+  - HTTP 401/403 (auth errors): log the error, skip remaining submissions to that KB for this run, and surface a message guiding the user to refresh credentials (e.g., `aws sso login --profile <profile>`)
+  - HTTP 400 (validation errors): pass the error details and original note back to the extraction LLM with a correction prompt, retry submission with the corrected output (up to 2 correction attempts per note; on persistent failure, stage the note in the pending queue for manual review)
+  - HTTP 5xx / network errors: retry up to 3 times with exponential backoff; on persistent failure, log the error and continue with remaining notes
 - After processing all conversations in a directory, the `last-processed` timestamp updates to the last-modified time of the final conversation file
 
 ### FR-4: Conversation Translation Layer
@@ -155,10 +171,9 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 **Acceptance Criteria:**
 - Bedrock API failures (throttling, timeout, network error) retry up to 3 times with exponential backoff
 - Malformed JSON output retries up to 3 times (fresh API call each retry)
-- Partially valid JSON arrays (some entries parse, some don't) are accepted for the valid entries; conversation marked `partially-processed`
-- After 3 retries with no usable output, conversation is marked `failed` and skipped
-- Both `partially-processed` and `failed` conversations are logged to `~/.multi-kb/logs/extraction-errors.jsonl` with conversation ID, source path, error details, and timestamp
-- Failed conversations are not automatically retried on subsequent runs (log provides data for future re-processing capability)
+- Partially valid JSON arrays (some entries parse, some don't) are accepted for the valid entries; the conversation is still considered processed (timestamp advances normally)
+- After 3 retries with no usable output, the conversation is skipped for the current run and logged to `~/.multi-kb/logs/extraction-errors.jsonl` with conversation ID, source path, error details, and timestamp
+- Failed conversations may be re-processed on subsequent runs if the conversation file is modified again (triggering the `last-processed` timestamp check). Any resulting duplicate notes from re-processing are handled by dream cycle consolidation.
 
 ### FR-7: Hook-Based Knowledge Injection
 
@@ -169,12 +184,12 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Hook fires only at conversation start (per-message injection is out of scope for MVP)
 - User's first message is used verbatim as the query for remote KB `recallKnowledge` API calls. For local KBs, the CLI first derives 3–5 search keywords from the message via the translation summarization model (see FR-8) before executing `git grep` queries.
 - All target KBs matching the current routing configuration are queried concurrently
-- Results from multiple KBs are merged via rank-based interleaving (top-ranked from each KB first, then second-ranked, etc.) until 10 notes are selected
+- Each KB's results are sorted by relevance before merging: remote KB results by descending `score`, local KB results by descending match count (title matches weighted 3x). Results from all KBs are then merged via rank-based interleaving (top-ranked from each KB first, then second-ranked, etc.) until 10 notes total are selected. If one KB returns fewer results than others, remaining slots are filled from the KBs that have results remaining.
 - Injected content is formatted as a Markdown list with note title, source KB name, and full content
 - No token budget cap on injected content for MVP
 - Hook is blocking with a configurable timeout (default: 8 seconds)
 - Partial results from responsive KBs are used if other KBs time out
-- If no KBs respond within timeout, conversation proceeds with no injection and a warning is logged
+- If no KBs respond within timeout, conversation proceeds with no injection and a warning is logged to `~/.multi-kb/logs/hook-errors.jsonl`
 - Notor integration: injected block prepended to conversation system context via conversation-start hook
 - Claude Code integration: CLI registers a `user_prompt_submit` hook. The hook fires on every user message but includes a first-message guard — if the conversation already has prior assistant messages, the CLI exits immediately with no output. On the first message, the CLI performs knowledge recall and outputs the injected context block, which Claude Code prepends to the conversation's system context.
 - When the pending approval queue (`~/.multi-kb/pending/`) is non-empty, the injected block includes a notice with the pending note count (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
@@ -196,7 +211,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - For hook-based recall (FR-7), the CLI first calls the translation summarization model (`translation.summarization_model_id`) to derive 3–5 search keywords from the user's natural language query, then runs `git grep` per keyword. For dream cycle Phase 2 recall, keywords are derived mechanically from the note's title and key terms (no LLM call).
 - Local recall results are ranked by match count (number of query term matches per note, with title matches weighted at 3x body matches) to produce a coarse relevance ordering for interleaving with remote KB results
 - Local dream cycles run as part of the combined `multi-kb run` command (capture processing then dream cycle sequentially) on the OS-native cron schedule, or via manual trigger with `multi-kb dream-cycle`
-- Local dream cycles use the same Phase 1–4 logic as server mode with the following local adaptations: Phase 0 is a no-op (local git repo is always current); Phase 1 skips similarity grouping entirely — each pending note is processed as a singleton batch; Phase 2 uses keyword-based `git grep` queries (derived from the note's title and key terms) to find related existing notes; Phase 4 is git commit + update dream cycle timestamp + clear manifest + release lock (no S3 sync or OpenSearch reindex)
+- Local dream cycles use the same Phase 1–4 logic as server mode with the following local adaptations: Phase 0 is a no-op (local git repo is always current); Phase 1 skips similarity grouping entirely — each pending note is processed as a singleton batch; Phase 2 uses keyword-based `git grep` queries (derived from the note's title and key terms) to find related existing notes; Phase 4 is git commit + update dream cycle timestamp + release lock (no S3 sync or OpenSearch reindex)
+- No dream cycle manifest for MVP — if a dream cycle fails mid-processing, already-committed batches are preserved (notes flipped to `status: active`), and remaining `status: pending` notes are simply re-processed from scratch on the next dream cycle run. This may result in some re-work but avoids manifest complexity.
 
 ### FR-9: Local Web UI for Approvals
 
@@ -228,7 +244,6 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
   - Per-directory routing configuration tracks harness pairings, target KBs, routing modes, and approval modes
 - **State file (`state.yaml`):**
   - Per-directory `last-processed` timestamps
-  - Per-conversation processing status (`partially-processed`, `failed`), keyed by source file path (e.g., `~/.claude/projects/my-project/abc123.jsonl`). File path is used because it is available pre-parse, allowing the CLI to skip failed conversations without re-reading them.
   - Last dream cycle timestamp
   - CLI never writes to `config.yaml` after initial setup (except via explicit user-triggered commands like adding a new KB)
 
@@ -252,19 +267,21 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 #### Process Model
 - Runs as a single long-running process (not short-lived invocations)
-- Manages all scheduled activities via built-in timers (no system crontab)
-- Three concurrent activities managed by built-in timers: SQS polling (continuous), dream cycle (configurable schedule, default every 6 hours), and recall log processing (once per day)
+- Manages all scheduled activities via a single periodic tick (configurable interval, default every 5 minutes; no system crontab)
+- On each tick, the process checks whether a dream cycle is due (i.e., time since last dream cycle exceeds `dream_cycle.interval`, default 3 hours). If due, it runs a dream cycle. Otherwise, it processes SQS ingestion and recall logs.
+- Recall log processing runs once per day (tracked by last-run timestamp; executed during the first non-dream-cycle tick after the daily threshold is crossed)
+- If a tick is still running when the next tick is due, the next tick is skipped (no concurrent processing, no lock contention)
 - Managed by a systemd unit for process lifecycle (start, stop, restart on failure)
 
 #### SQS Ingestion
-- Continuously polls the configured SQS queue for validated `submitKnowledge` messages
+- Polls the configured SQS queue for validated `submitKnowledge` messages during non-dream-cycle ticks
 - Batches ~5–10 messages before processing (configurable batch size)
 - For each message in the batch: creates a `<UID>.md` Markdown file with full frontmatter (`uid`, `title`, `status: pending`, `author`, `last-updated` set to `submitted_at`, empty `last-linked-to`, `last-recalled`, `consolidated-from-notes`) using the pre-generated UID and validated fields from the SQS message
 - Commits the entire batch as a single git commit to the CodeCommit repository
 - After a successful commit, performs an incremental S3 sync (see below)
 - Deletes successfully processed messages from the SQS queue
 - Messages that fail processing are left in the queue for SQS retry (up to 3 attempts before moving to the dead-letter queue, as configured by the CDK stack)
-- Ingestion and dream cycles share a lock file — ingestion batches acquire the lock before committing and release it after S3 sync completes. If the lock is held by a dream cycle, the ingestion batch waits (with a configurable timeout) rather than dropping messages.
+- Since the single-tick model ensures only one activity runs at a time, there is no lock contention between ingestion and dream cycles
 
 #### S3 Incremental Sync
 - After each git commit (ingestion batch or dream cycle batch), syncs only the changed files to the S3 bucket
@@ -280,12 +297,13 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
   - **Phase 1:** Queries OpenSearch Serverless directly (via VPC endpoint, using OpenSearch query DSL) for `status: pending` notes. Groups pending notes into batches by similarity search (up to 10 per batch) — pick an ungrouped pending note as seed, query OpenSearch for similar pending notes excluding already-grouped UIDs, form batch, repeat until all pending notes are assigned.
   - **Phase 2:** For each batch, queries OpenSearch Serverless directly for related `status: active` notes (up to 10 per batch), using representative content from the batch as the search query.
   - **Phase 3:** Identical to client mode — LLM evaluation, action application, per-batch git commits.
-  - **Phase 4:** Final S3 sync, triggers Bedrock KB data source sync (`StartIngestionJob`), polls for completion, updates dream cycle timestamp, clears manifest, releases lock.
+  - **Phase 4:** Final S3 sync, triggers Bedrock KB data source sync (`StartIngestionJob`), polls for completion, updates dream cycle timestamp, releases lock.
+- No dream cycle manifest for MVP — if a dream cycle fails mid-processing, already-committed batches are preserved (notes flipped to `status: active`), and remaining `status: pending` notes are re-processed from scratch on the next dream cycle run
 - Consolidation LLM model is configurable via server-mode config (`dream_cycle.model_id`)
 - Bedrock model calls use the `bedrock-runtime` VPC endpoint (InvokeModel) and `bedrock-agent` VPC endpoint (StartIngestionJob/GetIngestionJob)
 
 #### Recall Log Processing
-- Runs once per day via built-in timer
+- Runs once per day during a non-dream-cycle tick (tracked by last-run timestamp; executed during the first eligible tick after the daily threshold is crossed)
 - Scans S3 objects under the previous day's `recall-logs/<YYYY-MM-DD>/` prefix
 - Parses each recall log JSON blob to collect all recalled UIDs
 - For each unique UID: updates the `last-recalled` frontmatter timestamp on the corresponding note in the CodeCommit repository to the most recent recall timestamp for that UID
@@ -294,10 +312,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Acquires the shared lock before committing (to prevent concurrent writes with ingestion or dream cycles)
 
 #### Concurrency Control
-- All write operations (ingestion commits, dream cycle commits, recall log commits) share a single lock file
-- Lock file includes a heartbeat timestamp updated every 60 seconds during processing
-- Lock TTL is 30 minutes — if no heartbeat update occurs within this window, the lock is considered stale and can be force-acquired
-- When the lock is held by a dream cycle, SQS ingestion waits rather than skipping (messages must not be dropped). When the lock is held by ingestion, a scheduled dream cycle skips (next scheduled run will pick up the work).
+- The single-tick model (one activity per tick, skip if previous tick is still running) eliminates concurrent write operations — no lock contention between ingestion, dream cycles, and recall log processing
+- A lock file with heartbeat (60-second update interval, 30-minute TTL) is still maintained to prevent overlapping process instances (e.g., if systemd restarts the process while a previous instance is still running). If the lock is held with an active heartbeat, the new instance exits immediately. If the heartbeat is stale (>30 minutes), the lock is force-acquired.
 
 #### Server Mode Configuration
 - Server-mode config is provided via `config.yaml` with `mode: server` and server-specific sections:
@@ -311,7 +327,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
   - `opensearch.region` — AWS region for OpenSearch operations
   - `bedrock_kb.knowledge_base_id` — Bedrock Knowledge Base ID (for StartIngestionJob)
   - `bedrock_kb.data_source_id` — Bedrock KB data source ID (for StartIngestionJob)
-  - `dream_cycle.schedule` — cron expression (default: `0 */6 * * *`)
+  - `tick_interval` — how often the process wakes to do work (default: `5m`)
+  - `dream_cycle.interval` — minimum time between dream cycles (default: `3h`)
   - `dream_cycle.model_id` — Bedrock model for consolidation LLM calls
   - `recall_log.schedule` — time of day for recall log processing (default: `02:00`)
 - All AWS API calls use the EC2 instance's IAM role (no explicit credential configuration needed)
@@ -432,9 +449,10 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 4. Bedrock returns malformed JSON
 5. CLI retries (attempt 3)
 6. Bedrock returns valid JSON with 5 entries, 1 malformed
-7. CLI accepts 4 valid entries, marks conversation as `partially-processed`
+7. CLI accepts 4 valid entries and considers the conversation processed (timestamp advances normally)
 8. Valid notes are routed normally
 9. Error details logged to `~/.multi-kb/logs/extraction-errors.jsonl`
+10. If the conversation is later modified and re-processed, dream cycle consolidation handles any resulting duplicates
 
 ### Alternative Flow: Hook Timeout
 

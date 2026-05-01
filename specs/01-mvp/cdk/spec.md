@@ -22,13 +22,13 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Q: How does the EC2 instance trigger OpenSearch reindexing from S3? → A: Via Bedrock `StartIngestionJob` / `GetIngestionJob` APIs against the Knowledge Base data source. EC2 does not perform direct OpenSearch indexing operations — the Bedrock KB sync pipeline handles S3 → OpenSearch indexing.
 - Q: What is the exact set of VPC endpoints required? → A: Ten endpoints total. S3 gateway endpoint (`com.amazonaws.{region}.s3`); interface endpoints for SQS (`com.amazonaws.{region}.sqs`), CodeCommit git (`com.amazonaws.{region}.git-codecommit`), Bedrock Runtime (`com.amazonaws.{region}.bedrock-runtime`) for InvokeModel, Bedrock Agent (`com.amazonaws.{region}.bedrock-agent`) for StartIngestionJob/GetIngestionJob, OpenSearch Serverless (`com.amazonaws.{region}.aoss`) for direct dream cycle queries, SSM (`com.amazonaws.{region}.ssm`), SSM Messages (`com.amazonaws.{region}.ssmmessages`), EC2 Messages (`com.amazonaws.{region}.ec2messages`) for Session Manager access, and CloudWatch Logs (`com.amazonaws.{region}.logs`) for CloudWatch agent log shipping. No generic `bedrock` control plane endpoint needed.
 - Q: Should VPC interface endpoints span multiple AZs for resilience or single AZ for cost? → A: Single AZ. ASG is pinned to the same AZ as the interface endpoints. Trades AZ failover for ~50% cost reduction on endpoints (~$65.70/month for 9 interface endpoints in 1 AZ vs ~$131.40/month in 2 AZs). Acceptable for MVP since the system is single-instance with no HA requirement beyond instance recovery within the same AZ.
-- Q: How are cron schedules (dream cycle, recall log processing) managed on the EC2 instance? → A: The CLI runs as a single long-running process with built-in timers. One process handles SQS polling, dream cycle scheduling, and recall log processing — managed as a single systemd unit. No system crontab entries.
+- Q: How are cron schedules (dream cycle, recall log processing) managed on the EC2 instance? → A: The CLI runs as a single long-running process with a periodic tick (default every 5 minutes). On each tick, it checks whether a dream cycle is due (elapsed time exceeds `dream_cycle.interval`, default 3 hours); if so, it runs a dream cycle; otherwise, it processes SQS ingestion and recall logs. Managed as a single systemd unit. No system crontab entries.
 - Q: What runtime should the Lambda functions use? → A: Node.js 22 (`nodejs22.x`). Fastest cold starts among managed runtimes, important for meeting p99 latency targets. Natural pairing with CDK TypeScript codebase.
 - Q: What memory and timeout configuration should the Lambda functions use? → A: Right-sized per workload. submitKnowledge: 256 MB / 10s (lightweight validation + SQS send). recallKnowledge: 1024 MB / 30s (Bedrock Retrieve + optional coverage LLM call needs headroom for retries and slow responses).
 - Q: What should CloudWatch alarms do when they trigger? → A: No alarm actions for MVP. Alarms exist as CloudWatch metrics only — operators poll the console. SNS/email integration deferred to post-MVP.
 - Q: How should operators access the EC2 instance for debugging? → A: AWS Systems Manager Session Manager. Adds 3 interface endpoints (`ssm`, `ssmmessages`, `ec2messages` — ~$21.90/month additional in single AZ). No SSH keys, no bastion host, no public IP. SSM agent is pre-installed on Amazon Linux 2023.
 - Q: How should the CloudWatch agent be installed and configured, and is a VPC endpoint needed for log shipping? → A: Install via `dnf install amazon-cloudwatch-agent` in user data script. Add CloudWatch Logs interface endpoint (`com.amazonaws.{region}.logs`) for log shipping. Brings total to 10 endpoints (1 gateway + 9 interface), ~$65.70/month for interface endpoints in single AZ.
-- Q: On ASG instance replacement, how does the new instance recover the CodeCommit clone and dream cycle manifest? → A: User data script clones the CodeCommit repo on boot (via the git-codecommit VPC endpoint). The dream cycle manifest is ephemeral — lost on instance replacement, which is acceptable because pending notes already processed will have `status: active` in the repo and won't be re-picked. The only re-work is for batches that were in-flight at crash time, which is correct behavior (SQS visibility timeout returns those messages to the queue). No persistent EBS volume needed.
+- Q: On ASG instance replacement, how does the new instance recover the CodeCommit clone? → A: User data script clones the CodeCommit repo on boot (via the git-codecommit VPC endpoint). Notes already processed will have `status: active` in the repo and won't be re-picked by the next dream cycle. Remaining `status: pending` notes are re-processed from scratch. In-flight SQS batches are retried via visibility timeout. No persistent EBS volume needed. No dream cycle manifest to recover (MVP uses stateless re-processing).
 - Q: Does the EC2 IAM role need read access to the CLI binary S3 path, which may be in a different bucket than the KB bucket? → A: Yes. The IAM role includes `s3:GetObject` scoped to the exact object ARN derived from the `cliBinaryS3Uri` config parameter. This is in addition to the KB bucket permissions. The S3 gateway endpoint already supports cross-bucket access within the same region.
 - Q: How should the recall Lambda write the recall log to S3? → A: Synchronously within the same invocation, after computing results but before returning the response. A single S3 PutObject of a small JSON blob adds ~20-50ms, well within the 5-second p99 latency target. If the S3 write fails, the Lambda logs the error and returns results normally — recall logs are best-effort analytics data. This avoids the complexity of Lambda response streaming (which requires function URLs or HTTP APIs, incompatible with the REST API + IAM auth setup).
 - Q: What is the exact JSON schema for the HTTP 400 validation error response from submitKnowledge? → A: A flat `errors` object keyed by field name, with string values describing the validation failure. Example: `{ "errors": { "title": "must be present and non-empty", "content": "must not exceed 100,000 characters" } }`. Only fields that failed validation appear in the object.
@@ -63,7 +63,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Runtime: Node.js 22 (`nodejs22.x`) on ARM64 (Graviton), 256 MB memory, 10-second timeout
 - Validates `title` is present, non-empty, and ≤ 255 characters
 - Validates `content` is present, non-empty, and ≤ 100,000 characters
-- Validates `author` is present, non-empty, and ≤ 100 characters
+- Validates `author` is present, non-empty, and ≤ 100 characters. Author identity is trust-based in MVP — no validation against the authenticated caller's identity. Identity matching (e.g., against Federate-authenticated caller) is deferred to post-MVP.
 - On validation failure, returns HTTP 400 with a JSON body: `{ "errors": { "<field>": "<reason>", ... } }` — a flat object keyed by field name, containing only the fields that failed validation
 - On success, generates a 16-character Crockford base32 UID for the new note
 - On success, generates a `submitted_at` timestamp (ISO 8601, current time)
@@ -88,11 +88,11 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Acceptance Criteria:**
 - Instance runs Amazon Linux 2023
 - Instance has git, the CLI binary, and the CloudWatch agent pre-installed via user data script (downloads CLI binary from a configurable S3 path on boot via the S3 VPC gateway endpoint; installs CloudWatch agent via `dnf install amazon-cloudwatch-agent`; clones the CodeCommit repository via the git-codecommit VPC endpoint)
-- CLI binary runs in server mode as a single long-running process managed by a systemd unit, handling SQS polling, dream cycle scheduling, and recall log processing via built-in timers (no system crontab)
+- CLI binary runs in server mode as a single long-running process managed by a systemd unit. The process uses a single periodic tick (configurable, default 5 minutes). On each tick, it checks whether a dream cycle is due (time since last dream cycle exceeds `dream_cycle.interval`, default 3 hours); if so, it runs a dream cycle; otherwise, it processes SQS ingestion and recall logs. No system crontab, no concurrent activities.
 - Instance has IAM role with permissions for: SQS (receive/delete), CodeCommit (full repo access), S3 (read/write to KB bucket + `s3:GetObject` on the `cliBinaryS3Uri` object ARN for binary download), OpenSearch Serverless (data plane access for direct queries during dream cycle), Bedrock (InvokeModel for dream cycle LLM calls, StartIngestionJob/GetIngestionJob for triggering KB data source sync), SSM (Session Manager access for operator debugging)
 - Instance polls SQS, batches ~5–10 messages, and commits them as Markdown files to CodeCommit in a single git commit per batch
 - After each commit, instance syncs changed files to S3 (incremental, not full repo)
-- Instance manages a lock file for concurrency control between ingestion batches and dream cycles
+- Instance manages a lock file to prevent overlapping process instances (the single-tick model eliminates intra-process concurrency)
 - Instance is deployed in a private subnet (no public IP); outbound access via VPC endpoints (no NAT gateway)
 - Operator access via AWS Systems Manager Session Manager (no SSH keys, no bastion host)
 - VPC endpoints (10 total):
@@ -168,7 +168,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - Performs coverage assessment when top score < 0.3 (threshold configurable via environment variable):
   - Sends query + result summaries to a fast LLM (configurable model ID via environment variable)
   - If a gap is detected, executes a follow-up Bedrock Retrieve query
-  - Deduplicates combined results by UID
+  - Deduplicates combined results by UID, then truncates to the `limit` parameter (default 10) — the final result set never exceeds the requested limit regardless of how many results the follow-up query returned
   - Falls back to original results silently on any failure in the coverage step
 - After computing results, writes a recall log to S3 synchronously (`recall-logs/<YYYY-MM-DD>/<request-id>.json`) before returning the response. If the S3 write fails, the Lambda logs the error and returns results normally (recall logs are best-effort analytics data).
 
@@ -177,15 +177,15 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Description:** The EC2 instance runs dream cycle consolidation on a configurable cron schedule, processing pending notes through grouping, context retrieval, and LLM-driven consolidation.
 
 **Acceptance Criteria:**
-- Schedule is configurable (default: every 6 hours), managed by the CLI process's built-in timer (not system crontab)
-- Acquires lock file before processing; skips if lock is held with active heartbeat
-- Stale lock (no heartbeat update within 30 minutes) can be force-acquired
+- Dream cycle runs when the periodic tick (default every 5 minutes) determines that `dream_cycle.interval` (default 3 hours) has elapsed since the last dream cycle
+- Since the single-tick model ensures only one activity runs at a time, there is no lock contention between ingestion and dream cycles
+- A lock file with heartbeat (60-second update interval, 30-minute TTL) prevents overlapping process instances; stale locks are force-acquired
 - Phase 0: Syncs CodeCommit → S3, triggers Bedrock KB data source sync (`StartIngestionJob`), polls `GetIngestionJob` for completion, waits up to 10 minutes
 - Phase 1: Queries OpenSearch directly (via VPC endpoint, using OpenSearch query DSL) for `status: pending` notes, groups by similarity (max 10 per batch)
 - Phase 2: For each batch, queries OpenSearch directly for related `status: active` notes (max 10 per batch)
 - Phase 3: Sends each work item to LLM, applies returned actions (keep/merge/split/consolidate), commits per batch
-- Phase 4: Final S3 sync, triggers Bedrock KB data source sync (`StartIngestionJob`), clears manifest, releases lock
-- Tracks per-batch completion in a manifest file for partial failure recovery
+- Phase 4: Final S3 sync, triggers Bedrock KB data source sync (`StartIngestionJob`), updates dream cycle timestamp, releases lock
+- No dream cycle manifest for MVP — if a dream cycle fails mid-processing, already-committed batches are preserved (notes flipped to `status: active`), and remaining `status: pending` notes are re-processed from scratch on the next dream cycle run
 - Uses configurable Bedrock model for consolidation LLM calls
 
 ### FR-11: Recall Log Processing (Daily Batch)
@@ -193,7 +193,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 **Description:** The EC2 instance processes recall logs daily to update `last-recalled` timestamps on knowledge notes.
 
 **Acceptance Criteria:**
-- Runs once per day, managed by the CLI process's built-in timer (not system crontab)
+- Runs once per day during a non-dream-cycle tick (tracked by last-run timestamp; executed during the first eligible tick after the daily threshold is crossed)
 - Scans S3 objects under the previous day's `recall-logs/` prefix
 - Collects all recalled UIDs
 - Updates `last-recalled` frontmatter on each referenced note in CodeCommit
@@ -219,9 +219,9 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 **Acceptance Criteria:**
 - SQS DLQ captures messages that fail processing after 3 attempts
-- Dream cycle partial failures are recoverable on next run via manifest
+- Dream cycle partial failures are recoverable on next run — already-committed batches are preserved and remaining `status: pending` notes are re-processed from scratch (no manifest tracking in MVP)
 - Lock file heartbeat TTL prevents permanent deadlocks from EC2 crashes
-- EC2 instance auto-recovers via Auto Scaling Group (min: 1, max: 1, desired: 1), pinned to a single AZ (same AZ as VPC interface endpoints). Replacement instances clone the CodeCommit repo on boot; the dream cycle manifest is ephemeral (lost on replacement) — still-pending notes are re-processed from scratch on the next cycle
+- EC2 instance auto-recovers via Auto Scaling Group (min: 1, max: 1, desired: 1), pinned to a single AZ (same AZ as VPC interface endpoints). Replacement instances clone the CodeCommit repo on boot; still-pending notes are re-processed from scratch on the next cycle
 - S3 sync failures on one cycle are caught by the next cycle's Phase 0
 
 ### NFR-3: Security
@@ -281,22 +281,22 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 ### Alternative Flow: Dream Cycle Consolidation
 
-1. Cron triggers dream cycle on EC2
-2. EC2 acquires lock (or skips if held)
+1. Periodic tick determines dream cycle is due (time since last cycle exceeds `dreamCycleInterval`)
+2. EC2 begins dream cycle processing (single-tick model ensures no concurrent activity)
 3. Phase 0: Sync and reindex
 4. Phase 1: Group pending notes into batches
 5. Phase 2: Find related active notes per batch
 6. Phase 3: LLM evaluates each work item, EC2 applies actions, commits per batch
-7. Phase 4: Final sync, reindex, release lock
+7. Phase 4: Final sync, reindex, update dream cycle timestamp, release lock
 
 ### Error Conditions
 
 - **submitKnowledge with invalid fields:** Lambda returns HTTP 400 with field-level error details; nothing enqueued
 - **SQS message processing failure:** Message returns to queue after visibility timeout; after 3 failures, moved to DLQ
-- **Dream cycle crash mid-batch:** Lock heartbeat expires after 30 min; next run force-acquires lock; manifest indicates which batches completed; unfinished batches are retried
+- **Dream cycle crash mid-batch:** Lock heartbeat expires after 30 min; next run force-acquires lock; already-committed batches are preserved (notes flipped to `status: active`); remaining `status: pending` notes are re-processed from scratch on next cycle (no manifest tracking in MVP)
 - **OpenSearch reindex timeout (>10 min):** Dream cycle proceeds best-effort with current index state
-- **Bedrock API throttling during dream cycle:** Retries up to 3 times with exponential backoff per batch; persistent failure marks batch as failed in manifest
-- **EC2 instance termination:** ASG launches replacement; user data clones CodeCommit repo and starts CLI process, resuming SQS polling and dream cycle scheduling. Dream cycle manifest is lost — still-pending notes are re-processed from scratch on next cycle (already-processed notes have `status: active` and are skipped). Any in-flight SQS batch is retried (visibility timeout returns messages to queue)
+- **Bedrock API throttling during dream cycle:** Retries up to 3 times with exponential backoff per batch; persistent failure skips the batch (remaining `status: pending` notes are re-processed on next cycle)
+- **EC2 instance termination:** ASG launches replacement; user data clones CodeCommit repo and starts CLI process, resuming the periodic tick loop. Still-pending notes are re-processed from scratch on next dream cycle (already-processed notes have `status: active` and are skipped). Any in-flight SQS batch is retried (visibility timeout returns messages to queue)
 
 ## Success Criteria
 
@@ -336,10 +336,9 @@ The CDK stack is designed to be deployed independently by any team — each depl
 - **Path:** `recall-logs/<YYYY-MM-DD>/<request-id>.json`
 - **Body:** `{ "timestamp": "...", "query": "...", "recalled_uids": [...] }`
 
-### Dream Cycle Manifest
+### Dream Cycle State
 
-- **Location:** Local file on EC2 instance
-- **Content:** Tracks batch IDs, completion status, and timestamps for partial failure recovery
+- No manifest file in MVP — partial failure recovery relies on re-processing remaining `status: pending` notes from scratch on the next dream cycle run
 
 ## CDK Stack Structure
 
@@ -353,7 +352,8 @@ The CDK stack is designed to be deployed independently by any team — each depl
 | `embeddingModelId` | `"amazon.titan-embed-text-v2:0"` | Bedrock embedding model |
 | `consolidationModelId` | `"anthropic.claude-sonnet-4-20250514"` | Dream cycle LLM model |
 | `coverageModelId` | `"anthropic.claude-haiku-3-20240307"` | Coverage assessment LLM model |
-| `dreamCycleSchedule` | `"0 */6 * * *"` | Cron expression for dream cycle |
+| `tickInterval` | `"5m"` | How often the server-mode process wakes to do work |
+| `dreamCycleInterval` | `"3h"` | Minimum time between dream cycles |
 | `excludePendingFromRecall` | `true` | Whether to filter pending notes from recall |
 | `coverageScoreThreshold` | `0.3` | Score below which coverage assessment fires |
 | `cliBinaryS3Uri` | _(required)_ | S3 URI of the CLI binary to install on the EC2 instance (e.g., `s3://my-artifacts/multi-kb-cli/latest/multi-kb-cli-linux-amd64`) |
