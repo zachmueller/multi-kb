@@ -473,17 +473,20 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - [ ] Test cases: register to empty settings, register alongside existing hooks, idempotent re-register, unregister, file doesn't exist yet, malformed settings file
 
 ### HKI-002 [P]: Notor Hook Registration
-**Description:** Implement programmatic registration of a conversation-start hook in Notor per research.md R-6 and spec FR-7.
+**Description:** Implement programmatic registration of a conversation-start hook in Notor per [research.md R-6](research.md#r-6-notor-hook-registration) and spec FR-7. Uses the user automation approach: writes a Markdown automation file to the vault.
 **Files:**
 - `internal/hook/notor.go` — RegisterNotorHook, UnregisterNotorHook
 - `internal/hook/notor_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Locates Notor hook configuration mechanism
-- [ ] Registers conversation-start hook that invokes `multi-kb hook --harness notor`
-- [ ] Appends alongside pre-existing hooks
-- [ ] Idempotent registration
-- [ ] Test cases: register, re-register, unregister
+- [ ] **Automation file approach (R-6):** Writes a Markdown automation file to `{vault}/notor/automations/multi-kb-recall.md`. Does NOT modify Notor's `data.json` plugin settings.
+- [ ] **Automation file contents:** Frontmatter with `notor-type: automation`, `notor-trigger: on_conversation_start`, `notor-blocking: true`, `notor-blocking-emit-kind: multi_kb_recall`, `notor-blocking-timeout: 10000`, `notor-automation-order: 100`. Code fence with TypeScript that calls `utils.executeShellCommand("multi-kb hook --harness notor", ...)` passing `context.firstMessage` and `context.conversationId` via stdin JSON, then calls `chatBlocks.emit()` with the CLI's stdout.
+- [ ] Creates `{vault}/notor/automations/` directory if it doesn't exist
+- [ ] **Idempotency (R-6):** Checks if `multi-kb-recall.md` already exists. If so, overwrites it (filename is the unique key). Re-running setup produces the same result.
+- [ ] Coexists with any pre-existing automations (each automation is a separate file; no interference)
+- [ ] UnregisterNotorHook deletes `{vault}/notor/automations/multi-kb-recall.md` if it exists
+- [ ] The vault path is resolved from the source directory in `config.yaml`
+- [ ] Test cases: register to empty automations dir, register when dir doesn't exist (creates it), idempotent re-register (overwrite), unregister, coexistence with other automation files
 
 ### HKI-003: Remote KB recallKnowledge Client
 **Description:** Implement the remote KB recall client per contracts/recall-knowledge.md.
@@ -537,11 +540,11 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - [ ] When pending queue is non-empty: includes notice at the end (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
 - [ ] Empty results produce empty string (silent — no "no results found" message)
 - [ ] **Claude Code output format (R-5):** FormatHookOutput for `claude-code` harness wraps the Markdown in a JSON object: `{"systemMessage": "<markdown>"}`. The `systemMessage` field is what Claude Code injects into the system context.
-- [ ] **Notor output format:** FormatHookOutput for `notor` harness outputs raw Markdown to stdout (Notor's hook contract TBD by R-6).
+- [ ] **Notor output format (R-6):** FormatHookOutput for `notor` harness outputs raw Markdown to stdout (no JSON wrapper). The Notor automation TypeScript code reads this stdout and calls `chatBlocks.emit()` to inject it as an extension block visible to the LLM.
 - [ ] Test cases: multiple notes from multiple KBs, single note, pending notice, no pending, empty results, Claude Code JSON wrapping, Notor raw output
 
 ### HKI-007: Hook Entry Point Command (`multi-kb hook`)
-**Description:** Wire up the hook subcommand that orchestrates the full injection flow per spec FR-7. Behavior reshaped by [research.md R-5](research.md#r-5-claude-code-hook-registration) findings.
+**Description:** Wire up the hook subcommand that orchestrates the full injection flow per spec FR-7. Behavior reshaped by [research.md R-5](research.md#r-5-claude-code-hook-registration) and [R-6](research.md#r-6-notor-hook-registration) findings.
 **Files:**
 - `internal/cmd/hook.go` — full implementation replacing stub
 - `internal/hook/inject.go` — core injection orchestrator
@@ -549,15 +552,16 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 **Acceptance Criteria:**
 - [ ] Accepts `--harness` flag (claude-code or notor)
 - [ ] **Claude Code stdin parsing (R-5):** Reads JSON from stdin containing `user_prompt`, `session_id`, `transcript_path`, `cwd`. Parses the `user_prompt` field as the query text. Uses `cwd` (or `$CLAUDE_PROJECT_DIR` env var) to identify the current directory for routing config.
-- [ ] **First-message guard (R-5):** For Claude Code, reads the `transcript_path` file and checks for prior `user`-type entries. If prior user messages exist, this is not the first message — exit immediately with code 0 and no stdout output. If no prior user messages (or transcript is empty/missing), proceed with injection.
+- [ ] **Notor stdin parsing (R-6):** Reads JSON from stdin containing `first_message`, `conversation_id`, `timestamp` (passed by the Notor automation wrapper). Parses the `first_message` field as the query text. Uses the vault root (CWD, since Notor sets CWD to vault root) to identify the current directory for routing config.
+- [ ] **First-message guard (R-5):** For Claude Code only — reads the `transcript_path` file and checks for prior `user`-type entries. If prior user messages exist, this is not the first message — exit immediately with code 0 and no stdout output. If no prior user messages (or transcript is empty/missing), proceed with injection. **No first-message guard needed for Notor** — the `on_conversation_start` trigger only fires on the first message.
 - [ ] Identifies target KBs for the current directory from config
 - [ ] Queries all target KBs concurrently (local via git grep with LLM keywords, remote via recallKnowledge)
 - [ ] Merges results via rank-based interleaving → top 10
-- [ ] **Output format (R-5):** For Claude Code, writes JSON to stdout: `{"systemMessage": "<formatted markdown>"}`. For Notor, writes raw Markdown to stdout (per R-6 TBD). Exit code 0 on success.
+- [ ] **Output format (R-5, R-6):** For Claude Code, writes JSON to stdout: `{"systemMessage": "<formatted markdown>"}`. For Notor, writes raw Markdown to stdout (no JSON wrapper — the automation TypeScript code handles `chatBlocks.emit()`). Exit code 0 on success.
 - [ ] Enforces configurable timeout (default 8s) — partial results from responsive KBs used if others time out
 - [ ] On complete timeout (no KBs respond): exit code 0 with no stdout output, warning logged to `hook-errors.jsonl`
-- [ ] **Error handling (R-5):** On fatal error, exit with non-0/non-2 code (non-blocking error — Claude Code proceeds without injection). Never exit with code 2 (blocking error) to avoid halting the user's conversation.
-- [ ] Test cases: full injection path (mocked), first-message guard via transcript (pass/block), stdin JSON parsing, JSON output format for Claude Code, timeout handling, partial results, error exit codes
+- [ ] **Error handling (R-5):** On fatal error, exit with non-0/non-2 code (non-blocking error — both Claude Code and Notor proceed without injection). Never exit with code 2 for Claude Code (blocking error). For Notor, any non-zero exit from the shell command is handled by the automation wrapper.
+- [ ] Test cases: full injection path (mocked), first-message guard via transcript for Claude Code (pass/block), stdin JSON parsing for both harnesses, JSON output format for Claude Code, raw Markdown output for Notor, timeout handling, partial results, error exit codes
 
 ---
 
@@ -1035,13 +1039,13 @@ _Research items must complete before their dependent implementation phases._
 | **R-3:** Claude Code conversation format | CLI Phase 2 (Translation Layer) | TRN-002 | **✅ Complete** |
 | **R-4:** Notor conversation format | CLI Phase 2 (Translation Layer) | TRN-003 | Open |
 | **R-5:** Claude Code hook registration | CLI Phase 4 (Hook Injection) | HKI-001, HKI-007 | **✅ Complete** |
-| **R-6:** Notor hook registration | CLI Phase 4 (Hook Injection) | HKI-002 | Open |
+| **R-6:** Notor hook registration | CLI Phase 4 (Hook Injection) | HKI-002 | **✅ Complete** |
 
-**Remaining research:** R-2 (highest priority — blocks CDK Lambda tasks), R-4 and R-6 (block Notor translation and hook tasks).
+**Remaining research:** R-2 (highest priority — blocks CDK Lambda tasks), R-4 (blocks Notor translation).
 
-**R-3 and R-5 are complete.** Their findings reshape TRN-002, HKI-001, HKI-006, and HKI-007 — see updated task descriptions below.
+**R-3, R-5, and R-6 are complete.** Their findings reshape TRN-002, HKI-001, HKI-002, HKI-006, and HKI-007 — see updated task descriptions below.
 
-**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 2 TRN-002 (R-3 complete), Phase 3 (Extraction), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
+**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 2 TRN-002 (R-3 complete), Phase 3 (Extraction), Phase 4 HKI-001 and HKI-002 (R-5 and R-6 complete), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
 
 ---
 

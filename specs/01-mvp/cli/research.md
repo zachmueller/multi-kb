@@ -756,7 +756,7 @@ Changing hook configuration requires restarting Claude Code. This is fine for `m
 
 ---
 
-## R-6: Notor Hook Registration
+## R-6: Notor Hook Registration ✅
 
 **Question:** How to programmatically register a conversation-start hook in Notor?
 
@@ -769,9 +769,284 @@ Changing hook configuration requires restarting Claude Code. This is fine for `m
 
 **Prototype Task:** Register a test hook that injects a test string at conversation start.
 
-**Findings:** _(to be populated)_
+**Source:** [github.com/zachmueller/notor](https://github.com/zachmueller/notor) — TypeScript Obsidian plugin, MIT licensed, not yet in the Obsidian community plugin registry (installed via BRAT or from source).
 
-**Decision:** _(to be populated)_
+**Findings:**
+
+### Two Hook Mechanisms in Notor
+
+Notor has two distinct hook mechanisms. Understanding both is critical for choosing the right approach:
+
+#### 1. Shell Command Hooks (Phase 3 — Settings UI)
+
+Configured in the Obsidian plugin settings UI. Support four lifecycle events:
+
+| Event | Execution Model | Stdout Captured? |
+|-------|----------------|-----------------|
+| `pre_send` | **Blocking**, sequential, awaited | **Yes** — injected as user message |
+| `on_tool_call` | Fire-and-forget, sequential | No |
+| `on_tool_result` | Fire-and-forget, sequential | No |
+| `after_completion` | Fire-and-forget, sequential | No |
+
+**`pre_send` is the only shell hook event that captures stdout and injects it into the conversation.** There is no shell hook event for `on_conversation_start`.
+
+#### 2. User Automations (Phase 5 — Markdown files in vault)
+
+Defined as Markdown files in `{vault}/notor/automations/`. Support all lifecycle events plus vault events, including `on_conversation_start`. These are TypeScript/JavaScript code running inside the Obsidian runtime with access to the full plugin API (`utils`, `obsidian`, `libs`, `context`).
+
+| Trigger | Blocking? | Notes |
+|---------|----------|-------|
+| `on_conversation_start` | Optional (configurable) | Only meaningful trigger for conversation-start injection |
+| `pre_send` | Always blocking | Return value injected into conversation |
+| `on_tool_call` / `on_tool_result` | No | Fire-and-forget |
+| `after_completion` | No | Fire-and-forget |
+| `on_schedule` | No | Cron-triggered |
+| Vault events (`on_save`, etc.) | No | File-triggered |
+
+### Hook Configuration Storage
+
+**Shell hooks** are stored in Notor's Obsidian plugin settings at `{vault}/.obsidian/plugins/notor/data.json` under the `hooks` key:
+
+```json
+{
+  "hooks": {
+    "pre_send": [
+      {
+        "id": "uuid-v4",
+        "event": "pre_send",
+        "command": "multi-kb hook --harness notor",
+        "label": "multi-kb knowledge injection",
+        "enabled": true,
+        "action_type": "execute_command"
+      }
+    ],
+    "on_tool_call": [],
+    "on_tool_result": [],
+    "after_completion": []
+  },
+  "hook_timeout": 10
+}
+```
+
+`data.json` is Obsidian's standard plugin settings file (each plugin has one at `{vault}/.obsidian/plugins/{plugin-id}/data.json`). It is a flat JSON file that the plugin reads via `this.loadData()` and writes via `this.saveData()`.
+
+**User automations** are Markdown files in `{vault}/notor/automations/`:
+
+```markdown
+---
+notor-type: automation
+notor-trigger: on_conversation_start
+notor-display-name: multi-kb knowledge injection
+notor-blocking: true
+notor-blocking-emit-kind: multi_kb_recall
+notor-blocking-timeout: 10000
+notor-automation-order: 100
+---
+
+\```ts
+// TypeScript code running inside Obsidian
+const result = await utils.executeShellCommand("multi-kb hook --harness notor", {
+  timeout: 8000,
+  env: { NOTOR_FIRST_MESSAGE: context.firstMessage }
+});
+// Inject result into conversation via chatBlocks.emit()
+\```
+```
+
+### Approach A: `pre_send` Shell Hook (Recommended for MVP)
+
+Use the `pre_send` shell hook event with a first-message guard, exactly analogous to the Claude Code `UserPromptSubmit` approach.
+
+**How it works:**
+
+1. Hook fires on **every user message** (not just conversation start)
+2. Hook receives context via `NOTOR_*` environment variables:
+   - `NOTOR_CONVERSATION_ID` — conversation UUID
+   - `NOTOR_HOOK_EVENT` — `"pre_send"`
+   - `NOTOR_TIMESTAMP` — ISO 8601 timestamp
+3. Hook command runs with CWD set to the vault root
+4. Hook stdout (if non-empty) is injected as a **separate user message** with `is_hook_injection: true`, rendered as a collapsible UI element
+5. The hook message appears **before the user's actual message** in the conversation, so the LLM sees the injected context on its first turn
+
+**First-message detection:** The `pre_send` hook does NOT receive the user's message text or conversation history as input. The environment variables include only `NOTOR_CONVERSATION_ID` and `NOTOR_TIMESTAMP`. To determine if this is the first message:
+
+- **Option 1 (recommended):** Read the conversation history file from the Notor history directory. The CLI knows the vault root (CWD = vault root) and the history path. Look up the conversation by `NOTOR_CONVERSATION_ID`. If no history file exists yet or the file has no prior non-hook user messages, this is the first message.
+- **Option 2:** Maintain a CLI-side session state file tracking conversation IDs that have already been processed. If the conversation ID is new, proceed with injection.
+
+**Limitation:** The `pre_send` hook does NOT receive the user's first message text in environment variables. The hook would need to either:
+1. Read the message from the Notor history file (which may not yet be written at `pre_send` time, since the message hasn't been dispatched yet)
+2. Accept that the first-message text is not available for keyword derivation, and use a generic recall query instead
+3. **Use stdin** — the hook-events.ts code shows `PreSendContext` includes only `conversationId` and `timestamp`, NOT the user's message. This is a significant limitation.
+
+**Impact on multi-kb:** Without the user's first message, the hook cannot perform query-based recall. This makes `pre_send` shell hooks unsuitable as the primary injection mechanism — recall requires the user's query text.
+
+### Approach B: User Automation with `on_conversation_start` (Recommended)
+
+Use a user automation file that triggers on `on_conversation_start`, which provides the user's first message in the context.
+
+**How it works:**
+
+1. Create a Markdown automation file at `{vault}/notor/automations/multi-kb-recall.md`
+2. The automation triggers on `on_conversation_start`, which fires after the first non-hook user message is submitted
+3. The `ConversationStartContext` provides:
+   - `context.conversationId` — conversation UUID
+   - `context.firstMessage` — the user's first message text
+   - `context.timestamp` — ISO 8601 timestamp
+4. The automation runs the shell command `multi-kb hook --harness notor` with the first message passed as an environment variable or via stdin
+5. The automation is configured as **blocking** with a timeout, so it completes before the LLM's first turn
+6. The automation injects its output via `chatBlocks.emit()`, which creates an `extension_block` message visible to the LLM
+
+**Advantages:**
+- Receives the user's first message (`context.firstMessage`) — enables query-based recall
+- Only fires on conversation start — no first-message guard needed
+- Blocking mode ensures injection completes before LLM dispatch
+- Native timeout support (`notor-blocking-timeout`)
+
+**How to pass the first message to the CLI:** The automation calls `utils.executeShellCommand()` with the first message passed via stdin pipe or environment variable. The exact mechanism:
+
+```typescript
+const result = await utils.executeShellCommand(
+  `echo '${JSON.stringify(context.firstMessage)}' | multi-kb hook --harness notor`,
+  { timeout: 8000 }
+);
+```
+
+Or, more robustly, using the shell's stdin redirection:
+
+```typescript
+const proc = await utils.executeShellCommand("multi-kb hook --harness notor", {
+  timeout: 8000,
+  stdin: context.firstMessage
+});
+```
+
+**How output is injected:** Blocking `on_conversation_start` automations can emit blocks via `chatBlocks.emit(kind, data, opts)`. These become `extension_block` messages in the conversation transcript, visible to the LLM on its first turn. The architecture docs confirm: "Blocks emitted during blocking automations (pre_send, blocking on_conversation_start) land before the session snapshot and are visible to the LLM on the current turn."
+
+### Approach C: Hybrid — Automation Wrapping Shell Hook
+
+Create a thin automation file that wraps the shell command with proper context passing:
+
+```markdown
+---
+notor-type: automation
+notor-trigger: on_conversation_start
+notor-display-name: multi-kb knowledge injection
+notor-blocking: true
+notor-blocking-emit-kind: multi_kb_recall
+notor-blocking-timeout: 10000
+notor-automation-order: 100
+---
+
+\```ts
+const input = JSON.stringify({ first_message: context.firstMessage, conversation_id: context.conversationId });
+const result = await utils.executeShellCommand(`echo '${input.replace(/'/g, "'\\''")}' | multi-kb hook --harness notor`, { timeout: 8000 });
+if (result && result.trim()) {
+  chatBlocks.emit("multi_kb_recall", { content: result.trim() }, { fallback_text: result.trim() });
+}
+\```
+```
+
+This gives the CLI the first message via stdin (as JSON), invokes the same `multi-kb hook --harness notor` command, and injects the output as an extension block.
+
+### Multiple Hooks Coexistence
+
+**Shell hooks (pre_send):** The `hooks.pre_send` array supports multiple entries. All enabled hooks execute sequentially in array order. Adding a multi-kb hook alongside existing hooks is safe — it's an array append.
+
+**User automations (on_conversation_start):** Multiple automations can exist at the same trigger point. Execution order is determined by `notor-automation-order` (ascending) then filename alphabetically. Blocking automations are awaited sequentially. Multiple blocking automations coexist — they execute one after another before the LLM's first turn.
+
+### Registration: How to Write the Automation File
+
+**Programmatic registration** requires creating a Markdown file at `{vault}/notor/automations/multi-kb-recall.md`. The CLI needs:
+
+1. **The vault path** — already configured in `config.yaml` as the source directory
+2. **Write access** to `{vault}/notor/automations/` — the CLI must create this directory if it doesn't exist (Notor creates it automatically on first use, but it may not exist yet)
+3. **File creation** — write the automation Markdown file with frontmatter + code fence
+
+**Idempotency:** Check if `{vault}/notor/automations/multi-kb-recall.md` already exists. If so, overwrite it (update in place). The filename is the unique key.
+
+**No Obsidian restart required:** Notor's extension watcher monitors the `notor/automations/` directory for file changes and reloads automatically.
+
+### Hook Output Format
+
+**For the shell command hook approach (Approach A — `pre_send`):** The hook writes raw text to stdout. Notor captures stdout and injects it as a separate user message with `is_hook_injection: true`. The output is NOT JSON-wrapped (unlike Claude Code). Raw Markdown to stdout.
+
+**For the automation approach (Approach B/C — `on_conversation_start`):** The automation calls `chatBlocks.emit(kind, data, opts)` to inject an extension block. The `fallback_text` field provides the text representation visible to the LLM. The output is a structured block, not raw stdout.
+
+**For the CLI's perspective:** In both approaches, `multi-kb hook --harness notor` outputs raw Markdown to stdout (no JSON wrapper). The difference is in how the harness consumes it:
+- **Claude Code:** CLI must wrap output in `{"systemMessage": "..."}` JSON
+- **Notor (pre_send):** CLI writes raw Markdown to stdout; Notor injects as-is
+- **Notor (automation):** The automation TypeScript code reads the CLI's stdout and calls `chatBlocks.emit()` with it
+
+### Context Injection Placement
+
+**pre_send hooks:** Hook stdout becomes a **separate user message** (`is_hook_injection: true`) inserted **before** the user's actual message. The LLM sees it as user-provided context. It appears as a collapsible element in the UI.
+
+**on_conversation_start automations:** Blocking automation output becomes an **extension_block message** inserted after the first user message but **before the LLM's first response**. The block is part of the session snapshot, so the LLM sees it in its context window.
+
+Both approaches result in the injected content being visible to the LLM on its first turn. The key difference is metadata (hook injection vs. extension block) and where in the message sequence it appears.
+
+### Global Hook Timeout
+
+Default: 10 seconds (configurable via `hook_timeout` in plugin settings). This is the maximum time a shell hook can run before being terminated. For automations, the timeout is per-automation via `notor-blocking-timeout` (in milliseconds).
+
+**Decision:**
+
+1. **Use Approach C (hybrid automation wrapping shell command) as the primary mechanism.** This provides the critical `context.firstMessage` for query-based recall while keeping the CLI's hook logic (`multi-kb hook --harness notor`) identical across harnesses. The automation file is a thin adapter between Notor's TypeScript runtime and the CLI's shell interface.
+
+2. **Registration target:** Write a Markdown automation file to `{vault}/notor/automations/multi-kb-recall.md`. The CLI creates the `notor/automations/` directory if needed. No modification to `data.json` required.
+
+3. **Idempotency:** Check if the file exists. If so, overwrite it (the filename is the unique key). Re-running setup produces the same result.
+
+4. **Hook command:** `multi-kb hook --harness notor`. The CLI binary must be on PATH (documented in setup).
+
+5. **Input format:** The automation passes the user's first message to the CLI via stdin as JSON: `{"first_message": "<text>", "conversation_id": "<uuid>"}`. The CLI's Notor hook handler reads stdin JSON (same pattern as Claude Code, different field names). The CLI must handle both Claude Code's stdin schema (`user_prompt`, `transcript_path`, etc.) and Notor's schema (`first_message`, `conversation_id`) based on the `--harness` flag.
+
+6. **Output format:** The CLI writes raw Markdown to stdout (no JSON wrapper). The automation reads the CLI's stdout and calls `chatBlocks.emit("multi_kb_recall", { content: result }, { fallback_text: result })` to inject it as an extension block visible to the LLM.
+
+7. **Timeout:** Set `notor-blocking-timeout: 10000` (10 seconds) on the automation. The CLI's internal timeout remains 8 seconds. This gives the CLI 8 seconds to complete, with a 2-second buffer before Notor kills the automation.
+
+8. **No first-message guard needed.** The `on_conversation_start` trigger only fires on the first message — unlike `pre_send` (which fires on every message) and unlike Claude Code's `UserPromptSubmit` (which also fires on every message).
+
+9. **Automation order:** Set `notor-automation-order: 100` to run after Notor's built-in `memory-search` automation (which has a lower default order). This ensures Notor's own memory system runs first, and multi-kb knowledge injection follows.
+
+10. **Coexistence:** The automation file does not interfere with any existing hooks or automations. Multiple `on_conversation_start` automations execute sequentially in order. No risk of overwriting user configuration.
+
+11. **Spec impact:** The spec says hook output is "raw Markdown to stdout" injected into "system context." This is approximately correct for Notor: the automation produces an extension block visible to the LLM, which functions as injected context. The CLI's output format (raw Markdown to stdout) is correct for Notor (no JSON wrapper needed, unlike Claude Code's `{"systemMessage": "..."}`).
+
+12. **Settings file location for reference:** Notor stores all plugin settings in `{vault}/.obsidian/plugins/notor/data.json`. The `hooks` key contains the shell hook arrays. However, multi-kb does NOT need to modify `data.json` — the automation file approach is entirely file-based and does not touch plugin settings.
+
+13. **Automation file template:** The CLI should write the following file during setup:
+
+```markdown
+---
+notor-type: automation
+notor-trigger: on_conversation_start
+notor-display-name: multi-kb knowledge injection
+notor-blocking: true
+notor-blocking-emit-kind: multi_kb_recall
+notor-blocking-timeout: 10000
+notor-automation-order: 100
+---
+
+\```ts
+const input = JSON.stringify({
+  first_message: context.firstMessage,
+  conversation_id: context.conversationId,
+  timestamp: context.timestamp
+});
+const result = await utils.executeShellCommand(
+  "multi-kb hook --harness notor",
+  { timeout: 8000, stdin: input }
+);
+if (result && result.trim()) {
+  chatBlocks.emit("multi_kb_recall", { content: result.trim() }, {
+    fallback_text: result.trim()
+  });
+}
+\```
+```
+
+**Note:** The exact `utils.executeShellCommand` stdin API needs verification against the Notor source. If stdin piping is not supported, the alternative is to pass the input as a command-line argument or via a temporary file. The most robust fallback is environment variable injection: set `NOTOR_FIRST_MESSAGE` in the shell environment before invoking the CLI.
 
 ---
 
