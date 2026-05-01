@@ -284,18 +284,24 @@ _Corresponds to plan.md Phase B. Builds harness-specific conversation translator
 - [ ] Test cases: single conversation, re-processed conversation with per-message timestamps, assistant message reassembly across split lines, tool call/result pairing via tool_use_id, content block flattening, project path mapping
 
 ### TRN-003 [P]: Notor Translator
-**Description:** Implement translator that reads Notor chat history from `{vault}/notor/history/` and produces intermediate format per spec FR-4.
+**Description:** Implement translator that reads Notor chat history and produces intermediate format per spec FR-4. Schema fully documented in [research.md R-4](research.md#r-4-notor-conversation-format).
 **Files:**
 - `internal/translate/notor.go` — NotorTranslator: discover conversations, translate messages, per-message previously_processed
 - `internal/translate/notor_test.go`
 **Dependencies:** TRN-001, FND-002
 **Acceptance Criteria:**
-- [ ] Reads from `{vault}/notor/history/` where vault is the user-configured directory
-- [ ] Parses Notor native format (specific format TBD by R-4 research)
-- [ ] Per-message timestamps: compares each message timestamp to `last_processed` for previously_processed flag
-- [ ] Extracts persona and workflow metadata into conversation header
-- [ ] Handles role normalization, content flattening, tool call collapsing
-- [ ] Test cases: single conversation, re-processed with per-message timestamps, persona extraction
+- [ ] **History path discovery (R-4):** Reads `{vault}/.obsidian/plugins/notor/data.json`, parses JSON, extracts `history_path` field (vault-relative). Resolves relative to vault root. Default: `{vault}/.obsidian/plugins/notor/history/`. The spec's placeholder `{vault}/notor/history/` is incorrect.
+- [ ] **File discovery (R-4):** Lists all `*.jsonl` files in the history directory. Filters out sub-agent files (filenames containing `_subagent_`). Each remaining file is one conversation.
+- [ ] **JSONL parsing (R-4):** Line 1 parsed as conversation header (`_type: "conversation"` — contains id, created_at, updated_at, provider_id, model_id, persona/workflow metadata). Lines 2+ parsed as messages (`_type: "message"`). Uses `_type` field to discriminate.
+- [ ] **Role normalization (R-4):** Notor uses 6 roles: `user`, `assistant`, `tool_call`, `tool_result`, `system`, `extension_block`. Maps `user` → user, `assistant` → assistant. Skips `extension_block` messages (internal plugin state). Skips `system` messages that are compaction records (`JSON.parse(content).type === "compaction"`). `tool_call` and `tool_result` are collapsed into tool summaries on the preceding assistant message.
+- [ ] **Tool call/result pairing (R-4):** Pairs adjacent `tool_call` + `tool_result` messages via `tool_call.id` ↔ `tool_result.tool_call_id`. Generates summary using tool_name, parameters, success/error status, and result. Collapses into `tool_uses` entries on the preceding assistant message.
+- [ ] **Content extraction (R-4):** Content field can be plain string OR ContentBlock array. If string, use directly. If array, filter to `type: "text"` blocks and join with newline. Skip image/document/custom_block content blocks.
+- [ ] **Per-message timestamps (R-4):** Uses the `timestamp` field on every message line (ISO 8601 with ms precision, UTC). Compares each message's `timestamp` to `last_processed` to set `previously_processed` flag individually — same approach as Claude Code translator.
+- [ ] **Persona/workflow metadata (R-4):** Extracts `workflow_name`, `workflow_path`, `persona_name`, and `is_background` from conversation header (line 1). Surfaces in intermediate format conversation header metadata for routing decisions.
+- [ ] **Workflow instruction filtering (R-4):** Messages with `is_workflow_message: true` can be flagged so the extraction prompt can optionally skip verbose workflow instruction text.
+- [ ] Populates conversation header with source_harness="notor", source_path, persona_name, workflow_name, project_dir (vault root)
+- [ ] **Sub-agent conversations (R-4):** Skips files with `_subagent_` in filename. Sub-agent output already captured in parent conversation's `tool_result`.
+- [ ] Test cases: single conversation, re-processed conversation with per-message timestamps, persona extraction from header, workflow conversation, tool call/result pairing via tool_call_id, content as string vs ContentBlock array, sub-agent file filtering, compaction record skipping, extension_block skipping
 
 ### TRN-004: Tool Interaction Summarization
 **Description:** Implement summarization of tool call/result pairs — mechanical templates for small interactions, LLM for large ones per contracts/intermediate-format.md.
@@ -1037,15 +1043,15 @@ _Research items must complete before their dependent implementation phases._
 |----------|---------------------|--------|--------|
 | **R-2:** Bedrock KB metadata extraction | CDK Phase 4 (Lambda Functions) | LMB-004, PRM-003 | Open |
 | **R-3:** Claude Code conversation format | CLI Phase 2 (Translation Layer) | TRN-002 | **✅ Complete** |
-| **R-4:** Notor conversation format | CLI Phase 2 (Translation Layer) | TRN-003 | Open |
+| **R-4:** Notor conversation format | CLI Phase 2 (Translation Layer) | TRN-003 | **✅ Complete** |
 | **R-5:** Claude Code hook registration | CLI Phase 4 (Hook Injection) | HKI-001, HKI-007 | **✅ Complete** |
 | **R-6:** Notor hook registration | CLI Phase 4 (Hook Injection) | HKI-002 | **✅ Complete** |
 
-**Remaining research:** R-2 (highest priority — blocks CDK Lambda tasks), R-4 (blocks Notor translation).
+**Remaining research:** R-2 (highest priority — blocks CDK Lambda tasks).
 
-**R-3, R-5, and R-6 are complete.** Their findings reshape TRN-002, HKI-001, HKI-002, HKI-006, and HKI-007 — see updated task descriptions below.
+**R-3, R-4, R-5, and R-6 are complete.** Their findings reshape TRN-002, TRN-003, HKI-001, HKI-002, HKI-006, and HKI-007 — see updated task descriptions.
 
-**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 2 TRN-002 (R-3 complete), Phase 3 (Extraction), Phase 4 HKI-001 and HKI-002 (R-5 and R-6 complete), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
+**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 2 (R-3 and R-4 complete), Phase 3 (Extraction), Phase 4 (R-5 and R-6 complete), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
 
 ---
 

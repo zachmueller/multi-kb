@@ -125,10 +125,20 @@ All major technology choices are resolved by the spec (Go, Bedrock, git grep, YA
   7. **Subagent conversations** in companion directories — skip in MVP (result captured in parent conversation's tool result).
   See [research.md R-3](research.md#r-3-claude-code-conversation-format).
 
-#### R-4: Notor Conversation Format
+#### R-4: Notor Conversation Format ✅
 - **Research Task:** Document the Notor chat history format at `{vault}/notor/history/`
 - **Questions to Answer:** File format (JSON, JSONL, other)? Message schema? Per-message timestamps available? Persona/workflow metadata available?
 - **Success Criteria:** Working translator that reads a real Notor conversation and produces intermediate format
+- **Resolution:** Full schema documented from Notor source code. Key findings that reshape implementation:
+  1. **History location is NOT `{vault}/notor/history/`** — it's `{vault}/.obsidian/plugins/notor/history/` (configurable via `history_path` in `data.json`). The spec placeholder is wrong. Discovery: read `{vault}/.obsidian/plugins/notor/data.json` → `history_path` field.
+  2. **JSONL format, one file = one conversation.** Line 1 is conversation header (`_type: "conversation"`), lines 2+ are messages (`_type: "message"`). File naming: `{YYYYMMDD}_{HHMMSS}_{uuid}.jsonl`.
+  3. **Six message roles:** `user`, `assistant`, `tool_call`, `tool_result`, `system`, `extension_block`. Critical difference from Claude Code: **dedicated roles** for tool calls/results (separate JSONL lines), not content blocks within user/assistant messages.
+  4. **Per-message timestamps ARE available** — ISO 8601 with ms precision on every message. Same approach as Claude Code: compare each `timestamp` to `last_processed`.
+  5. **Persona/workflow metadata on conversation header only** — `workflow_path`, `workflow_name`, `persona_name`, `is_background`. Not per-message.
+  6. **Tool call/result pairing:** Adjacent lines, paired via `tool_call.id` ↔ `tool_result.tool_call_id`.
+  7. **Content field is string OR ContentBlock[]** — must handle both (Claude Code is always array).
+  8. **Skip `extension_block` messages** (internal plugin state) and **sub-agent files** (filename contains `_subagent_`).
+  See [research.md R-4](research.md#r-4-notor-conversation-format).
 
 #### R-5: Claude Code Hook Registration ✅
 - **Research Task:** Document how to programmatically register a `user_prompt_submit` hook in Claude Code
@@ -142,10 +152,17 @@ All major technology choices are resolved by the spec (Go, Bedrock, git grep, YA
   5. **Timeout:** Set hook timeout to 10s (above CLI's 8s internal timeout).
   See [research.md R-5](research.md#r-5-claude-code-hook-registration).
 
-#### R-6: Notor Hook Registration
+#### R-6: Notor Hook Registration ✅
 - **Research Task:** Document how to programmatically register a conversation-start hook in Notor
 - **Questions to Answer:** Where is the hook config? What format? How does Notor pass conversation context to the hook? What does the hook return (stdout? file?) for injection?
 - **Success Criteria:** CLI can register a hook that injects a test string at conversation start
+- **Resolution:** Four findings that reshape Phase D (Hook Injection):
+  1. **Two hook mechanisms exist:** Shell command hooks (in `data.json`, 4 events) and user automations (Markdown files in `{vault}/notor/automations/`, all events). Shell `pre_send` hook does NOT receive the user's message text, making it unsuitable for query-based recall. Use the **automation approach** instead.
+  2. **Use `on_conversation_start` automation.** Write a Markdown file to `{vault}/notor/automations/multi-kb-recall.md` with frontmatter (`notor-trigger: on_conversation_start`, `notor-blocking: true`, `notor-blocking-timeout: 10000`). The automation TypeScript calls `utils.executeShellCommand("multi-kb hook --harness notor")` passing `context.firstMessage` via stdin, then calls `chatBlocks.emit()` to inject the output as an extension block.
+  3. **No first-message guard needed.** `on_conversation_start` only fires on the first message (unlike Claude Code's `UserPromptSubmit` which fires on every message).
+  4. **Output format:** CLI writes raw Markdown to stdout (no JSON wrapper, unlike Claude Code's `{"systemMessage": "..."}`). The automation wrapper handles injection via `chatBlocks.emit()`.
+  5. **Idempotency:** Filename (`multi-kb-recall.md`) is the unique key. Overwrite on re-registration.
+  See [research.md R-6](research.md#r-6-notor-hook-registration).
 
 #### R-7: Crockford Base32 UID Generation
 - **Research Task:** Identify or implement Crockford base32 encoding for 16-character UIDs
