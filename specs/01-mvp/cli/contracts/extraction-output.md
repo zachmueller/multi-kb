@@ -30,11 +30,11 @@ The full translated conversation in intermediate JSONL format (all lines concate
 
 For re-processed conversations, all messages are included (full context), with `previously_processed: true/false` flags. The system prompt instructs the LLM to extract knowledge only from `previously_processed: false` messages while using the full conversation for context.
 
-### Chunked Conversations (>800K tokens)
+### Chunked Conversations (~800K tokens)
 
-When a translated conversation exceeds 800K tokens (measured by fast approximation):
+When a translated conversation exceeds ~800K tokens (measured by fast approximation; the implementation threshold is 700,000 to leave headroom for token estimation error):
 
-1. Split at message boundaries (never mid-message) at the ~800K token mark
+1. Split at message boundaries (never mid-message) near the threshold
 2. Process first chunk normally → extract notes
 3. Summarize first chunk to ~10–20K tokens using the **extraction model** (`extraction.model_id`) with a summarization-specific prompt
 4. Prepend summary to next chunk as contextual preamble
@@ -66,7 +66,7 @@ When a translated conversation exceeds 800K tokens (measured by fast approximati
 | Field | Type | Required | Constraints |
 |-------|------|----------|-------------|
 | `title` | string | yes | Non-empty, ≤255 characters |
-| `content` | string | yes | Non-empty, Markdown |
+| `content` | string | yes | Non-empty, Markdown, ≤100,000 characters |
 | `suggested_target_kbs` | string[] | yes | Array of KB name strings (may be empty) |
 
 ### Empty Extraction

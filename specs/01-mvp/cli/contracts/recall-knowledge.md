@@ -30,7 +30,7 @@ SigV4-signed request using the configured `aws_profile` (for `iam` auth) or dire
 | Field | Type | Required | Default | Constraints |
 |-------|------|----------|---------|-------------|
 | `query` | string | yes | — | Non-empty |
-| `limit` | integer | no | 10 | Positive integer |
+| `limit` | integer | no | 10 | Positive integer, 1–100 |
 
 For hook-based injection, the `query` is the user's first message verbatim.
 
@@ -76,6 +76,12 @@ Results are pre-sorted by descending `score`. Only `status: active` notes are re
 4. Results from all KBs are merged via **rank-based interleaving** (top-ranked from each KB first, then second-ranked, etc.)
 5. Top 10 notes selected from merged results
 6. Formatted as Markdown and written to stdout
+
+### Error Responses
+
+- **HTTP 400:** `{ "errors": { "query": "must be present and non-empty" } }` — returned when `query` is missing or empty. The CLI should log a warning and treat as empty results (no injection). Do not retry.
+- **HTTP 401/403:** Authentication or authorization failure. Log error, skip this KB for the remainder of the hook invocation.
+- **HTTP 5xx:** Server error. Retry per standard retry policy; on exhaustion, treat as empty results from this KB.
 
 ### Timeout Handling
 

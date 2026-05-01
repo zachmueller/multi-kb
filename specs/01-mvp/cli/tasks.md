@@ -89,7 +89,9 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - [ ] Validates: mode ∈ {client, server}, author non-empty ≤100 chars, unique KB names, auth ∈ {iam, federate}, aws_profile required when auth=iam, routing ∈ {always, consider}, approval ∈ {auto-approve, require-manual-approval}, kb references resolve to knowledge_bases or local/<name>
 - [ ] Returns structured errors listing all validation failures (not just first)
 - [ ] Defaults: hook.timeout=8s, extraction/translation/dream_cycle model IDs have sensible defaults
-- [ ] Test cases: valid config, missing required fields, invalid enum values, dangling KB references, empty sources
+- [ ] Duration fields (`tick_interval`, `dream_cycle.interval`, `hook.timeout`) validated using Go's `time.ParseDuration`; rejects bare integers and invalid strings with structured error
+- [ ] `recall_log.schedule` validated as `HH:MM` 24-hour UTC format (regex: `^([01]\d|2[0-3]):[0-5]\d$`); rejects invalid values
+- [ ] Test cases: valid config, missing required fields, invalid enum values, dangling KB references, empty sources, invalid duration string (e.g., `5 minutes`, `5`), invalid schedule (e.g., `25:00`, `2pm`)
 
 ### FND-002: State YAML Loading and Writing
 **Description:** Implement `state.yaml` schema, loader, and atomic writer per data-model.md Entity 3.
@@ -165,12 +167,12 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 **Implementation Note:** Uses git shell-out (FND-005) for commits. Sanitize title and author strings before use in file content or git commit messages.
 **Acceptance Criteria:**
 - [ ] Writes `<UID>.md` to the appropriate local KB directory
-- [ ] YAML frontmatter includes all fields: uid, title, status (pending), author, last-updated, last-linked-to (empty), last-recalled (empty), consolidated-from-notes (empty)
+- [ ] YAML frontmatter includes all fields: uid, title, status (pending), author, last-updated, last-linked-to, last-recalled, consolidated-from-notes — all present with YAML null values for unpopulated fields (bare key, no value — e.g., `last-recalled:` on its own line, per data-model.md convention)
 - [ ] Body contains the note's Markdown content
 - [ ] Generates UID via FND-004
 - [ ] Commits the new file with a descriptive git commit message
 - [ ] Validates note constraints: title ≤255 chars, content ≤100K chars, author ≤100 chars
-- [ ] Test cases: write note, verify frontmatter, verify file naming, validation failures
+- [ ] Test cases: write note, verify frontmatter (all keys present; unpopulated fields have null values, not omitted), verify round-trip parse produces empty string or nil for null fields, verify file naming, validation failures
 
 ### FND-007: Git Grep Recall with Match-Count Ranking
 **Description:** Implement local KB recall using `git grep` with match-count ranking and title weighting per spec FR-8.
@@ -248,7 +250,7 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - [ ] Estimates tokens from a string using a fast heuristic (e.g., ~4 chars per token for English text, ~3.5 for code-heavy content)
 - [ ] Does not use an external tokenizer library (speed priority)
 - [ ] Accuracy within ±20% for typical conversation content
-- [ ] Exports `ChunkingThreshold = 700_000` constant (conservative value to leave headroom for estimation error — actual model context windows are larger)
+- [ ] Exports `ChunkingThreshold = 700_000` constant (intentionally below the spec's ~800K target to provide a safety margin for the approximate token counter — actual model context windows are larger)
 - [ ] Handles empty strings, very long strings, and mixed content
 - [ ] Test cases: known calibration strings, edge cases (empty, single char, 1M chars)
 
@@ -379,7 +381,8 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - [ ] Parses JSON array response into []Note structs (title, content, suggested_target_kbs)
 - [ ] Partial acceptance: valid entries accepted, invalid entries logged and dropped
 - [ ] Empty array is valid (no knowledge extracted)
-- [ ] Validates extracted notes: title non-empty ≤255 chars, content non-empty, suggested_target_kbs is string array
+- [ ] Validates extracted notes: title non-empty ≤255 chars, content non-empty ≤100,000 characters, suggested_target_kbs is string array
+- [ ] Notes with content exceeding 100K characters are logged as extraction warnings and dropped (not included in results)
 - [ ] Test cases: successful extraction, empty result, partial valid JSON, completely invalid JSON, field validation
 
 ### EXT-004: Chunked Extraction for Oversized Conversations
@@ -521,7 +524,8 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - [ ] Handles `iam` vs `federate` auth: `iam` uses SigV4 signing; `federate` sends plain HTTP POST with no auth headers
 - [ ] Respects configurable timeout (from hook.timeout)
 - [ ] Returns partial results on timeout (context cancellation)
-- [ ] Test cases: successful recall, timeout, auth error, empty results
+- [ ] HTTP 400 response: logs warning with error body, returns empty result set (no injection). Does not retry.
+- [ ] Test cases: successful recall, timeout, auth error, empty results, HTTP 400 (invalid query)
 
 ### HKI-004: LLM-Derived Keyword Generation
 **Description:** Implement keyword derivation from natural language queries for local KB recall per spec FR-8.
@@ -574,7 +578,8 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - [ ] Accepts `--harness` flag (claude-code or notor)
 - [ ] **Claude Code stdin parsing (R-5):** Reads JSON from stdin containing `user_prompt`, `session_id`, `transcript_path`, `cwd`. Parses the `user_prompt` field as the query text. Uses `cwd` (or `$CLAUDE_PROJECT_DIR` env var) to identify the current directory for routing config.
 - [ ] **Notor stdin parsing (R-6):** Reads JSON from stdin containing `first_message`, `conversation_id`, `timestamp` (passed by the Notor automation wrapper). Parses the `first_message` field as the query text. Uses the vault root (CWD, since Notor sets CWD to vault root) to identify the current directory for routing config.
-- [ ] **First-message guard (R-5):** For Claude Code only — reads the `transcript_path` file and checks for prior `user`-type entries. If prior user messages exist, this is not the first message — exit immediately with code 0 and no stdout output. If no prior user messages (or transcript is empty/missing), proceed with injection. **No first-message guard needed for Notor** — the `on_conversation_start` trigger only fires on the first message.
+- [ ] **First-message guard (R-5):** For Claude Code only — reads the `transcript_path` file and counts `user`-type JSONL lines. If count >= 1 (prior user messages exist), this is not the first message — exit immediately with code 0 and no stdout output. If count is 0 (transcript empty, missing, or contains no user-type entries), this is the first message — proceed with injection. Note: the hook fires before the current prompt is written to the transcript, so count=0 means the current prompt is the first message. **No first-message guard needed for Notor** — the `on_conversation_start` trigger only fires on the first message.
+- [ ] **Pre-flight validation:** If the extracted query (user's first message) is empty or whitespace-only, skip recall entirely — exit with code 0 and no stdout output. Do not send empty queries to KBs.
 - [ ] Identifies target KBs for the current directory from config
 - [ ] Queries all target KBs concurrently (local via git grep with LLM keywords, remote via recallKnowledge)
 - [ ] Merges results via rank-based interleaving → top 10
@@ -637,11 +642,13 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 **Files:**
 - `internal/dreamcycle/phase3.go` — ConsolidateBatch function (LLM call, action parsing)
 - `internal/dreamcycle/actions.go` — ApplyActions function (keep, merge, split, consolidate)
+- `internal/dreamcycle/notestore.go` — `NoteStore` interface definition
 - `internal/dreamcycle/phase3_test.go`
 - `internal/dreamcycle/actions_test.go`
 **Dependencies:** EXT-001, FND-006, FND-005, PRM-002
 **Contract:** [consolidation-output.md](contracts/consolidation-output.md)
 **Acceptance Criteria:**
+- [ ] **Interface abstraction:** Action application (file reads, writes, deletes, commits) uses a `NoteStore` interface with methods: `ReadNote(uid) -> Note`, `WriteNote(note)`, `DeleteNote(uid)`, `CommitBatch(message)`. Local mode implements with `internal/git/repo.go` operations; server mode implements with `internal/server/codecommit.go` operations. DRM-004 depends on the interface, not the concrete implementation.
 - [ ] Constructs consolidation prompt with: the pending note (singleton batch) + related active notes
 - [ ] Calls `dream_cycle.model_id` via Bedrock
 - [ ] Parses LLM response into action types: keep, merge, split, consolidate
@@ -649,8 +656,10 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - [ ] **merge:** merge content into target note, delete source note, update `consolidated-from-notes` on target
 - [ ] **split:** create multiple new active notes from one pending note, delete original
 - [ ] **consolidate:** create one new active note from multiple notes, delete originals, update `consolidated-from-notes`
+- [ ] **Content length heuristic for consolidate:** If a `consolidate` action references active notes, warn-log if the new `content` length is less than 80% of the combined source content length. The action still proceeds (it's a warning, not a block), but the warning is recorded in the run log for auditability.
 - [ ] Per-batch git commit after applying all actions
-- [ ] Test cases: keep action, merge action, split action, consolidate action, LLM failure (skip batch)
+- [ ] Git commit message for consolidate actions explicitly lists deleted active note UIDs (e.g., `dream-cycle: consolidate — deleted active notes ABC123, DEF456`)
+- [ ] Test cases: keep action, merge action, split action, consolidate action, consolidate with active notes (verify warning heuristic), LLM failure (skip batch)
 
 ### DRM-005: Dream Cycle Commands
 **Description:** Wire up `multi-kb dream-cycle` (standalone) and integrate into `multi-kb run` (combined capture + dream cycle).
@@ -870,7 +879,8 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - [ ] Parses all server-mode fields: sqs.queue_url, sqs.batch_size, codecommit.repo_name/region, s3.bucket/region, opensearch.endpoint/region, bedrock_kb.knowledge_base_id/data_source_id, tick_interval, dream_cycle.interval/model_id, recall_log.schedule
 - [ ] Server-mode fields only validated when `mode: server`
 - [ ] Required fields for server mode: sqs.queue_url, codecommit.repo_name, s3.bucket, opensearch.endpoint, bedrock_kb.knowledge_base_id/data_source_id
-- [ ] Test cases: valid server config, missing required server fields, client mode ignores server fields
+- [ ] Duration fields (`tick_interval`, `dream_cycle.interval`) validated using `time.ParseDuration` (same rules as FND-001); `recall_log.schedule` validated as `HH:MM` UTC
+- [ ] Test cases: valid server config, missing required server fields, client mode ignores server fields, invalid duration for tick_interval, invalid schedule format
 
 ### SRV-002: Tick Loop and Activity Dispatch
 **Description:** Implement the server-mode main loop: periodic tick, dream cycle vs ingestion dispatch per spec FR-12.
@@ -1008,6 +1018,7 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 - [ ] Defines the extraction task, output JSON format (title/content/suggested_target_kbs), and quality guidelines
 - [ ] Instructs LLM to focus on `previously_processed: false` messages while using full conversation for context
 - [ ] Instructs LLM to avoid extracting trivial or obvious information
+- [ ] Instructs LLM to keep individual note content concise and focused (generally under 5,000 characters per note; hard limit of 100,000 characters enforced by the parser)
 - [ ] Specifies that empty array `[]` is valid when no knowledge is extractable
 - [ ] Tested against ≥3 sample conversations: one with clear knowledge, one with no extractable knowledge, one re-processed conversation with mixed flags
 - [ ] Prompt length reasonable (under ~2K tokens)
@@ -1024,6 +1035,7 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 - [ ] Specifies the JSON output schema from consolidation-output.md
 - [ ] Instructs that every pending note UID must appear in exactly one action
 - [ ] Instructs to preserve information — never silently discard content
+- [ ] Explicitly instructs LLM that consolidating active notes is a high-stakes operation: the new note must contain ALL information from all source notes. The LLM should prefer `keep` over `consolidate` when uncertain about information preservation.
 - [ ] Distinguishes merge (absorb into existing) from consolidate (create new from multiple)
 - [ ] Tested against ≥3 sample batches: one with a novel note (keep), one with a duplicate (merge), one with overlapping notes (consolidate)
 - [ ] Prompt length reasonable (under ~3K tokens)
@@ -1136,7 +1148,7 @@ _Cross-cutting validation phase. Tasks can start as soon as their dependencies a
 - [ ] **First-Time Setup:** Binary download → setup wizard → config written → hooks registered → cron registered (under 10 minutes)
 - [ ] **Scheduled Capture:** Cron fires → conversations scanned → knowledge extracted → notes routed → run log written
 - [ ] **Hook Injection:** New conversation → hook fires → recall queries → Markdown injected → conversation proceeds
-- [ ] **Oversized Conversation:** >800K token conversation → chunked → all knowledge extracted
+- [ ] **Oversized Conversation:** >700K token conversation (the implementation threshold per FND-011) → chunked → all knowledge extracted
 - [ ] **Extraction Failure:** Bedrock throttle → retry → partial acceptance → error logged
 - [ ] **Hook Timeout:** Slow KB → timeout → partial results used
 - [ ] **Re-Processing:** Modified old conversation → re-translated → new knowledge extracted

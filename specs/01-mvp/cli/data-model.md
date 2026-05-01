@@ -23,6 +23,8 @@
 | `last-recalled` | ISO 8601 | no | — | Not updated by local processes in MVP (schema parity) |
 | `consolidated-from-notes` | string[] | no | Format: `<filename> (<commit-hash>)` | Populated by dream cycle merge/consolidate actions |
 
+**Frontmatter YAML null convention:** Optional fields not yet populated (`last-linked-to`, `last-recalled`, `consolidated-from-notes`) use YAML null representation: the key is present with no value (e.g., `last-recalled:` on its own line). This parses as `nil`/`""` in Go's `gopkg.in/yaml.v3` and as `null` in JavaScript YAML parsers. Do NOT omit the key entirely — all frontmatter keys must always be present for schema consistency.
+
 **Body:** Markdown content. May contain `[[UID|Title]]` wikilinks (inserted by dream cycle consolidation).
 
 **State Transitions:**
@@ -127,6 +129,11 @@ sources:
 - `exclusion_rules` must be an array of strings (can be empty)
 - `extraction.model_id` must be a non-empty string
 - `hook.timeout` must be a valid duration string
+
+#### Field Format Reference
+
+- **Duration fields** (`tick_interval`, `dream_cycle.interval`, `hook.timeout`): Parsed using Go's `time.ParseDuration` — accepts formats like `5m`, `3h`, `8s`, `500ms`, `1h30m`. Does NOT accept bare integers (e.g., `5` is invalid; use `5m`). Invalid values produce a structured validation error at config load time.
+- **Schedule field** (`recall_log.schedule`): Parsed as `HH:MM` in 24-hour UTC format. Regex: `^([01]\d|2[0-3]):[0-5]\d$`. Examples: `02:00` (2 AM UTC), `14:30` (2:30 PM UTC). Invalid values rejected at config load time.
 
 ### 3. Runtime State (`state.yaml`)
 

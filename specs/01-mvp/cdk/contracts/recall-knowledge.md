@@ -20,7 +20,7 @@ Deployed on API Gateway REST API with `prod` stage. `AWS_IAM` authorization (Sig
 ### Request Processing
 
 1. Parse JSON body from API Gateway Lambda proxy event (`event.body`)
-2. Extract `query` (required, string) and `limit` (optional, integer, default 10)
+2. Extract `query` (required, string) and `limit` (optional, integer in range [1, 100], default 10)
 3. Call Bedrock Knowledge Base Retrieve API with `query`
 4. Optionally filter results to `status: active` notes only (if `EXCLUDE_PENDING` is `true`)
 5. If top result score < `COVERAGE_SCORE_THRESHOLD`:
@@ -72,12 +72,24 @@ Results sorted by descending `score`. Array length ≤ `limit`.
 **Validation Error (HTTP 400):**
 
 ```javascript
+// Missing or empty query
 {
   statusCode: 400,
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
     errors: {
       query: "must be present and non-empty"
+    }
+  })
+}
+
+// Out-of-range limit
+{
+  statusCode: 400,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    errors: {
+      limit: "must be an integer between 1 and 100"
     }
   })
 }

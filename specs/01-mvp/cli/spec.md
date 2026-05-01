@@ -41,7 +41,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Q: How should the CLI decompose a natural language first-message query into effective `git grep` searches for local KB recall? → A: LLM-derived keywords — use the translation summarization model (`translation.summarization_model_id`, e.g., Claude Haiku) to generate 3–5 search keywords from the user's natural language query, then `git grep` each keyword. Results are ranked by match count as already specified. This adds one fast, cheap LLM call to the hook injection path but produces much better keyword selection than mechanical stop-word removal.
 - Q: How should the approval web UI (FR-9) assets be packaged and served, given the single-binary constraint? → A: Embed static HTML/CSS/JS assets in the Go binary via `embed.FS`. The UI is a simple approve/reject interface, so a single-page app bundled at compile time keeps the single-binary promise intact with zero runtime file dependencies. Assets are served from memory at runtime by the built-in HTTP server.
 - Q: Should standalone manual subcommands (`multi-kb process`, `multi-kb dream-cycle`) respect the same lock file as the combined `multi-kb run`, or bypass it since they're user-initiated? → A: Respect the same lock — manual subcommands use the identical lock acquisition logic. If the lock is already held, the CLI prints a user-friendly message identifying what holds the lock and when the heartbeat was last updated, then exits immediately. This prevents concurrent writes to shared state/KB files regardless of trigger source.
-- Q: What specific Claude Code hook mechanism should the CLI use for knowledge injection? → A: User-prompt-submit hook with first-message guard — the CLI registers a Claude Code `user_prompt_submit` hook during setup. The hook fires on every user message, but the CLI checks whether this is the first message in the conversation (e.g., by checking for the absence of prior assistant messages in the session context provided by the hook). If it is not the first message, the CLI exits immediately with no output. If it is the first message, the CLI performs knowledge recall and outputs the injected context block. This reuses a well-defined, stable Claude Code hook event while preserving the "conversation-start only" injection constraint.
+- Q: What specific Claude Code hook mechanism should the CLI use for knowledge injection? → A: User-prompt-submit hook with first-message guard — the CLI registers a Claude Code `user_prompt_submit` hook during setup. The hook fires on every user message, but the CLI checks whether this is the first message in the conversation by reading the `transcript_path` file (received via stdin JSON) and counting `user`-type JSONL entries. If no user entries exist (or the transcript is empty/missing), this is the first message — the CLI performs knowledge recall and outputs the injected context block. If prior user entries exist, the CLI exits immediately with code 0 and no output. Note: the hook fires before the current prompt is written to the transcript, so count=0 means the current prompt is the first message. This reuses a well-defined, stable Claude Code hook event while preserving the "conversation-start only" injection constraint.
 - Q: What weight multiplier should title matches receive relative to body matches in local KB recall ranking? → A: 3x — a title match counts as 3 body matches when computing match-count rank scores. Simple, meaningful signal boost without over-dominating results.
 - Q: How are individual conversations keyed in `state.yaml` for tracking processing status? → A: Per-conversation processing state is not tracked in MVP. The CLI tracks only per-directory `last-processed` timestamps. Failed conversations are logged to `extraction-errors.jsonl` but not marked in state — they may be re-processed if the file is modified again, with dream cycle consolidation handling any resulting duplicates.
 - Q: What happens when the extraction LLM returns an empty `suggested_target_kbs` array for a note and there are no `always`-mode KBs configured for the current directory? → A: Fallback to local `default` KB — the note is written to the local default KB to prevent silent data loss. The local default KB acts as a safety net so no extracted knowledge is ever discarded. This aligns with the "zero tribal knowledge" goal.
@@ -163,7 +163,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Output is a JSON array of objects with `title`, `content`, and `suggested_target_kbs` fields
 - For re-processed conversations, extraction focuses on `previously_processed: false` messages while using the full conversation for context
 - Respects the user's global exclusion rules: the array of exclusion strings from `config.yaml` is appended to the extraction system prompt as a bulleted list under a "Content exclusion rules — never include in notes destined for non-local KBs" heading
-- Conversations exceeding 800K tokens (measured after translation to intermediate format) are split at message boundaries and processed iteratively with summarized context carried forward. Each processed chunk is summarized to ~10–20K tokens before being prepended to the next chunk as contextual preamble. Chunk summarization uses the extraction model (`extraction.model_id`) with a summarization-specific prompt — not the cheaper translation model — to ensure high-quality context preservation across chunks.
+- Conversations exceeding ~800K tokens (measured after translation to intermediate format; implementation uses a conservative 700K threshold to account for token estimation error) are split at message boundaries and processed iteratively with summarized context carried forward. Each processed chunk is summarized to ~10–20K tokens before being prepended to the next chunk as contextual preamble. Chunk summarization uses the extraction model (`extraction.model_id`) with a summarization-specific prompt — not the cheaper translation model — to ensure high-quality context preservation across chunks.
 
 ### FR-6: Extraction Error Handling
 
@@ -192,7 +192,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Partial results from responsive KBs are used if other KBs time out
 - If no KBs respond within timeout, conversation proceeds with no injection and a warning is logged to `~/.multi-kb/logs/hook-errors.jsonl`
 - Notor integration: injected block prepended to conversation system context via conversation-start hook
-- Claude Code integration: CLI registers a `user_prompt_submit` hook. The hook fires on every user message but includes a first-message guard — if the conversation already has prior assistant messages, the CLI exits immediately with no output. On the first message, the CLI performs knowledge recall and outputs the injected context block, which Claude Code prepends to the conversation's system context.
+- Claude Code integration: CLI registers a `user_prompt_submit` hook. The hook fires on every user message but includes a first-message guard — the CLI reads the `transcript_path` from stdin JSON and counts `user`-type JSONL entries. If prior user entries exist, the CLI exits immediately with code 0 and no output. If no user entries exist (or the transcript is empty/missing), the CLI performs knowledge recall and outputs the injected context block, which Claude Code prepends to the conversation's system context.
 - When the pending approval queue (`~/.multi-kb/pending/`) is non-empty, the injected block includes a notice with the pending note count (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
 
 ### FR-8: Local Knowledge Base Storage
@@ -464,8 +464,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 ### Alternative Flow: Oversized Conversation Processing
 
-1. A conversation exceeds 800K tokens after translation
-2. CLI splits at the 800K boundary on a message boundary
+1. A conversation exceeds the chunking threshold (~800K tokens nominal; 700K implementation threshold) after translation
+2. CLI splits near the threshold on a message boundary
 3. First chunk is processed through extraction, yielding knowledge notes
 4. First chunk is summarized to ~10-20K tokens
 5. Summary is prepended to the next chunk as context
@@ -513,7 +513,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Users can go from binary download to first successful knowledge capture in under 10 minutes of setup time
 - Knowledge from AI conversations is captured without any manual user action after initial setup (zero ongoing effort for auto-approved flows)
 - Relevant team knowledge surfaces in new AI conversations within the hook timeout window (default 8 seconds)
-- The system handles conversations of any length (including those exceeding 800K tokens) without silent data loss
+- The system handles conversations of any length (including those exceeding the ~800K token chunking threshold) without silent data loss
 - Manual approval workflow enables users to review and filter knowledge before it reaches team KBs, with a clear queue and simple approve/reject interaction
 - A single CLI binary serves both local development use and server-mode deployment without code divergence
 

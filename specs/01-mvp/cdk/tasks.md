@@ -438,6 +438,7 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 **Acceptance Criteria:**
 - [ ] Parses `event.body` — extracts `query` (required, string) and `limit` (optional, integer, default 10)
 - [ ] Validates `query`: present, non-empty string; returns HTTP 400 on failure
+- [ ] Validates `limit`: must be integer >= 1 and <= 100; returns HTTP 400 with `{ errors: { limit: "must be an integer between 1 and 100" } }` if out of range. Non-integer values return 400. Default 10 if omitted.
 - [ ] Calls Bedrock Retrieve API with `knowledgeBaseId`, `retrievalQuery.text = query`
 - [ ] Optionally filters to `status: active` when `EXCLUDE_PENDING` is `true`
 - [ ] Maps Retrieve response to `[{ uid, title, content, score }]` sorted by descending score
@@ -450,7 +451,7 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
   - Best-effort: S3 failure logged but doesn't affect response
 - [ ] Returns HTTP 200 with results array (or empty array)
 - [ ] Reads env vars: `KNOWLEDGE_BASE_ID`, `BUCKET_NAME`, `COVERAGE_MODEL_ID`, `COVERAGE_SCORE_THRESHOLD`, `EXCLUDE_PENDING`
-- [ ] Test (mocked Bedrock/S3): successful recall, empty results, coverage assessment trigger, coverage fallback, S3 write failure, validation error
+- [ ] Test (mocked Bedrock/S3): successful recall, empty results, coverage assessment trigger, coverage fallback, S3 write failure, validation error, limit=0 → 400, limit=-1 → 400, limit=101 → 400, limit=50 → 200, limit omitted → uses default 10
 
 ### LMB-005: recallKnowledge CDK Construct
 **Description:** Create the CDK construct that provisions the recallKnowledge Lambda with correct runtime, permissions, and environment.

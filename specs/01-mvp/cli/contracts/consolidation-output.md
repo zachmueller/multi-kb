@@ -173,6 +173,7 @@ Combine multiple pending (or pending + active) notes into a single new note.
 - At least one `source_uids` entry must be a pending note from the batch
 - `source_uids` may include active notes from the "Related Active Notes" section
 - Every pending note referenced must be from the current batch
+- **WARNING: This action DELETES all source notes, including active notes. The consolidated note must be a strict information superset of all source content. Never consolidate if information would be lost.**
 
 **Applied changes:**
 - Generate new UID for the consolidated note
