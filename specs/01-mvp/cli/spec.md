@@ -88,7 +88,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - User provides a description for each remote KB during setup (used by the extraction LLM for `consider`-mode routing decisions). The CLI does not fetch descriptions from the remote KB — descriptions are user-supplied local configuration.
 - User can configure routing rules per directory, per directory+harness, and per directory+harness+persona/workflow
 - Each routing pairing supports two settings: routing mode (`always` or `consider`) and approval mode (`auto-approve` or `require-manual-approval`)
-- User can define global exclusion rules describing content that should never be shared with non-local KBs
+- User can define global exclusion rules as an array of natural language strings in `config.yaml` (e.g., `["Personal opinions about individuals", "Credentials and secrets", "Salary or compensation details"]`). These strings are appended verbatim to the extraction system prompt as a bulleted list under a "Content exclusion rules" heading, instructing the LLM to never include matching content in notes destined for non-local KBs.
 - Simplified onboarding presets are available for approval mode: auto-approve always, always require manual approval, or select per group
 - CLI auto-registers harness hooks during setup for each selected harness (e.g., Notor conversation-start hook, Claude Code `user_prompt_submit` hook with first-message guard), appending the multi-kb hook alongside any pre-existing hooks at the same trigger points (never overwriting existing hooks)
 - User provides their author identity during setup (stored as top-level `author` in `config.yaml`), used for all `submitKnowledge` API calls. The CLI performs no validation of this value — the `author` field is trust-based in MVP. The backend validates only presence, non-empty, and length (≤100 characters). Identity matching (e.g., against Federate-authenticated caller) is deferred to post-MVP.
@@ -125,7 +125,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
     "extracted_at": "2026-05-01T10:30:00Z"
   }
   ```
-  No `uid` field — UIDs are generated at submission time (server-side for remote KBs, locally for local KBs). No `status` field — existence in the directory means pending; deletion means resolved. `target_kbs` is an array because a single note can route to multiple KBs; the approval UI presents each target for review.
+  No `uid` field — UIDs are generated at submission time (server-side for remote KBs, locally for local KBs). No `status` field — existence in the directory means pending; deletion means resolved. `target_kbs` is an array because a single note can route to multiple KBs; the approval UI presents each target independently for review (approve/reject per KB).
+  Pending files are named `<timestamp>-<hash>.json`, where `<timestamp>` is the `extracted_at` value formatted as `YYYYMMDDTHHMMSS` and `<hash>` is a short (8-character) hex hash of the note's title + content to avoid collisions when multiple notes are extracted at the same timestamp. Example: `20260501T103000-a3f7b2c1.json`.
 - Remote submissions are self-throttled to a maximum of 10 requests per second per target KB
 - The CLI expects HTTP 202 with `{ "uid": "<UID>", "request_id": "<request-id>" }` on successful submission. The returned UID is not stored or tracked by the CLI in MVP (fire-and-forget); it exists for potential future use.
 - On `submitKnowledge` failure, the CLI applies error-type-specific handling:
@@ -161,8 +162,8 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - The append file is read fresh on each extraction run (no restart required)
 - Output is a JSON array of objects with `title`, `content`, and `suggested_target_kbs` fields
 - For re-processed conversations, extraction focuses on `previously_processed: false` messages while using the full conversation for context
-- Respects the user's global exclusion rules
-- Conversations exceeding 800K tokens are split at message boundaries and processed iteratively with summarized context carried forward. Chunk summarization uses the extraction model (`extraction.model_id`) with a summarization-specific prompt — not the cheaper translation model — to ensure high-quality context preservation across chunks.
+- Respects the user's global exclusion rules: the array of exclusion strings from `config.yaml` is appended to the extraction system prompt as a bulleted list under a "Content exclusion rules — never include in notes destined for non-local KBs" heading
+- Conversations exceeding 800K tokens (measured after translation to intermediate format) are split at message boundaries and processed iteratively with summarized context carried forward. Each processed chunk is summarized to ~10–20K tokens before being prepended to the next chunk as contextual preamble. Chunk summarization uses the extraction model (`extraction.model_id`) with a summarization-specific prompt — not the cheaper translation model — to ensure high-quality context preservation across chunks.
 
 ### FR-6: Extraction Error Handling
 
@@ -185,7 +186,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - User's first message is used verbatim as the query for remote KB `recallKnowledge` API calls. For local KBs, the CLI first derives 3–5 search keywords from the message via the translation summarization model (see FR-8) before executing `git grep` queries.
 - All target KBs matching the current routing configuration are queried concurrently
 - Each KB's results are sorted by relevance before merging: remote KB results by descending `score`, local KB results by descending match count (title matches weighted 3x). Results from all KBs are then merged via rank-based interleaving (top-ranked from each KB first, then second-ranked, etc.) until 10 notes total are selected. If one KB returns fewer results than others, remaining slots are filled from the KBs that have results remaining.
-- Injected content is formatted as a Markdown list with note title, source KB name, and full content
+- Injected content is written to stdout as raw Markdown (no JSON wrapper) containing note titles, source KB names, and full content. Each harness consumes stdout directly as the injection payload.
 - No token budget cap on injected content for MVP
 - Hook is blocking with a configurable timeout (default: 8 seconds)
 - Partial results from responsive KBs are used if other KBs time out
@@ -220,13 +221,19 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 
 **Acceptance Criteria:**
 - Web server launches on-demand via `multi-kb approve` command, automatically opens the user's default browser, and shuts down after a configurable idle timeout (default: 5 minutes) with no browser activity, or when all pending notes are resolved, whichever comes first. Ctrl+C in the terminal always terminates the server immediately.
+- Web server binds to `localhost` on an auto-selected available port (printed to terminal on startup, e.g., "Approval UI running at http://localhost:52431")
 - Web UI assets (HTML, CSS, JS) are embedded in the Go binary via `embed.FS` and served from memory at runtime — no external asset files or runtime dependencies required
 - Web server is accessible locally for reviewing pending notes from `~/.multi-kb/pending/`
-- Users can approve or reject individual staged notes
-- Before approving, users can optionally edit a note's title and content inline (e.g., to fix LLM hallucinations or redact sensitive content). Edits are applied to the note before submission.
-- Approved notes (with any edits applied) are submitted to their target KB (local or remote) and the corresponding JSON file is deleted from `~/.multi-kb/pending/`
-- Rejected notes have their JSON file deleted from `~/.multi-kb/pending/`
-- UI displays note title, content, target KB, and source conversation context (all read from the pending JSON file)
+- Each note's `target_kbs` are presented as individual approval targets — users can approve for some KBs and reject for others within the same note. A pending JSON file is deleted only when all targets have been resolved (approved or rejected).
+- Before approving a target, users can optionally edit a note's title and content inline (e.g., to fix LLM hallucinations, redact sensitive content). Edits apply to all remaining targets for that note.
+- Approved targets are submitted to their KB (local or remote) immediately upon approval. Rejected targets are simply removed from the note's pending target list.
+- UI displays note title, content, all target KBs, source conversation path, and extraction timestamp (all read from the pending JSON file)
+- **HTTP API served by the web server:**
+  - `GET /` — serves the single-page approval UI (embedded HTML/CSS/JS)
+  - `GET /api/notes` — returns JSON array of all pending notes (read from `~/.multi-kb/pending/`)
+  - `POST /api/notes/:filename/approve` — body: `{ "target_kb": "kb-name", "title": "<edited-or-original>", "content": "<edited-or-original>" }`. Submits the note to the specified target KB, removes that target from the pending file's `target_kbs` array, and deletes the file if no targets remain.
+  - `POST /api/notes/:filename/reject` — body: `{ "target_kb": "kb-name" }`. Removes the specified target from the pending file's `target_kbs` array and deletes the file if no targets remain.
+  - All endpoints are localhost-only; no authentication required (the server is short-lived and local)
 
 ### FR-10: Configuration and State File Structure
 
@@ -308,8 +315,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - Parses each recall log JSON blob to collect all recalled UIDs
 - For each unique UID: updates the `last-recalled` frontmatter timestamp on the corresponding note in the CodeCommit repository to the most recent recall timestamp for that UID
 - Silently skips UIDs for notes that no longer exist (e.g., deleted during dream cycle consolidation)
-- Commits all `last-recalled` updates as a single git commit
-- Acquires the shared lock before committing (to prevent concurrent writes with ingestion or dream cycles)
+- Commits all `last-recalled` updates as a single git commit (the single-tick model ensures no concurrent writes with ingestion or dream cycles; the inter-instance lock is already held by the process)
 
 #### Concurrency Control
 - The single-tick model (one activity per tick, skip if previous tick is still running) eliminates concurrent write operations — no lock contention between ingestion, dream cycles, and recall log processing
@@ -386,7 +392,7 @@ The MVP focuses on the client-mode experience: scanning AI conversations, extrac
 - User-extensible extraction prompt via `~/.multi-kb/prompts/extraction-append.md`
 - Configurable model IDs for extraction, translation summarization, and dream cycle consolidation
 - Per-directory/per-harness/per-persona routing granularity supports diverse team workflows
-- Global exclusion rules are user-defined natural language descriptions
+- Global exclusion rules are an array of user-defined natural language strings in `config.yaml`, appended to the extraction prompt as a bulleted exclusion list
 
 ## User Scenarios & Testing
 

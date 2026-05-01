@@ -302,7 +302,7 @@ The CDK stack is designed to be deployed independently by any team — each depl
 
 - A team can deploy the full stack with a single `cdk deploy` command and have a working knowledge base API within 30 minutes
 - Knowledge submitted via `submitKnowledge` is searchable via `recallKnowledge` within 10 minutes under normal conditions
-- The dream cycle processes 100 pending notes through consolidation within a single 6-hour cycle
+- The dream cycle processes 100 pending notes through consolidation within a single 3-hour cycle
 - The system operates continuously for 7 days without manual intervention or data loss
 - A second team can deploy their own independent instance using the same CDK code with only configuration changes (stack name, repo name, etc.)
 - Cross-team recall works: a CLI configured with multiple KB endpoints can query all of them and receive merged results
