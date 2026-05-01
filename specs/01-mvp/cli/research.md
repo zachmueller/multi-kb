@@ -232,11 +232,11 @@ Agent tool calls produce companion files under `<session-uuid>/subagents/`:
 
 ---
 
-## R-4: Notor Conversation Format
+## R-4: Notor Conversation Format ✅
 
 **Question:** What is the exact schema of Notor chat history files?
 
-**Location:** `{vault}/notor/history/`
+**Location:** `{vault}/.obsidian/plugins/notor/history/`
 
 **Areas to Investigate:**
 - File format (JSON, JSONL, Markdown, other?)
@@ -247,9 +247,342 @@ Agent tool calls produce companion files under `<session-uuid>/subagents/`:
 
 **Prototype Task:** Read a real Notor history directory, document the schema, build a parser.
 
-**Findings:** _(to be populated)_
+**Findings:**
 
-**Decision:** _(to be populated)_
+### History Directory Location
+
+The default history path is `{vault}/.obsidian/plugins/notor/history/`. This is configurable via the plugin's `history_path` setting in `data.json` (vault-relative). The setting stores a vault-relative path like `.obsidian/plugins/notor/history/`.
+
+**Note:** The spec's placeholder `{vault}/notor/history/` is incorrect. The `{vault}/notor/` directory contains user-facing data (personas, workflows, rules, memory), while history files live under the Obsidian plugin config directory at `{vault}/.obsidian/plugins/notor/history/`.
+
+### File Format: JSONL (one file = one conversation)
+
+Each conversation is a single `.jsonl` file. **One file = one conversation.** No explicit boundary markers needed.
+
+- **Line 1** is always the **conversation header** (`_type: "conversation"`)
+- **Lines 2+** are **message records** (`_type: "message"`), appended chronologically
+
+### File Naming Convention
+
+Format: `{timestamp}_{uuid}.jsonl`
+
+The timestamp is derived from the conversation's `created_at` ISO 8601 string by stripping punctuation:
+- Input: `2026-03-10T04:15:13.521Z`
+- Output: `20260310_041513`
+
+Full example: `20260310_041513_0ecc5e56-6460-41c4-8762-464cec0816e7.jsonl`
+
+Generation logic (from `conversationFilename()` in `src/chat/history.ts`):
+```
+created_at.replace(/[-:]/g, "").replace("T", "_").replace(/\.\d+Z$/, "Z").replace("Z", "")
+```
+
+**Sub-agent files** follow a different convention: `{parent_timestamp}_{parent_id}_subagent_{invocation_id}.jsonl`. These can be identified by containing `_subagent_` in the filename.
+
+### Conversation Header Schema (Line 1)
+
+```json
+{
+  "_type": "conversation",
+  "id": "0ecc5e56-6460-41c4-8762-464cec0816e7",
+  "created_at": "2026-03-10T04:15:13.521Z",
+  "updated_at": "2026-03-10T04:15:46.659Z",
+  "provider_id": "bedrock",
+  "model_id": "global.anthropic.claude-sonnet-4-6",
+  "total_input_tokens": 20275,
+  "total_output_tokens": 509,
+  "estimated_cost": 0.06846,
+  "mode": "plan",
+  "title": "Is there a pandas equivalent in the world of TypeScript?"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `_type` | `"conversation"` | Yes | Discriminator — always `"conversation"` for headers |
+| `id` | string (UUID v4) | Yes | Unique conversation identifier |
+| `created_at` | string (ISO 8601) | Yes | Conversation creation timestamp |
+| `updated_at` | string (ISO 8601) | Yes | Last activity timestamp (updated on each message) |
+| `provider_id` | string | Yes | LLM provider type (e.g., `"bedrock"`, `"anthropic"`, `"openai"`, `"local"`) |
+| `model_id` | string | Yes | Model identifier (e.g., `"global.anthropic.claude-sonnet-4-6"`) |
+| `total_input_tokens` | number | Yes | Cumulative input tokens |
+| `total_output_tokens` | number | Yes | Cumulative output tokens |
+| `estimated_cost` | number \| null | Yes | Cumulative estimated cost (null if pricing unavailable) |
+| `mode` | `"plan"` \| `"act"` | Yes | Conversation mode at time of last update |
+| `title` | string \| undefined | No | Display title (auto-generated from first user message) |
+| `workflow_path` | string \| null | No | Vault-relative path of workflow note (null for non-workflow) |
+| `workflow_name` | string \| null | No | Display name of workflow (e.g., `"daily/review"`) |
+| `persona_name` | string \| null | No | Active persona name (null for default persona) |
+| `is_background` | boolean | No | True for event-triggered background workflow executions |
+| `use_extended_context` | boolean | No | True if 1M extended context was active |
+| `forked_from_conversation_id` | string \| null | No | Parent conversation ID for forked conversations |
+| `forked_from_message_id` | string \| null | No | Fork-point message ID |
+| `is_favorite` | boolean | No | Whether conversation is favorited |
+| `preset_name` | string \| null | No | Model preset name active when created |
+| `draft_text` | string \| null | No | Unsent draft text saved between conversation switches |
+
+**Workflow conversation header example:**
+```json
+{
+  "_type": "conversation",
+  "id": "6b9f1205-817d-4308-9e5f-8eecab4847a1",
+  "created_at": "2026-03-18T04:33:22.529Z",
+  "updated_at": "2026-03-18T04:35:06.013Z",
+  "provider_id": "bedrock",
+  "model_id": "global.anthropic.claude-sonnet-4-6",
+  "total_input_tokens": 48818,
+  "total_output_tokens": 1562,
+  "estimated_cost": 0.169884,
+  "mode": "act",
+  "workflow_path": "notor/workflows/narrative-02-transcript-to-outline.md",
+  "workflow_name": "narrative-02-transcript-to-outline",
+  "persona_name": null,
+  "is_background": false,
+  "title": "Workflow: narrative-02-transcript-to-outline"
+}
+```
+
+### Message Schema (Lines 2+)
+
+```json
+{
+  "_type": "message",
+  "id": "f8bcd674-4f33-46ef-b158-5518ecc885bc",
+  "conversation_id": "0ecc5e56-6460-41c4-8762-464cec0816e7",
+  "role": "user",
+  "content": "Is there a `pandas` equivalent in the world of TypeScript?",
+  "timestamp": "2026-03-10T04:15:28.932Z",
+  "input_tokens": null,
+  "output_tokens": null,
+  "cost_estimate": null,
+  "tool_call": null,
+  "tool_result": null,
+  "truncated": false,
+  "auto_context": null,
+  "attachments": null,
+  "hook_injections": null
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `_type` | `"message"` | Yes | Discriminator — always `"message"` |
+| `id` | string (UUID v4) | Yes | Unique message identifier |
+| `conversation_id` | string (UUID v4) | Yes | Parent conversation ID |
+| `role` | MessageRole | Yes | Message role (see below) |
+| `content` | string \| ContentBlock[] | Yes | Message text or structured content blocks |
+| `timestamp` | string (ISO 8601) | Yes | When the message was created, UTC with ms precision |
+| `input_tokens` | number \| null | No | Input token count (null for non-LLM messages) |
+| `output_tokens` | number \| null | No | Output token count (null for non-LLM messages) |
+| `cost_estimate` | number \| null | No | Estimated cost for this message |
+| `tool_call` | ToolCall \| null | No | Tool call details (for `tool_call` role only) |
+| `tool_result` | ToolResult \| null | No | Tool result details (for `tool_result` role only) |
+| `truncated` | boolean | No | Whether message was truncated from LLM context |
+| `auto_context` | string \| null | No | Auto-context XML block injected into user messages |
+| `attachments` | array \| null | No | Metadata for attached notes/files on user messages |
+| `hook_injections` | string[] \| null | No | Captured stdout from pre-send hooks |
+| `is_hook_injection` | boolean | No | Whether this user message is a hook injection |
+| `is_workflow_message` | boolean | No | Whether this is the opening workflow instructions message |
+| `source_extension` | string \| null | No | Extension name for `extension_block` role messages |
+| `exclude_from_compaction` | boolean | No | Whether to exclude from compaction summarizer input |
+
+### Message Roles
+
+```typescript
+type MessageRole = "system" | "user" | "assistant" | "tool_call" | "tool_result" | "extension_block";
+```
+
+| Role | Description | Translator relevance |
+|------|-------------|---------------------|
+| `user` | User-typed messages | **Yes** — primary user content |
+| `assistant` | LLM responses (text content) | **Yes** — primary assistant content |
+| `tool_call` | LLM-requested tool invocation | **Yes** — collapse into summary |
+| `tool_result` | Tool execution output | **Yes** — collapse into summary |
+| `system` | System messages (including compaction records) | **Selective** — detect compaction events |
+| `extension_block` | Extension-produced messages (e.g., memory recall/capture) | **No** — skip in translator |
+
+**Critical difference from Claude Code:** Notor uses **dedicated roles** for tool calls and results (`tool_call`, `tool_result`) rather than embedding them as content blocks within `user`/`assistant` messages. Each tool call and each tool result is its own JSONL line with its own `_type: "message"`.
+
+### Content Field Format
+
+The `content` field can be either:
+1. **Plain string** — most common for `user` and `assistant` messages
+2. **ContentBlock array** — for messages with images, documents, or custom extension blocks
+
+```typescript
+type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; media_type: ImageMediaType; data: string; width?: number; height?: number }
+  | { type: "document"; media_type: "application/pdf"; data: string; page_count?: number }
+  | { type: "custom_block"; kind: string; data: Record<string, unknown>; fallback_text?: string; estimated_wire_tokens?: number; loading?: boolean };
+```
+
+For the translator: use `typeof content === "string" ? content : content.filter(b => b.type === "text").map(b => b.text).join("\n")` to extract text.
+
+### ToolCall Schema
+
+```json
+{
+  "role": "tool_call",
+  "content": "",
+  "tool_call": {
+    "id": "tooluse_JHlCmvR9LP15REfVj0Qu2R",
+    "tool_name": "search_vault",
+    "parameters": { "query": "pandas TypeScript" },
+    "status": "pending"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Provider-assigned tool call ID (for correlation with results) |
+| `tool_name` | string | Name of the tool invoked |
+| `parameters` | Record<string, unknown> | Tool parameters as key-value pairs |
+| `status` | `"pending"` \| `"approved"` \| `"rejected"` \| `"success"` \| `"error"` | Current status |
+
+### ToolResult Schema
+
+```json
+{
+  "role": "tool_result",
+  "content": "",
+  "tool_result": {
+    "tool_name": "search_vault",
+    "success": true,
+    "result": { "total_matches": 0, "files": [] },
+    "duration_ms": 169,
+    "tool_call_id": "tooluse_JHlCmvR9LP15REfVj0Qu2R"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tool_name` | string | Name of the tool that was invoked |
+| `success` | boolean | Whether execution succeeded |
+| `result` | string \| Record<string, unknown> | Tool output (can be string or structured JSON) |
+| `error` | string \| null | Error message if execution failed |
+| `duration_ms` | number | Execution time in milliseconds |
+| `tool_call_id` | string | Matches `id` on the corresponding ToolCall |
+| `content_blocks` | ContentBlock[] | Optional media output from tool execution |
+| `sub_agent_metadata` | object \| null | Sub-agent execution metadata (see below) |
+
+**Sub-agent metadata** (present only on `use_subagent` tool results):
+```json
+{
+  "sub_agent_metadata": {
+    "jsonl_filename": "20260430_043827_62afbf59..._subagent_495b4938....jsonl",
+    "token_usage": { "input": 1658, "output": 73 },
+    "iteration_count": 2,
+    "stop_reason": "completed",
+    "profile_name": "notor-help"
+  }
+}
+```
+
+### Tool Call / Result Pairing
+
+Tool calls and results are **paired** via `tool_call.id` ↔ `tool_result.tool_call_id`. They always appear as adjacent JSONL lines: a `tool_call` message immediately followed by its `tool_result` message.
+
+### Compaction Records
+
+When the conversation is compacted (summarized to reclaim context window space), a `system` role message is appended with the `content` field containing a JSON-serialized `CompactionRecord`:
+
+```json
+{
+  "_type": "message",
+  "role": "system",
+  "content": "{\"id\":\"...\",\"conversation_id\":\"...\",\"type\":\"compaction\",\"timestamp\":\"2026-03-10T07:45:08.602Z\",\"token_count_at_compaction\":1160600,\"context_window_limit\":200000,\"threshold\":0.8,\"summary\":\"The user asked...\",...}"
+}
+```
+
+Detection: `role === "system"` and `JSON.parse(content).type === "compaction"`. The translator should be aware that messages before a compaction record may have been summarized and replaced in the active context window, but they are all preserved in the JSONL file.
+
+### Per-Message Timestamps
+
+Every message has a `timestamp` field — **ISO 8601 with millisecond precision, UTC** (e.g., `"2026-03-10T04:15:28.932Z"`). This is the same format as Claude Code.
+
+The translator can use per-message timestamps for the `previously_processed` flag: compare each message's `timestamp` to `last_processed`. Only messages with timestamps > `last_processed` get `previously_processed: false`.
+
+### Persona/Workflow Metadata (Per-Conversation, Not Per-Message)
+
+Persona and workflow metadata are stored **on the conversation header only**, not on individual messages:
+- `workflow_path` — vault-relative path to the workflow note
+- `workflow_name` — display name of the workflow
+- `persona_name` — active persona name (null for default)
+- `is_background` — true for event-triggered (background) workflow executions
+
+The translator extracts these from line 1 of the JSONL file. Individual messages carry `is_workflow_message: true` to flag the opening workflow instructions message, which can be used to filter out verbose workflow instruction text from extraction.
+
+### Sub-Agent Conversation Files
+
+Sub-agent conversations are stored as separate JSONL files with `_subagent_` in the filename. Their header uses `_type: "sub_agent_conversation"` (not `"conversation"`), so they are automatically excluded from `listConversations()`.
+
+Header schema:
+```json
+{
+  "_type": "sub_agent_conversation",
+  "id": "343b904a-...",
+  "parent_conversation_id": "62afbf59-...",
+  "sub_agent_name": "notor-help",
+  "provider_id": "bedrock",
+  "model_id": "global.anthropic.claude-opus-4-6-v1",
+  "total_input_tokens": 1658,
+  "total_output_tokens": 73,
+  "iteration_count": 2,
+  "stop_reason": "completed",
+  "created_at": "2026-04-30T04:42:29.299Z"
+}
+```
+
+The translator should **skip sub-agent files** (identify via `isSubAgentFilename()` check: `filename.includes("_subagent_")`). The sub-agent's output is already captured in the parent conversation's `tool_result` for the `use_subagent` tool call.
+
+### Extension Block Messages
+
+Messages with `role: "extension_block"` carry plugin extension data (e.g., memory recall results, memory capture records). Example:
+```json
+{
+  "role": "extension_block",
+  "content": [{ "type": "custom_block", "kind": "memory_recalled", "data": {...} }],
+  "source_extension": "Memory Search (auto-inject)",
+  "exclude_from_compaction": false
+}
+```
+
+The translator should **skip extension_block messages** — they are internal plugin state, not user/assistant conversation content.
+
+### Complete Conversation Example (Annotated)
+
+```
+Line 1: {"_type":"conversation","id":"...","created_at":"2026-03-10T04:15:13.521Z",...,"title":"Is there a pandas equivalent..."}
+Line 2: {"_type":"message","role":"user","content":"Is there a `pandas` equivalent in the world of TypeScript?","timestamp":"2026-03-10T04:15:28.932Z",...}
+Line 3: {"_type":"message","role":"tool_call","content":"","tool_call":{"tool_name":"search_vault","parameters":{"query":"pandas TypeScript"},"status":"pending"},"timestamp":"2026-03-10T04:15:32.526Z",...}
+Line 4: {"_type":"message","role":"tool_result","content":"","tool_result":{"tool_name":"search_vault","success":true,"result":{"total_matches":0,"files":[]},"tool_call_id":"tooluse_JHlCmvR9LP15REfVj0Qu2R"},"timestamp":"2026-03-10T04:15:32.698Z",...}
+Line 5: {"_type":"message","role":"assistant","content":"No existing notes on this topic...","timestamp":"2026-03-10T04:15:46.659Z","input_tokens":20275,"output_tokens":509,...}
+```
+
+**Decision:**
+
+1. **History path discovery:** Read `{vault}/.obsidian/plugins/notor/data.json`, parse JSON, extract `history_path` field. Resolve relative to vault root. Default: `{vault}/.obsidian/plugins/notor/history/`.
+
+2. **File discovery:** List all `*.jsonl` files in the history directory. Filter out sub-agent files (filenames containing `_subagent_`). Each remaining file is one conversation.
+
+3. **Parsing strategy:** Read line 1 as conversation header. Read remaining lines as messages. Parse each line as JSON. Use `_type` field to discriminate header vs. message lines.
+
+4. **Per-message timestamps are available and should be used.** Same strategy as Claude Code: compare each message's `timestamp` to `last_processed`. Only messages with timestamps > `last_processed` get `previously_processed: false`.
+
+5. **Persona/workflow metadata extraction:** Read `workflow_name`, `workflow_path`, `persona_name`, and `is_background` from the conversation header (line 1). These are per-conversation, not per-message. The translator should surface these in its output so the consolidation pipeline can use them for routing decisions.
+
+6. **Tool call/result collapsing:** Pair adjacent `tool_call` + `tool_result` messages via `tool_call.id` ↔ `tool_result.tool_call_id`. Generate a summary like `"[Tool: search_vault -> success: 0 matches]"`. This mirrors the Claude Code translator's approach but is simpler since Notor uses dedicated roles rather than content blocks.
+
+7. **Skip extension_block messages.** They are internal plugin state (memory recall, memory capture) and not relevant to knowledge extraction.
+
+8. **Skip system messages** that are compaction records. The messages before compaction are still present in the JSONL file (the file is append-only), so the translator processes all non-system messages regardless.
+
+9. **Content extraction:** For each message, check `typeof content === "string"`. If string, use directly. If array (ContentBlock[]), filter to `type: "text"` blocks and join with newline. Skip image/document/custom_block content blocks.
+
+10. **Sub-agent conversations should be skipped in MVP.** The sub-agent's output is already captured in the parent conversation's tool result.
 
 ---
 
