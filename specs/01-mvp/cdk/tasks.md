@@ -373,7 +373,7 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 **Files:**
 - `lambda/recall/index.ts` — handler function
 - `test/lambda/recall.test.ts` — handler unit tests
-**Dependencies:** LMB-001
+**Dependencies:** LMB-001, R-2 research (Bedrock KB metadata extraction — determines how uid/title are extracted from Retrieve results), PRM-003 (coverage assessment prompt)
 **Acceptance Criteria:**
 - [ ] Parses `event.body` — extracts `query` (required, string) and `limit` (optional, integer, default 10)
 - [ ] Validates `query`: present, non-empty string; returns HTTP 400 on failure
@@ -611,6 +611,21 @@ _Bring all constructs together in the main stack._
   - API Gateway methods reference the actual Lambda functions
   - VPC endpoints are in the same subnet as the ASG
 - [ ] Test: `npm test` passes with snapshot matching
+
+---
+
+## Research Ordering
+
+_Research items must complete before their dependent implementation phases._
+
+| Research | Must Complete Before | Blocks |
+|----------|---------------------|--------|
+| **R-2:** Bedrock KB metadata extraction | Phase 4 (Lambda Functions) | LMB-004 (recallKnowledge handler — determines uid/title extraction from Retrieve results) |
+| **R-1:** OpenSearch Serverless CDK setup | Phase 3 (Search Infrastructure) | SRC-001, SRC-002, SRC-003, SRC-004 (L1 construct usage, policy format) |
+| **R-6:** OpenSearch dual-access network policy | Phase 3 (Search Infrastructure) | SRC-003 (network policy configuration) |
+| **R-7:** Lambda proxy integration format | Phase 4 (Lambda Functions) | LMB-001 (response helpers) |
+
+**Tasks that can proceed without research:** Phases 0-2 (Setup, Networking, Storage), Phase 5 (API Gateway), Phase 6 (EC2 Compute — except final user data details), Phase 7 (Observability).
 
 ---
 

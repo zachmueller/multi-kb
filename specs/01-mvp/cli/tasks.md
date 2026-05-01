@@ -7,10 +7,10 @@
 
 ## Task Summary
 
-**Total Tasks:** 82
-**Phases:** 10 (Setup → Foundation → Translation → Extraction → Hooks → Dream Cycle → Wizard → Approval UI → Server Mode → Build)
+**Total Tasks:** 87 (82 original + 5 prompt tasks)
+**Phases:** 10 + cross-cutting prompt authoring + research ordering
 **Estimated Complexity:** High
-**Parallel Execution Opportunities:** 18 task groups
+**Parallel Execution Opportunities:** 18 task groups + prompt tasks (all parallel)
 
 ## Dependency Legend
 
@@ -49,6 +49,7 @@
 - `internal/cmd/addsource.go` — `multi-kb add-source`
 - `internal/cmd/addkb.go` — `multi-kb add-kb`
 - `internal/cmd/hook.go` — `multi-kb hook`
+- `internal/cmd/server.go` — `multi-kb server`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
 - [ ] `multi-kb --help` lists all subcommands
@@ -137,12 +138,14 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/git/repo.go` — InitRepo, CommitFiles, IsRepo functions
 - `internal/git/repo_test.go`
 **Dependencies:** ENV-001
+**Implementation Note:** Use `os/exec` shell-out to the `git` binary for all git operations. Sanitize all user-derived inputs (directory names, file names) to prevent command injection. Requires `git` on PATH.
 **Acceptance Criteria:**
 - [ ] Creates `~/.multi-kb/local/<kb-name>/` directory
 - [ ] Runs `git init` in the directory
 - [ ] Creates initial commit (empty or with `.gitkeep`)
 - [ ] IsRepo detects whether a path is an initialized git repo
 - [ ] Default KB created at `~/.multi-kb/local/default/`
+- [ ] All git arguments properly escaped/quoted to prevent command injection
 - [ ] Test cases: init fresh repo, detect existing repo, commit files
 
 ### FND-006: Local KB Note File Writing
@@ -151,6 +154,7 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/submit/local.go` — WriteNote function (generates UID, writes file, commits)
 - `internal/submit/local_test.go`
 **Dependencies:** FND-004, FND-005
+**Implementation Note:** Uses git shell-out (FND-005) for commits. Sanitize title and author strings before use in file content or git commit messages.
 **Acceptance Criteria:**
 - [ ] Writes `<UID>.md` to the appropriate local KB directory
 - [ ] YAML frontmatter includes all fields: uid, title, status (pending), author, last-updated, last-linked-to (empty), last-recalled (empty), consolidated-from-notes (empty)
@@ -168,6 +172,7 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/git/grep_test.go`
 - `internal/recall/local_test.go`
 **Dependencies:** FND-005, FND-006
+**Implementation Note:** Uses `os/exec` shell-out to `git grep -c`. Sanitize keyword inputs to prevent command injection (keywords come from LLM output in the hook path, or from note titles in the dream cycle path).
 **Acceptance Criteria:**
 - [ ] Runs `git grep -c <keyword>` per keyword against the working tree
 - [ ] Filters results to `status: active` notes only (parses frontmatter to check status)
@@ -226,15 +231,16 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - [ ] Test cases: with full data, with empty logs, with no config
 
 ### FND-011 [P]: Token Counting Approximation
-**Description:** Implement fast token estimation for determining when conversations exceed the 800K chunking threshold per spec FR-5.
+**Description:** Implement fast token estimation for determining when conversations exceed the chunking threshold per spec FR-5.
 **Files:**
-- `internal/token/count.go` — EstimateTokens function
+- `internal/token/count.go` — EstimateTokens function, ChunkingThreshold constant
 - `internal/token/count_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
 - [ ] Estimates tokens from a string using a fast heuristic (e.g., ~4 chars per token for English text, ~3.5 for code-heavy content)
 - [ ] Does not use an external tokenizer library (speed priority)
-- [ ] Accuracy within ±20% for typical conversation content (good enough for chunking threshold)
+- [ ] Accuracy within ±20% for typical conversation content
+- [ ] Exports `ChunkingThreshold = 700_000` constant (conservative value to leave headroom for estimation error — actual model context windows are larger)
 - [ ] Handles empty strings, very long strings, and mixed content
 - [ ] Test cases: known calibration strings, edge cases (empty, single char, 1M chars)
 
@@ -353,18 +359,19 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - [ ] Test cases: successful extraction, empty result, partial valid JSON, completely invalid JSON, field validation
 
 ### EXT-004: Chunked Extraction for Oversized Conversations
-**Description:** Implement conversation chunking for >800K token conversations per spec FR-5.
+**Description:** Implement conversation chunking for >700K token conversations per spec FR-5.
 **Files:**
 - `internal/extract/extract.go` — ExtractChunked (splits, summarizes, iterates)
-**Dependencies:** EXT-003, FND-011
+**Dependencies:** EXT-003, FND-011, PRM-005
 **Acceptance Criteria:**
-- [ ] Detects when translated conversation exceeds 800K tokens (via token estimator)
-- [ ] Splits at message boundaries (never mid-message) near the 800K mark
+- [ ] Detects when translated conversation exceeds 700K tokens (conservative threshold from FND-011's `ChunkingThreshold` constant, leaves headroom for token estimation error)
+- [ ] Splits at message boundaries (never mid-message) near the 700K mark
 - [ ] First chunk processed normally via Extract
-- [ ] Each processed chunk summarized to ~10-20K tokens using extraction model with summarization-specific prompt
-- [ ] Summary prepended to next chunk as contextual preamble
+- [ ] Each processed chunk summarized to ~10-20K tokens using extraction model with summarization-specific prompt (PRM-005)
+- [ ] **Latest summary only** carried forward: each chunk's summary replaces the previous chunk's summary as the preamble for the next chunk (not accumulated). Keeps preamble bounded at ~10-20K regardless of conversation length.
+- [ ] Context preamble formatted as a leading section in the user message (before the JSONL conversation content)
 - [ ] All extracted notes from all chunks combined into single result
-- [ ] Test cases: conversation under threshold (no chunking), over threshold (2 chunks), very large (3+ chunks), split at message boundary
+- [ ] Test cases: conversation under threshold (no chunking), over threshold (2 chunks), very large (3+ chunks), split at message boundary, verify preamble replacement (not accumulation)
 
 ### EXT-005: Extraction Error Handling
 **Description:** Implement retry logic and error logging for extraction failures per spec FR-6 and contracts/extraction-output.md.
@@ -407,7 +414,7 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - [ ] Pre-flight validation: title ≤255 chars, content ≤100K chars, author ≤100 chars
 - [ ] Self-throttle: max 10 requests/second per target KB
 - [ ] HTTP 202: success (UID logged but not stored)
-- [ ] HTTP 400: pass error + original note to extraction LLM for correction, retry up to 2 times; on persistent failure, stage in pending queue
+- [ ] HTTP 400: pass error + original note to extraction LLM for correction, retry up to 2 times; on persistent failure, stage in pending queue. **Note:** This LLM correction only applies in the capture processing pipeline (EXT-008 path). The approval web server (APR-003) does NOT use LLM correction — it returns 502 immediately.
 - [ ] HTTP 401/403: log error, skip remaining submissions to this KB for the run, surface credential refresh guidance
 - [ ] HTTP 5xx / network: retry 3 times with exponential backoff; on persistent failure, log and continue
 - [ ] Test cases: successful submission, throttling, 400 correction flow, 401 skip behavior, 5xx retry
@@ -583,13 +590,14 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - [ ] Test cases: note with matching active notes, no related notes, keyword derivation from title
 
 ### DRM-004: Phase 3 — LLM Consolidation and Action Application
-**Description:** Implement Phase 3: send each batch (pending note + related notes) to LLM for consolidation, parse actions, apply them per spec FR-8.
+**Description:** Implement Phase 3: send each batch (pending note + related notes) to LLM for consolidation, parse actions, apply them per spec FR-8 and contracts/consolidation-output.md.
 **Files:**
 - `internal/dreamcycle/phase3.go` — ConsolidateBatch function (LLM call, action parsing)
 - `internal/dreamcycle/actions.go` — ApplyActions function (keep, merge, split, consolidate)
 - `internal/dreamcycle/phase3_test.go`
 - `internal/dreamcycle/actions_test.go`
-**Dependencies:** EXT-001, FND-006, FND-005
+**Dependencies:** EXT-001, FND-006, FND-005, PRM-002
+**Contract:** [consolidation-output.md](contracts/consolidation-output.md)
 **Acceptance Criteria:**
 - [ ] Constructs consolidation prompt with: the pending note (singleton batch) + related active notes
 - [ ] Calls `dream_cycle.model_id` via Bedrock
@@ -757,17 +765,19 @@ _Corresponds to plan.md Phase G. Builds on-demand approval web server._
 - [ ] `GET /` — serves embedded HTML
 - [ ] `GET /api/notes` — returns JSON array of all pending notes from `~/.multi-kb/pending/`
 - [ ] `POST /api/notes/:filename/approve` — body: {target_kb, title, content}
-  - Submits to target KB (local: writes note file; remote: calls submitKnowledge)
-  - Removes target from pending file's target_kbs
-  - Deletes file if no targets remain
+  - Submits to target KB:
+    - **Local KB:** generates UID at approval time via GenerateUID() (FND-004), writes `<UID>.md` file with frontmatter + content
+    - **Remote KB:** calls submitKnowledge API (server generates UID)
+  - On successful submission: removes target from pending file's target_kbs; deletes file if no targets remain
   - Edits to title/content persist in pending file for remaining targets
   - Returns {remaining_targets}
 - [ ] `POST /api/notes/:filename/reject` — body: {target_kb}
   - Removes target from target_kbs
   - Deletes file if no targets remain
   - Returns {remaining_targets}
-- [ ] Error responses: 404 (file not found), 400 (target not in array), 502 (submission failed)
-- [ ] Test cases: list notes, approve for one target, approve last target (file deleted), reject, edit before approve, 404, 400
+- [ ] Error responses: 404 (file not found), 400 (target not in array), 502 (submission failed — pending file left unchanged, target NOT removed, user can retry)
+- [ ] **Approval error handling:** On remote KB submission failure (400/401/5xx), return HTTP 502 with error details to the UI. Leave the pending file unchanged (target not removed). No retry logic, no LLM correction — keep the approval flow simple. User can retry from the UI.
+- [ ] Test cases: list notes, approve for one target (local KB — verify UID generated), approve for remote KB, approve last target (file deleted), reject, edit before approve, 404, 400, remote submission failure (502 returned, pending unchanged)
 
 ### APR-004: Approve Command Wiring
 **Description:** Wire up `multi-kb approve` to launch the web server per spec FR-9.
@@ -837,6 +847,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 **Files:**
 - `internal/server/codecommit.go` — CloneRepo, CommitBatch
 **Dependencies:** FND-005
+**Implementation Note:** Uses `os/exec` shell-out to `git` binary. CodeCommit credential helper configured via `git config` (set up by CDK user data script). Sanitize SQS message fields (UID, title, author) before use in file names or git commit messages.
 **Acceptance Criteria:**
 - [ ] Clones CodeCommit repository via HTTPS (git-codecommit VPC endpoint)
 - [ ] Creates `<UID>.md` Markdown files with full frontmatter per data-model.md Entity 1: uid, title, status: pending, author, last-updated (from submitted_at), empty last-linked-to/last-recalled/consolidated-from-notes
@@ -865,6 +876,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - `internal/server/dreamcycle.go` — ServerDreamCycle: Phase 0 (sync+reindex), Phase 1 (OpenSearch pending query + similarity grouping), Phase 2 (OpenSearch related query), Phase 4 (final sync + reindex)
 - `internal/server/dreamcycle_test.go`
 **Dependencies:** DRM-004, SRV-004, SRV-005
+**Contract:** [consolidation-output.md](contracts/consolidation-output.md) — Phase 3 shares logic with DRM-004
 **Acceptance Criteria:**
 - [ ] Phase 0: syncs CodeCommit→S3, triggers `StartIngestionJob`, polls `GetIngestionJob` with 10-min hard cutoff (proceeds best-effort if timeout)
 - [ ] Phase 1: queries OpenSearch (via VPC endpoint) for `status: pending` notes; groups into batches by similarity (max 10 per batch): pick ungrouped seed, query for similar pending notes, form batch, repeat
@@ -917,6 +929,97 @@ _Corresponds to plan.md Phase I._
 - [ ] Evaluates `upx` compression (optional, document trade-offs)
 - [ ] Documents final binary sizes per platform
 - [ ] Binary size is reasonable for a Go CLI with embedded web assets (<30MB target)
+
+---
+
+## Cross-Cutting: LLM Prompt Authoring
+
+_These tasks produce the core LLM prompts that drive the system's intelligence. Each prompt should be authored, tested against sample data, and iterated before the code that invokes it is finalized. Prompts can be worked on in parallel with each other._
+
+### PRM-001 [P]: Extraction System Prompt
+**Description:** Author the hardcoded extraction system prompt that instructs the LLM to extract knowledge notes from translated conversations per contracts/extraction-output.md.
+**Files:**
+- `internal/extract/prompts/extraction.go` — prompt text as Go constant or embedded file
+- Sample test conversations for validation
+**Dependencies:** None (can start early)
+**Acceptance Criteria:**
+- [ ] Defines the extraction task, output JSON format (title/content/suggested_target_kbs), and quality guidelines
+- [ ] Instructs LLM to focus on `previously_processed: false` messages while using full conversation for context
+- [ ] Instructs LLM to avoid extracting trivial or obvious information
+- [ ] Specifies that empty array `[]` is valid when no knowledge is extractable
+- [ ] Tested against ≥3 sample conversations: one with clear knowledge, one with no extractable knowledge, one re-processed conversation with mixed flags
+- [ ] Prompt length reasonable (under ~2K tokens)
+
+### PRM-002 [P]: Dream Cycle Consolidation Prompt
+**Description:** Author the consolidation system prompt for dream cycle Phase 3 per contracts/consolidation-output.md.
+**Files:**
+- `internal/dreamcycle/prompts/consolidation.go` — prompt text
+- Sample test batches for validation
+**Dependencies:** contracts/consolidation-output.md
+**Acceptance Criteria:**
+- [ ] Instructs LLM to evaluate each pending note against related active notes
+- [ ] Defines all four action types (keep, merge, split, consolidate) with clear criteria for when to use each
+- [ ] Specifies the JSON output schema from consolidation-output.md
+- [ ] Instructs that every pending note UID must appear in exactly one action
+- [ ] Instructs to preserve information — never silently discard content
+- [ ] Distinguishes merge (absorb into existing) from consolidate (create new from multiple)
+- [ ] Tested against ≥3 sample batches: one with a novel note (keep), one with a duplicate (merge), one with overlapping notes (consolidate)
+- [ ] Prompt length reasonable (under ~3K tokens)
+
+### PRM-003 [P]: Coverage Assessment Prompt (CDK)
+**Description:** Author the coverage gap detection prompt for the recallKnowledge Lambda's coverage assessment flow.
+**Files:**
+- `lambda/recall/prompts/coverage.ts` — prompt text (or inline in handler)
+- Sample test inputs for validation
+**Dependencies:** R-2 research (Bedrock KB metadata extraction)
+**Acceptance Criteria:**
+- [ ] Input format: user's original query + summaries of top Retrieve results (title + content snippet)
+- [ ] Output format: JSON `{ "gap_detected": boolean, "refined_query": string | null }`
+- [ ] When gap detected, `refined_query` contains a reformulated query targeting the gap
+- [ ] When no gap, `refined_query` is null
+- [ ] Tested against ≥3 sample scenarios: good coverage (no gap), missing topic (gap + refined query), ambiguous results
+- [ ] Prompt is concise — designed for a fast model (Haiku-class)
+
+### PRM-004 [P]: Keyword Derivation Prompt
+**Description:** Author the prompt for deriving 3-5 search keywords from a user's first message for local KB recall per spec FR-7.
+**Files:**
+- `internal/recall/prompts/keywords.go` — prompt text
+**Dependencies:** None
+**Acceptance Criteria:**
+- [ ] System prompt instructs: extract 3-5 key search terms from the user's message, return as JSON array of strings
+- [ ] Keywords should be specific technical terms, not generic words
+- [ ] Output format: `["keyword1", "keyword2", "keyword3"]`
+- [ ] Tested against ≥3 sample first messages: a technical question, a broad request, a short ambiguous query
+- [ ] Prompt is concise — designed for a fast model (Haiku-class)
+
+### PRM-005 [P]: Chunk Summarization Prompt
+**Description:** Author the prompt for summarizing processed conversation chunks to ~10-20K tokens for context carry-forward per spec FR-5.
+**Files:**
+- `internal/extract/prompts/summarize_chunk.go` — prompt text
+**Dependencies:** None
+**Acceptance Criteria:**
+- [ ] Instructs LLM to summarize the conversation chunk preserving: key topics discussed, decisions made, technical details, and context needed for understanding subsequent messages
+- [ ] Target output length: ~10-20K tokens
+- [ ] Specifies that only the latest summary is carried forward (not accumulated from all prior chunks)
+- [ ] Tested against ≥1 sample long conversation chunk
+- [ ] Uses extraction model (`extraction.model_id`), not the cheaper translation model
+
+---
+
+## Research Ordering
+
+_Research items must complete before their dependent implementation phases._
+
+| Research | Must Complete Before | Blocks |
+|----------|---------------------|--------|
+| **R-2:** Bedrock KB metadata extraction | CDK Phase 4 (Lambda Functions) | LMB-004, PRM-003 |
+| **R-4:** Notor conversation format | CLI Phase 2 (Translation Layer) | TRN-003 |
+| **R-5:** Claude Code hook registration | CLI Phase 4 (Hook Injection) | HKI-001, HKI-007 |
+| **R-6:** Notor hook registration | CLI Phase 4 (Hook Injection) | HKI-002 |
+
+**Recommended start order:** R-5 and R-2 are highest priority (block the most downstream tasks). R-4 and R-6 can follow.
+
+**Tasks that can proceed without research:** All of CLI Phase 0, Phase 1 (Foundation), Phase 3 (Extraction — uses Claude Code only for initial testing), Phase 5 (Dream Cycle), Phase 7 (Approval UI). All of CDK Phases 0-3 and Phase 5-8.
 
 ---
 
@@ -1005,7 +1108,9 @@ ENV-001 → ENV-002
        → HKI-004 → HKI-007
        → HKI-005 → HKI-007
        → HKI-006 → HKI-007
+       → PRM-002 ──────────────────────────────────────────→ DRM-004
        → DRM-001 → DRM-002 → DRM-003 → DRM-004 → DRM-005
+       → PRM-005 ──────────────────────────────────────────→ EXT-004
        → APR-001 → APR-002 → APR-003 → APR-004
 ```
 
@@ -1024,5 +1129,6 @@ This is the longest dependency chain (~10 sequential tasks). To minimize total i
 | Server Mode Parallel | SRV-003, SRV-004, SRV-005 | SRV-001 |
 | Wizard Subcommands | WIZ-006 | FND-001 |
 | Approval UI | APR-001 → APR-002 → APR-003 | Independent of extraction pipeline |
+| Prompt Authoring | PRM-001, PRM-002, PRM-003, PRM-004, PRM-005 | PRM-002 needs consolidation contract; PRM-003 needs R-2; others can start immediately |
 | Build Parallel | BLD-001, BLD-002 | ENV-003 |
 | Quality Parallel | QAT-001, QAT-002, QAT-003, QAT-004 | All prior phases |
