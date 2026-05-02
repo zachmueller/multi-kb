@@ -89,12 +89,12 @@ _Corresponds to plan.md Phase A. Builds VPC infrastructure._
 - `test/constructs/networking.test.ts`
 **Dependencies:** ENV-002
 **Acceptance Criteria:**
-- [ ] When `vpcId` is not provided: creates new VPC with a single private subnet in one AZ
-- [ ] When `vpcId` is provided: imports existing VPC via `Vpc.fromLookup()`
-- [ ] No public subnets, no NAT gateway
-- [ ] Single AZ for cost optimization (all endpoints and ASG pinned to same AZ)
-- [ ] Exports: VPC, subnet, availability zone
-- [ ] CDK assertion test: VPC resource exists with expected CIDR; no NAT gateway resource; single subnet
+- [x] When `vpcId` is not provided: creates new VPC with a single private subnet in one AZ
+- [x] When `vpcId` is provided: imports existing VPC via `Vpc.fromLookup()`
+- [x] No public subnets, no NAT gateway
+- [x] Single AZ for cost optimization (all endpoints and ASG pinned to same AZ)
+- [x] Exports: VPC, subnet, availability zone
+- [x] CDK assertion test: VPC resource exists with expected CIDR; no NAT gateway resource; single subnet
 
 ### NET-002: S3 Gateway Endpoint
 **Description:** Create the S3 gateway VPC endpoint per spec FR-4.
@@ -103,10 +103,10 @@ _Corresponds to plan.md Phase A. Builds VPC infrastructure._
 - `test/constructs/networking.test.ts` — additional assertions
 **Dependencies:** NET-001
 **Acceptance Criteria:**
-- [ ] Gateway endpoint for `com.amazonaws.{region}.s3`
-- [ ] Associated with the private subnet's route table
-- [ ] Free resource (no hourly cost)
-- [ ] CDK assertion test: VPC endpoint resource with `s3` service name and `Gateway` type
+- [x] Gateway endpoint for `com.amazonaws.{region}.s3`
+- [x] Associated with the private subnet's route table
+- [x] Free resource (no hourly cost)
+- [x] CDK assertion test: VPC endpoint resource with `s3` service name and `Gateway` type
 
 ### NET-003: Interface VPC Endpoints (9 endpoints)
 **Description:** Create all 9 interface VPC endpoints per spec FR-4 VPC endpoint list and research.md R-4.
@@ -115,7 +115,7 @@ _Corresponds to plan.md Phase A. Builds VPC infrastructure._
 - `test/constructs/networking.test.ts` — endpoint assertions
 **Dependencies:** NET-001, NET-004
 **Acceptance Criteria:**
-- [ ] Creates **8 standard interface endpoints** via `ec2.InterfaceVpcEndpoint`:
+- [x] Creates **8 standard interface endpoints** via `ec2.InterfaceVpcEndpoint`:
   1. `com.amazonaws.{region}.sqs`
   2. `com.amazonaws.{region}.git-codecommit`
   3. `com.amazonaws.{region}.bedrock-runtime`
@@ -124,15 +124,15 @@ _Corresponds to plan.md Phase A. Builds VPC infrastructure._
   6. `com.amazonaws.{region}.ssmmessages`
   7. `com.amazonaws.{region}.ec2messages`
   8. `com.amazonaws.{region}.logs` (CloudWatch Logs)
-- [ ] Creates **1 AOSS VPC endpoint** via `opensearchserverless.CfnVpcEndpoint` (L1 construct) — NOT `ec2.InterfaceVpcEndpoint`. This uses `AWS::OpenSearchServerless::VpcEndpoint`, not `AWS::EC2::VPCEndpoint`.
+- [x] Creates **1 AOSS VPC endpoint** via `opensearchserverless.CfnVpcEndpoint` (L1 construct) — NOT `ec2.InterfaceVpcEndpoint`. This uses `AWS::OpenSearchServerless::VpcEndpoint`, not `AWS::EC2::VPCEndpoint`.
   - AOSS endpoint props: `name` (must match `^[a-z][a-z0-9-]{2,31}$`), `vpcId`, `subnetIds`, `securityGroupIds`
   - AOSS endpoint returns `attrId` (the VPC endpoint ID used in the network policy's `SourceVPCEs` field)
-- [ ] All endpoints placed in the single private subnet (same AZ)
-- [ ] All endpoints (8 standard + 1 AOSS) share the VPC endpoint security group (NET-004)
-- [ ] **CRITICAL: `open: false`** on all `InterfaceVpcEndpoint` constructs to prevent CDK from auto-adding permissive `0.0.0.0/0` ingress rule
-- [ ] Private DNS enabled on all 8 standard interface endpoints
-- [ ] Exports: AOSS VPC endpoint ID (needed by SRC-003 network policy `SourceVPCEs`)
-- [ ] CDK assertion test: 8 `AWS::EC2::VPCEndpoint` resources + 1 `AWS::OpenSearchServerless::VpcEndpoint` resource; all reference the endpoint SG
+- [x] All endpoints placed in the single private subnet (same AZ)
+- [x] All endpoints (8 standard + 1 AOSS) share the VPC endpoint security group (NET-004)
+- [x] **CRITICAL: `open: false`** on all `InterfaceVpcEndpoint` constructs to prevent CDK from auto-adding permissive `0.0.0.0/0` ingress rule
+- [x] Private DNS enabled on all 8 standard interface endpoints
+- [x] Exports: AOSS VPC endpoint ID (needed by SRC-003 network policy `SourceVPCEs`)
+- [x] CDK assertion test: 8 `AWS::EC2::VPCEndpoint` resources + 1 `AWS::OpenSearchServerless::VpcEndpoint` resource; all reference the endpoint SG
 
 ### NET-004: Security Groups
 **Description:** Create security groups for EC2 instance and VPC endpoints per research.md R-4.
@@ -141,13 +141,13 @@ _Corresponds to plan.md Phase A. Builds VPC infrastructure._
 - `test/constructs/networking.test.ts`
 **Dependencies:** NET-001
 **Acceptance Criteria:**
-- [ ] EC2 security group: `allowAllOutbound: false`, explicit egress TCP 443 to endpoint SG only
-- [ ] VPC endpoint security group: `allowAllOutbound: false`, explicit ingress TCP 443 from EC2 SG only
-- [ ] No public inbound rules on either SG
-- [ ] Both SGs shared by all 9 interface endpoints (8 standard + 1 AOSS)
-- [ ] AOSS `CfnVpcEndpoint` receives `[endpointSg.securityGroupId]` as `securityGroupIds` (string, not construct reference)
-- [ ] Exports: EC2 SG (for compute construct), endpoint SG (for endpoints)
-- [ ] CDK assertion test: two SG resources with correct ingress/egress rules; no `0.0.0.0/0` rules
+- [x] EC2 security group: `allowAllOutbound: false`, explicit egress TCP 443 to endpoint SG only
+- [x] VPC endpoint security group: `allowAllOutbound: false`, explicit ingress TCP 443 from EC2 SG only
+- [x] No public inbound rules on either SG
+- [x] Both SGs shared by all 9 interface endpoints (8 standard + 1 AOSS)
+- [x] AOSS `CfnVpcEndpoint` receives `[endpointSg.securityGroupId]` as `securityGroupIds` (string, not construct reference)
+- [x] Exports: EC2 SG (for compute construct), endpoint SG (for endpoints)
+- [x] CDK assertion test: two SG resources with correct ingress/egress rules; no `0.0.0.0/0` rules
 
 ---
 
@@ -162,14 +162,14 @@ _Corresponds to plan.md Phase B._
 - `test/constructs/storage.test.ts`
 **Dependencies:** ENV-002
 **Acceptance Criteria:**
-- [ ] Bucket name derived from `bucketPrefix` prop + account/region suffix for uniqueness
-- [ ] Server-side encryption: SSE-S3 (AES-256)
-- [ ] Public access blocked (all four block settings enabled)
-- [ ] Versioning disabled
-- [ ] No lifecycle rules (MVP)
-- [ ] `removalPolicy: RemovalPolicy.RETAIN` (protect against accidental `cdk destroy`)
-- [ ] Exports: bucket object, bucket name, bucket ARN
-- [ ] CDK assertion test: bucket has encryption, public access blocked, versioning off
+- [x] Bucket name derived from `bucketPrefix` prop + account/region suffix for uniqueness
+- [x] Server-side encryption: SSE-S3 (AES-256)
+- [x] Public access blocked (all four block settings enabled)
+- [x] Versioning disabled
+- [x] No lifecycle rules (MVP)
+- [x] `removalPolicy: RemovalPolicy.RETAIN` (protect against accidental `cdk destroy`)
+- [x] Exports: bucket object, bucket name, bucket ARN
+- [x] CDK assertion test: bucket has encryption, public access blocked, versioning off
 
 ### STR-002 [P]: CodeCommit Repository
 **Description:** Create the CodeCommit git repository per spec FR-5.
@@ -178,9 +178,9 @@ _Corresponds to plan.md Phase B._
 - `test/constructs/storage.test.ts`
 **Dependencies:** ENV-002
 **Acceptance Criteria:**
-- [ ] Repository name from `repoName` prop (default: `"multi-kb"`)
-- [ ] Exports: repository object, clone URL (HTTPS), repository ARN
-- [ ] CDK assertion test: CodeCommit repository resource with expected name
+- [x] Repository name from `repoName` prop (default: `"multi-kb"`)
+- [x] Exports: repository object, clone URL (HTTPS), repository ARN
+- [x] CDK assertion test: CodeCommit repository resource with expected name
 
 ### STR-003 [P]: SQS Queue with DLQ
 **Description:** Create the SQS standard queue and dead-letter queue per spec FR-3.
@@ -189,13 +189,13 @@ _Corresponds to plan.md Phase B._
 - `test/constructs/storage.test.ts`
 **Dependencies:** ENV-002
 **Acceptance Criteria:**
-- [ ] Standard queue (not FIFO)
-- [ ] Visibility timeout: 5 minutes (300 seconds)
-- [ ] Message retention: 14 days (1,209,600 seconds)
-- [ ] DLQ configured with `maxReceiveCount: 3`
-- [ ] DLQ has 14-day retention
-- [ ] Exports: queue object, queue URL, queue ARN, DLQ object, DLQ ARN
-- [ ] CDK assertion test: queue has correct visibility timeout and retention; DLQ exists; redrive policy configured with maxReceiveCount 3
+- [x] Standard queue (not FIFO)
+- [x] Visibility timeout: 5 minutes (300 seconds)
+- [x] Message retention: 14 days (1,209,600 seconds)
+- [x] DLQ configured with `maxReceiveCount: 3`
+- [x] DLQ has 14-day retention
+- [x] Exports: queue object, queue URL, queue ARN, DLQ object, DLQ ARN
+- [x] CDK assertion test: queue has correct visibility timeout and retention; DLQ exists; redrive policy configured with maxReceiveCount 3
 
 ### STR-004: Stack Outputs — Storage
 **Description:** Add CloudFormation outputs for storage resources per spec Stack Outputs.
@@ -203,9 +203,9 @@ _Corresponds to plan.md Phase B._
 - `lib/multi-kb-stack.ts` — CfnOutput additions
 **Dependencies:** STR-001, STR-002, STR-003
 **Acceptance Criteria:**
-- [ ] Output `BucketName`: S3 bucket name
-- [ ] Output `RepoCloneUrl`: CodeCommit HTTPS clone URL
-- [ ] CDK assertion test: outputs exist with expected logical IDs
+- [x] Output `BucketName`: S3 bucket name
+- [x] Output `RepoCloneUrl`: CodeCommit HTTPS clone URL
+- [x] CDK assertion test: outputs exist with expected logical IDs
 
 ---
 
@@ -236,14 +236,14 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/constructs/search.test.ts`
 **Dependencies:** None (must be created BEFORE SRC-001 collection)
 **Acceptance Criteria:**
-- [ ] Uses `CfnSecurityPolicy` with `type: 'encryption'`
-- [ ] Policy name must match `^[a-z][a-z0-9-]{2,31}$`
-- [ ] Policy JSON is a **single object** (NOT an array — unlike network and data access policies)
-- [ ] Policy specifies `AWSOwnedKey: true`
-- [ ] `Rules` target the collection by name: `[{ "ResourceType": "collection", "Resource": ["collection/<name>"] }]`
-- [ ] Policy is `JSON.stringify()`-ed into the `policy` string prop
-- [ ] SRC-001 must call `collection.addDependency(encryptionPolicy)` — collection creation FAILS without encryption policy
-- [ ] CDK assertion test: security policy resource with type `encryption` and `AWSOwnedKey: true`
+- [x] Uses `CfnSecurityPolicy` with `type: 'encryption'`
+- [x] Policy name must match `^[a-z][a-z0-9-]{2,31}$`
+- [x] Policy JSON is a **single object** (NOT an array — unlike network and data access policies)
+- [x] Policy specifies `AWSOwnedKey: true`
+- [x] `Rules` target the collection by name: `[{ "ResourceType": "collection", "Resource": ["collection/<name>"] }]`
+- [x] Policy is `JSON.stringify()`-ed into the `policy` string prop
+- [x] SRC-001 must call `collection.addDependency(encryptionPolicy)` — collection creation FAILS without encryption policy
+- [x] CDK assertion test: security policy resource with type `encryption` and `AWSOwnedKey: true`
 
 ### SRC-003: Network Policy (Dual Access)
 **Description:** Create the OpenSearch Serverless network policy allowing both VPC and Bedrock service access per research.md R-6.
@@ -384,21 +384,21 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - `test/lambda/shared/validation.test.ts`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] **UID generation (R-5):** `crypto.randomBytes(10)` → 16-char Crockford base32 (alphabet: `0123456789ABCDEFGHJKMNPQRSTVWXYZ`); uppercase; exactly 16 chars
-- [ ] Uses bit-buffer encoding algorithm (R-5): accumulate 8 bits per byte, extract 5-bit groups MSB-first via `(buf >>> bits) & 0x1F` (unsigned right shift)
-- [ ] Zero npm dependencies — uses only Node.js built-in `crypto`
-- [ ] `encodeCrockford(Buffer)` exported separately from `generateUid()` for deterministic testing
-- [ ] **Response helpers (R-7):** Four functions in `lambda/shared/response.ts`: `success(statusCode, body)` for 200/202 responses, `error(statusCode, body)` for arbitrary errors, `validationError(errors: Record<string, string>)` convenience for HTTP 400 `{ errors: { field: reason } }`, `internalError()` convenience for HTTP 500 with generic message. All auto-stringify body and set `Content-Type: application/json` via shared `JSON_HEADERS` constant. Body parameter is `unknown` (helper calls `JSON.stringify()` internally). Uses `APIGatewayProxyResult` type from `@types/aws-lambda` (dev dependency — erased at compile time).
-- [ ] **Handler wrapper pattern (R-7):** Both Lambda handlers wrap logic in top-level try/catch returning `internalError()`. This guarantees well-formed responses (never 502 from malformed response) and preserves 500 vs 502 distinction for debugging. Guard `event.body` with `JSON.parse(event.body ?? '{}')` — catch `SyntaxError` to return 400.
-- [ ] **HTTP 401/403 not handled by Lambda (R-7):** API Gateway handles auth errors before Lambda invocation for `AWS_IAM` auth. Lambda does not need 401/403 response paths.
-- [ ] **Validation:** `validateSubmitKnowledge(body)` returns `{ valid: true, data }` or `{ valid: false, errors: {} }`; validates title (present, non-empty, ≤255), content (present, non-empty, ≤100K), author (present, non-empty, ≤100)
-- [ ] Test: UID deterministic encoding of 5 shared test vectors from R-5:
+- [x] **UID generation (R-5):** `crypto.randomBytes(10)` → 16-char Crockford base32 (alphabet: `0123456789ABCDEFGHJKMNPQRSTVWXYZ`); uppercase; exactly 16 chars
+- [x] Uses bit-buffer encoding algorithm (R-5): accumulate 8 bits per byte, extract 5-bit groups MSB-first via `(buf >>> bits) & 0x1F` (unsigned right shift)
+- [x] Zero npm dependencies — uses only Node.js built-in `crypto`
+- [x] `encodeCrockford(Buffer)` exported separately from `generateUid()` for deterministic testing
+- [x] **Response helpers (R-7):** Four functions in `lambda/shared/response.ts`: `success(statusCode, body)` for 200/202 responses, `error(statusCode, body)` for arbitrary errors, `validationError(errors: Record<string, string>)` convenience for HTTP 400 `{ errors: { field: reason } }`, `internalError()` convenience for HTTP 500 with generic message. All auto-stringify body and set `Content-Type: application/json` via shared `JSON_HEADERS` constant. Body parameter is `unknown` (helper calls `JSON.stringify()` internally). Uses `APIGatewayProxyResult` type from `@types/aws-lambda` (dev dependency — erased at compile time).
+- [x] **Handler wrapper pattern (R-7):** Both Lambda handlers wrap logic in top-level try/catch returning `internalError()`. This guarantees well-formed responses (never 502 from malformed response) and preserves 500 vs 502 distinction for debugging. Guard `event.body` with `JSON.parse(event.body ?? '{}')` — catch `SyntaxError` to return 400.
+- [x] **HTTP 401/403 not handled by Lambda (R-7):** API Gateway handles auth errors before Lambda invocation for `AWS_IAM` auth. Lambda does not need 401/403 response paths.
+- [x] **Validation:** `validateSubmitKnowledge(body)` returns `{ valid: true, data }` or `{ valid: false, errors: {} }`; validates title (present, non-empty, ≤255), content (present, non-empty, ≤100K), author (present, non-empty, ≤100)
+- [x] Test: UID deterministic encoding of 5 shared test vectors from R-5:
   - `Buffer.from([0x00 × 10])` → `"0000000000000000"`
   - `Buffer.from([0xFF × 10])` → `"ZZZZZZZZZZZZZZZZ"`
   - `Buffer.from([0x00..0x09])` → `"000G40R40M30E209"`
   - `Buffer.from([0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x42])` → `"VTPVXVYAZTXBW022"`
   - `Buffer.from("HelloWorld")` → `"91JPRV3FAXQQ4V34"`
-- [ ] Test: UID format (length=16, valid alphabet, no I/L/O/U, uniqueness over 1K), response shape, all validation rules from contracts/submit-knowledge.md table
+- [x] Test: UID format (length=16, valid alphabet, no I/L/O/U, uniqueness over 1K), response shape, all validation rules from contracts/submit-knowledge.md table
 
 ### LMB-002: submitKnowledge Lambda Handler
 **Description:** Implement the submitKnowledge Lambda per spec FR-2 and contracts/submit-knowledge.md.

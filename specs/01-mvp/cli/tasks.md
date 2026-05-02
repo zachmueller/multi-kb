@@ -85,13 +85,13 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/config/config_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Parses all fields from data-model.md Entity 2 (mode, author, knowledge_bases, extraction, translation, dream_cycle, hook, exclusion_rules, sources with targets and overrides)
-- [ ] Validates: mode ∈ {client, server}, author non-empty ≤100 chars, unique KB names, auth ∈ {iam, federate}, aws_profile required when auth=iam, routing ∈ {always, consider}, approval ∈ {auto-approve, require-manual-approval}, kb references resolve to knowledge_bases or local/<name>
-- [ ] Returns structured errors listing all validation failures (not just first)
-- [ ] Defaults: hook.timeout=8s, extraction/translation/dream_cycle model IDs have sensible defaults
-- [ ] Duration fields (`tick_interval`, `dream_cycle.interval`, `hook.timeout`) validated using Go's `time.ParseDuration`; rejects bare integers and invalid strings with structured error
-- [ ] `recall_log.schedule` validated as `HH:MM` 24-hour UTC format (regex: `^([01]\d|2[0-3]):[0-5]\d$`); rejects invalid values
-- [ ] Test cases: valid config, missing required fields, invalid enum values, dangling KB references, empty sources, invalid duration string (e.g., `5 minutes`, `5`), invalid schedule (e.g., `25:00`, `2pm`)
+- [x] Parses all fields from data-model.md Entity 2 (mode, author, knowledge_bases, extraction, translation, dream_cycle, hook, exclusion_rules, sources with targets and overrides)
+- [x] Validates: mode ∈ {client, server}, author non-empty ≤100 chars, unique KB names, auth ∈ {iam, federate}, aws_profile required when auth=iam, routing ∈ {always, consider}, approval ∈ {auto-approve, require-manual-approval}, kb references resolve to knowledge_bases or local/<name>
+- [x] Returns structured errors listing all validation failures (not just first)
+- [x] Defaults: hook.timeout=8s, extraction/translation/dream_cycle model IDs have sensible defaults
+- [x] Duration fields (`tick_interval`, `dream_cycle.interval`, `hook.timeout`) validated using Go's `time.ParseDuration`; rejects bare integers and invalid strings with structured error
+- [x] `recall_log.schedule` validated as `HH:MM` 24-hour UTC format (regex: `^([01]\d|2[0-3]):[0-5]\d$`); rejects invalid values
+- [x] Test cases: valid config, missing required fields, invalid enum values, dangling KB references, empty sources, invalid duration string (e.g., `5 minutes`, `5`), invalid schedule (e.g., `25:00`, `2pm`)
 
 ### FND-002: State YAML Loading and Writing
 **Description:** Implement `state.yaml` schema, loader, and atomic writer per data-model.md Entity 3.
@@ -100,11 +100,11 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/config/state_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Parses per-directory `last_processed` timestamps and `last_dream_cycle` timestamp
-- [ ] Atomic write: writes to temp file then renames (no partial writes on crash)
-- [ ] Validates: directory paths are absolute, timestamps are valid ISO 8601
-- [ ] Creates file with empty state if it doesn't exist
-- [ ] Test cases: load existing, create new, atomic write verification, concurrent read safety
+- [x] Parses per-directory `last_processed` timestamps and `last_dream_cycle` timestamp
+- [x] Atomic write: writes to temp file then renames (no partial writes on crash)
+- [x] Validates: directory paths are absolute, timestamps are valid ISO 8601
+- [x] Creates file with empty state if it doesn't exist
+- [x] Test cases: load existing, create new, atomic write verification, concurrent read safety
 
 ### FND-003 [P]: Lock File with Heartbeat
 **Description:** Implement lock file acquisition, heartbeat goroutine, release, and stale detection per data-model.md Entity 10.
@@ -113,13 +113,13 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/lock/lock_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Lock file at `~/.multi-kb/lock` contains JSON: pid, started_at, heartbeat, activity
-- [ ] Acquire succeeds if no lock file or stale heartbeat (>30 min old)
-- [ ] Acquire fails with structured info (pid, activity, last heartbeat) if lock is active
-- [ ] Heartbeat goroutine updates `heartbeat` field every 60 seconds
-- [ ] Release deletes the lock file and stops the heartbeat goroutine
-- [ ] Stale lock detection: heartbeat older than 30 minutes → force-acquire
-- [ ] Test cases: acquire fresh, acquire stale, fail on active, release, heartbeat updates
+- [x] Lock file at `~/.multi-kb/lock` contains JSON: pid, started_at, heartbeat, activity
+- [x] Acquire succeeds if no lock file or stale heartbeat (>30 min old)
+- [x] Acquire fails with structured info (pid, activity, last heartbeat) if lock is active
+- [x] Heartbeat goroutine updates `heartbeat` field every 60 seconds
+- [x] Release deletes the lock file and stops the heartbeat goroutine
+- [x] Stale lock detection: heartbeat older than 30 minutes → force-acquire
+- [x] Test cases: acquire fresh, acquire stale, fail on active, release, heartbeat updates
 
 ### FND-004 [P]: Crockford Base32 UID Generation
 **Description:** Implement 16-character Crockford base32 UID generation per [research.md R-7](research.md#r-7-crockford-base32-uid-generation).
@@ -128,14 +128,14 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/submit/uid_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Uses `crypto/rand` for 10 random bytes (80 bits of entropy)
-- [ ] Encodes to exactly 16 characters using Crockford base32 alphabet (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`)
-- [ ] Uses bit-buffer encoding algorithm (R-7): accumulate 8 bits per byte, extract 5-bit groups MSB-first via `(buf >> bits) & 0x1F`
-- [ ] No I, L, O, U characters in output
-- [ ] Uppercase output (Crockford canonical form — use uppercase alphabet constant directly, no post-processing)
-- [ ] Zero external dependencies — no third-party Crockford library
-- [ ] `EncodeCrockford([]byte)` exported separately from `GenerateUID()` for deterministic testing
-- [ ] Test cases: length=16, valid alphabet, uniqueness over 10K generations, deterministic encoding of 5 shared test vectors from R-7:
+- [x] Uses `crypto/rand` for 10 random bytes (80 bits of entropy)
+- [x] Encodes to exactly 16 characters using Crockford base32 alphabet (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`)
+- [x] Uses bit-buffer encoding algorithm (R-7): accumulate 8 bits per byte, extract 5-bit groups MSB-first via `(buf >> bits) & 0x1F`
+- [x] No I, L, O, U characters in output
+- [x] Uppercase output (Crockford canonical form — use uppercase alphabet constant directly, no post-processing)
+- [x] Zero external dependencies — no third-party Crockford library
+- [x] `EncodeCrockford([]byte)` exported separately from `GenerateUID()` for deterministic testing
+- [x] Test cases: length=16, valid alphabet, uniqueness over 10K generations, deterministic encoding of 5 shared test vectors from R-7:
   - `[0x00 × 10]` → `"0000000000000000"`
   - `[0xFF × 10]` → `"ZZZZZZZZZZZZZZZZ"`
   - `[0x00..0x09]` → `"000G40R40M30E209"`
@@ -150,13 +150,13 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 **Dependencies:** ENV-001
 **Implementation Note:** Use `os/exec` shell-out to the `git` binary for all git operations. Sanitize all user-derived inputs (directory names, file names) to prevent command injection. Requires `git` on PATH.
 **Acceptance Criteria:**
-- [ ] Creates `~/.multi-kb/local/<kb-name>/` directory
-- [ ] Runs `git init` in the directory
-- [ ] Creates initial commit (empty or with `.gitkeep`)
-- [ ] IsRepo detects whether a path is an initialized git repo
-- [ ] Default KB created at `~/.multi-kb/local/default/`
-- [ ] All git arguments properly escaped/quoted to prevent command injection
-- [ ] Test cases: init fresh repo, detect existing repo, commit files
+- [x] Creates `~/.multi-kb/local/<kb-name>/` directory
+- [x] Runs `git init` in the directory
+- [x] Creates initial commit (empty or with `.gitkeep`)
+- [x] IsRepo detects whether a path is an initialized git repo
+- [x] Default KB created at `~/.multi-kb/local/default/`
+- [x] All git arguments properly escaped/quoted to prevent command injection
+- [x] Test cases: init fresh repo, detect existing repo, commit files
 
 ### FND-006: Local KB Note File Writing
 **Description:** Implement writing knowledge notes as Obsidian-flavor Markdown files with YAML frontmatter per data-model.md Entity 1.
@@ -166,13 +166,13 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 **Dependencies:** FND-004, FND-005
 **Implementation Note:** Uses git shell-out (FND-005) for commits. Sanitize title and author strings before use in file content or git commit messages.
 **Acceptance Criteria:**
-- [ ] Writes `<UID>.md` to the appropriate local KB directory
-- [ ] YAML frontmatter includes all fields: uid, title, status (pending), author, last-updated, last-linked-to, last-recalled, consolidated-from-notes — all present with YAML null values for unpopulated fields (bare key, no value — e.g., `last-recalled:` on its own line, per data-model.md convention)
-- [ ] Body contains the note's Markdown content
-- [ ] Generates UID via FND-004
-- [ ] Commits the new file with a descriptive git commit message
-- [ ] Validates note constraints: title ≤255 chars, content ≤100K chars, author ≤100 chars
-- [ ] Test cases: write note, verify frontmatter (all keys present; unpopulated fields have null values, not omitted), verify round-trip parse produces empty string or nil for null fields, verify file naming, validation failures
+- [x] Writes `<UID>.md` to the appropriate local KB directory
+- [x] YAML frontmatter includes all fields: uid, title, status (pending), author, last-updated, last-linked-to, last-recalled, consolidated-from-notes — all present with YAML null values for unpopulated fields (bare key, no value — e.g., `last-recalled:` on its own line, per data-model.md convention)
+- [x] Body contains the note's Markdown content
+- [x] Generates UID via FND-004
+- [x] Commits the new file with a descriptive git commit message
+- [x] Validates note constraints: title ≤255 chars, content ≤100K chars, author ≤100 chars
+- [x] Test cases: write note, verify frontmatter (all keys present; unpopulated fields have null values, not omitted), verify round-trip parse produces empty string or nil for null fields, verify file naming, validation failures
 
 ### FND-007: Git Grep Recall with Match-Count Ranking
 **Description:** Implement local KB recall using `git grep` with match-count ranking and title weighting per spec FR-8.
@@ -184,13 +184,13 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 **Dependencies:** FND-005, FND-006
 **Implementation Note:** Uses `os/exec` shell-out to `git grep -c`. Sanitize keyword inputs to prevent command injection (keywords come from LLM output in the hook path, or from note titles in the dream cycle path).
 **Acceptance Criteria:**
-- [ ] Runs `git grep -c <keyword>` per keyword against the working tree
-- [ ] Filters results to `status: active` notes only (parses frontmatter to check status)
-- [ ] Counts matches per note across all keywords
-- [ ] Title matches weighted 3x (matches in YAML `title:` frontmatter line count triple)
-- [ ] Returns results sorted by descending match count
-- [ ] Returns structured results: uid, title, content, match_count
-- [ ] Test cases: single keyword, multiple keywords, title weighting, status filtering, empty results
+- [x] Runs `git grep -c <keyword>` per keyword against the working tree
+- [x] Filters results to `status: active` notes only (parses frontmatter to check status)
+- [x] Counts matches per note across all keywords
+- [x] Title matches weighted 3x (matches in YAML `title:` frontmatter line count triple)
+- [x] Returns results sorted by descending match count
+- [x] Returns structured results: uid, title, content, match_count
+- [x] Test cases: single keyword, multiple keywords, title weighting, status filtering, empty results
 
 ### FND-008 [P]: Pending Queue File Management
 **Description:** Implement create, list, read, update, and delete for pending queue entries per data-model.md Entity 4.
@@ -199,15 +199,15 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/route/pending_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Creates `~/.multi-kb/pending/` directory if not exists
-- [ ] Writes JSON files named `<YYYYMMDDTHHMMSS>-<8-char-hex-hash>.json`
-- [ ] Hash is first 8 hex chars of SHA-256 of `title + content`
-- [ ] JSON schema matches data-model.md Entity 4 (title, content, author, target_kbs, source_conversation, extracted_at)
-- [ ] ListPending returns all `.json` files in the directory
-- [ ] UpdatePending removes a specific target from `target_kbs` array
-- [ ] DeletePending removes the file when `target_kbs` is empty
-- [ ] PendingCount returns count of pending files (for status display and hook notice)
-- [ ] Test cases: create, list, read, remove single target, remove last target (auto-delete), concurrent access safety
+- [x] Creates `~/.multi-kb/pending/` directory if not exists
+- [x] Writes JSON files named `<YYYYMMDDTHHMMSS>-<8-char-hex-hash>.json`
+- [x] Hash is first 8 hex chars of SHA-256 of `title + content`
+- [x] JSON schema matches data-model.md Entity 4 (title, content, author, target_kbs, source_conversation, extracted_at)
+- [x] ListPending returns all `.json` files in the directory
+- [x] UpdatePending removes a specific target from `target_kbs` array
+- [x] DeletePending removes the file when `target_kbs` is empty
+- [x] PendingCount returns count of pending files (for status display and hook notice)
+- [x] Test cases: create, list, read, remove single target, remove last target (auto-delete), concurrent access safety
 
 ### FND-009 [P]: Run Log and Error Log Appending
 **Description:** Implement structured JSONL logging for runs, extraction errors, and hook errors per data-model.md Entities 7, 8, 9.
@@ -218,13 +218,13 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/logging/errors_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Creates `~/.multi-kb/logs/` directory if not exists
-- [ ] `runs.jsonl`: appends one JSON line per run with all fields from data-model.md Entity 7 (timestamp, type, trigger, directories_scanned, conversations_processed, notes_extracted, notes_routed map, errors, duration_ms)
-- [ ] `runs.jsonl` dream cycle variant: timestamp, type, trigger, batches_processed, actions map, errors, duration_ms
-- [ ] `extraction-errors.jsonl`: timestamp, conversation_id, source_path, error, retries
-- [ ] `hook-errors.jsonl`: timestamp, harness, directory, error, partial_results
-- [ ] All writes are append-only (open file with O_APPEND)
-- [ ] Test cases: append single entry, append multiple entries, file creation, valid JSON per line
+- [x] Creates `~/.multi-kb/logs/` directory if not exists
+- [x] `runs.jsonl`: appends one JSON line per run with all fields from data-model.md Entity 7 (timestamp, type, trigger, directories_scanned, conversations_processed, notes_extracted, notes_routed map, errors, duration_ms)
+- [x] `runs.jsonl` dream cycle variant: timestamp, type, trigger, batches_processed, actions map, errors, duration_ms
+- [x] `extraction-errors.jsonl`: timestamp, conversation_id, source_path, error, retries
+- [x] `hook-errors.jsonl`: timestamp, harness, directory, error, partial_results
+- [x] All writes are append-only (open file with O_APPEND)
+- [x] Test cases: append single entry, append multiple entries, file creation, valid JSON per line
 
 ### FND-010: Status Command Implementation
 **Description:** Implement `multi-kb status` displaying config summary, run history, pending count, and next scheduled run per spec FR-11.
@@ -232,13 +232,13 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/cmd/status.go` — full implementation replacing stub
 **Dependencies:** FND-001, FND-002, FND-008, FND-009
 **Acceptance Criteria:**
-- [ ] Displays current configuration summary: tracked directories, configured KBs (names, auth types), author
-- [ ] Displays last N runs (default 10) from `runs.jsonl` with success/failure status and key counts
-- [ ] Displays pending approval queue count when non-empty (e.g., "3 notes awaiting approval")
-- [ ] Displays next scheduled run time (placeholder until cron parsing in WIZ-005)
-- [ ] Handles missing config gracefully (suggests running `multi-kb setup`)
-- [ ] Handles empty run log gracefully ("No runs recorded yet")
-- [ ] Test cases: with full data, with empty logs, with no config
+- [x] Displays current configuration summary: tracked directories, configured KBs (names, auth types), author
+- [x] Displays last N runs (default 10) from `runs.jsonl` with success/failure status and key counts
+- [x] Displays pending approval queue count when non-empty (e.g., "3 notes awaiting approval")
+- [x] Displays next scheduled run time (placeholder until cron parsing in WIZ-005)
+- [x] Handles missing config gracefully (suggests running `multi-kb setup`)
+- [x] Handles empty run log gracefully ("No runs recorded yet")
+- [x] Test cases: with full data, with empty logs, with no config
 
 ### FND-011 [P]: Token Counting Approximation
 **Description:** Implement fast token estimation for determining when conversations exceed the chunking threshold per spec FR-5.
@@ -247,12 +247,12 @@ _Corresponds to plan.md Phase A. Builds local-only infrastructure._
 - `internal/token/count_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Estimates tokens from a string using a fast heuristic (e.g., ~4 chars per token for English text, ~3.5 for code-heavy content)
-- [ ] Does not use an external tokenizer library (speed priority)
-- [ ] Accuracy within ±20% for typical conversation content
-- [ ] Exports `ChunkingThreshold = 700_000` constant (intentionally below the spec's ~800K target to provide a safety margin for the approximate token counter — actual model context windows are larger)
-- [ ] Handles empty strings, very long strings, and mixed content
-- [ ] Test cases: known calibration strings, edge cases (empty, single char, 1M chars)
+- [x] Estimates tokens from a string using a fast heuristic (e.g., ~4 chars per token for English text, ~3.5 for code-heavy content)
+- [x] Does not use an external tokenizer library (speed priority)
+- [x] Accuracy within ±20% for typical conversation content
+- [x] Exports `ChunkingThreshold = 700_000` constant (intentionally below the spec's ~800K target to provide a safety margin for the approximate token counter — actual model context windows are larger)
+- [x] Handles empty strings, very long strings, and mixed content
+- [x] Test cases: known calibration strings, edge cases (empty, single char, 1M chars)
 
 ---
 
@@ -266,12 +266,12 @@ _Corresponds to plan.md Phase B. Builds harness-specific conversation translator
 - `internal/translate/intermediate.go` — ConversationHeader, Message, ToolUse structs; Writer that produces JSONL buffer
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] ConversationHeader: type, id, source_harness, source_path, started_at, metadata (persona, workflow, project_dir)
-- [ ] Message: type, role, content, timestamp, previously_processed, tool_uses
-- [ ] ToolUse: tool_name, summary
-- [ ] Writer serializes header + messages as JSONL (one JSON object per line)
-- [ ] Role enum: user, assistant, system
-- [ ] Test cases: serialize header, serialize messages with tool uses, round-trip parse
+- [x] ConversationHeader: type, id, source_harness, source_path, started_at, metadata (persona, workflow, project_dir)
+- [x] Message: type, role, content, timestamp, previously_processed, tool_uses
+- [x] ToolUse: tool_name, summary
+- [x] Writer serializes header + messages as JSONL (one JSON object per line)
+- [x] Role enum: user, assistant, system
+- [x] Test cases: serialize header, serialize messages with tool uses, round-trip parse
 
 ### TRN-002: Claude Code Translator
 **Description:** Implement translator that reads Claude Code conversation files from `~/.claude/projects/` and produces intermediate format per spec FR-4. Schema fully documented in [research.md R-3](research.md#r-3-claude-code-conversation-format).
@@ -280,18 +280,18 @@ _Corresponds to plan.md Phase B. Builds harness-specific conversation translator
 - `internal/translate/claudecode_test.go`
 **Dependencies:** TRN-001, FND-002
 **Acceptance Criteria:**
-- [ ] **Project directory mapping (R-3):** Converts user-configured directory path to project directory name by replacing `/` with `-` (e.g., `/Volumes/workplace/multi-kb` → `-Volumes-workplace-multi-kb`). Reads from `~/.claude/projects/<encoded-path>/`.
-- [ ] Discovers all `.jsonl` session files in the project directory (filenames are UUIDs, one file = one conversation)
-- [ ] Filters JSONL lines by `type` field: processes only `user`, `assistant`, and selectively `attachment` lines. Ignores `queue-operation`, `permission-mode`, `file-history-snapshot`, `last-prompt`, `ai-title`.
-- [ ] **Reassembles split assistant messages (R-3):** Groups consecutive `type: "assistant"` lines with the same `message.id` into a single logical assistant message (Claude Code splits one content block per JSONL line)
-- [ ] Parses content block arrays (always arrays, never bare strings): `text` blocks → plain text, `thinking` blocks → omit or summarize, `tool_use` blocks → pair with results
-- [ ] Flattens content block arrays to plain text strings (images → `[Image]` placeholder)
-- [ ] **Tool call/result pairing (R-3):** Matches `tool_use` blocks (on assistant lines) to `tool_result` blocks (on `type: "user"` lines) via `tool_use_id`. Uses `toolUseResult` outer field for richer summarization metadata when available.
-- [ ] Collapses tool call/result pairs into `tool_uses` entries on assistant messages
-- [ ] **Per-message timestamps (R-3 — CHANGED from spec):** Uses the `timestamp` field present on every message line (ISO 8601 with ms precision). Compares each message's `timestamp` to `last_processed` to set `previously_processed` flag individually — NOT at file level. This is the same approach as Notor, replacing the file-level fallback.
-- [ ] Populates conversation header with source_harness="claude-code", source_path, project_dir
-- [ ] **Subagent files (R-3):** Skips `<session-uuid>/subagents/` companion directories in MVP. Agent tool results are already captured in the parent conversation's tool result.
-- [ ] Test cases: single conversation, re-processed conversation with per-message timestamps, assistant message reassembly across split lines, tool call/result pairing via tool_use_id, content block flattening, project path mapping
+- [x] **Project directory mapping (R-3):** Converts user-configured directory path to project directory name by replacing `/` with `-` (e.g., `/Volumes/workplace/multi-kb` → `-Volumes-workplace-multi-kb`). Reads from `~/.claude/projects/<encoded-path>/`.
+- [x] Discovers all `.jsonl` session files in the project directory (filenames are UUIDs, one file = one conversation)
+- [x] Filters JSONL lines by `type` field: processes only `user`, `assistant`, and selectively `attachment` lines. Ignores `queue-operation`, `permission-mode`, `file-history-snapshot`, `last-prompt`, `ai-title`.
+- [x] **Reassembles split assistant messages (R-3):** Groups consecutive `type: "assistant"` lines with the same `message.id` into a single logical assistant message (Claude Code splits one content block per JSONL line)
+- [x] Parses content block arrays (always arrays, never bare strings): `text` blocks → plain text, `thinking` blocks → omit or summarize, `tool_use` blocks → pair with results
+- [x] Flattens content block arrays to plain text strings (images → `[Image]` placeholder)
+- [x] **Tool call/result pairing (R-3):** Matches `tool_use` blocks (on assistant lines) to `tool_result` blocks (on `type: "user"` lines) via `tool_use_id`. Uses `toolUseResult` outer field for richer summarization metadata when available.
+- [x] Collapses tool call/result pairs into `tool_uses` entries on assistant messages
+- [x] **Per-message timestamps (R-3 — CHANGED from spec):** Uses the `timestamp` field present on every message line (ISO 8601 with ms precision). Compares each message's `timestamp` to `last_processed` to set `previously_processed` flag individually — NOT at file level. This is the same approach as Notor, replacing the file-level fallback.
+- [x] Populates conversation header with source_harness="claude-code", source_path, project_dir
+- [x] **Subagent files (R-3):** Skips `<session-uuid>/subagents/` companion directories in MVP. Agent tool results are already captured in the parent conversation's tool result.
+- [x] Test cases: single conversation, re-processed conversation with per-message timestamps, assistant message reassembly across split lines, tool call/result pairing via tool_use_id, content block flattening, project path mapping
 
 ### TRN-003 [P]: Notor Translator
 **Description:** Implement translator that reads Notor chat history and produces intermediate format per spec FR-4. Schema fully documented in [research.md R-4](research.md#r-4-notor-conversation-format).
@@ -300,18 +300,18 @@ _Corresponds to plan.md Phase B. Builds harness-specific conversation translator
 - `internal/translate/notor_test.go`
 **Dependencies:** TRN-001, FND-002
 **Acceptance Criteria:**
-- [ ] **History path discovery (R-4):** Reads `{vault}/.obsidian/plugins/notor/data.json`, parses JSON, extracts `history_path` field (vault-relative). Resolves relative to vault root. Default: `{vault}/.obsidian/plugins/notor/history/`. The spec's placeholder `{vault}/notor/history/` is incorrect.
-- [ ] **File discovery (R-4):** Lists all `*.jsonl` files in the history directory. Filters out sub-agent files (filenames containing `_subagent_`). Each remaining file is one conversation.
-- [ ] **JSONL parsing (R-4):** Line 1 parsed as conversation header (`_type: "conversation"` — contains id, created_at, updated_at, provider_id, model_id, persona/workflow metadata). Lines 2+ parsed as messages (`_type: "message"`). Uses `_type` field to discriminate.
-- [ ] **Role normalization (R-4):** Notor uses 6 roles: `user`, `assistant`, `tool_call`, `tool_result`, `system`, `extension_block`. Maps `user` → user, `assistant` → assistant. Skips `extension_block` messages (internal plugin state). Skips `system` messages that are compaction records (`JSON.parse(content).type === "compaction"`). `tool_call` and `tool_result` are collapsed into tool summaries on the preceding assistant message.
-- [ ] **Tool call/result pairing (R-4):** Pairs adjacent `tool_call` + `tool_result` messages via `tool_call.id` ↔ `tool_result.tool_call_id`. Generates summary using tool_name, parameters, success/error status, and result. Collapses into `tool_uses` entries on the preceding assistant message.
-- [ ] **Content extraction (R-4):** Content field can be plain string OR ContentBlock array. If string, use directly. If array, filter to `type: "text"` blocks and join with newline. Skip image/document/custom_block content blocks.
-- [ ] **Per-message timestamps (R-4):** Uses the `timestamp` field on every message line (ISO 8601 with ms precision, UTC). Compares each message's `timestamp` to `last_processed` to set `previously_processed` flag individually — same approach as Claude Code translator.
-- [ ] **Persona/workflow metadata (R-4):** Extracts `workflow_name`, `workflow_path`, `persona_name`, and `is_background` from conversation header (line 1). Surfaces in intermediate format conversation header metadata for routing decisions.
-- [ ] **Workflow instruction filtering (R-4):** Messages with `is_workflow_message: true` can be flagged so the extraction prompt can optionally skip verbose workflow instruction text.
-- [ ] Populates conversation header with source_harness="notor", source_path, persona_name, workflow_name, project_dir (vault root)
-- [ ] **Sub-agent conversations (R-4):** Skips files with `_subagent_` in filename. Sub-agent output already captured in parent conversation's `tool_result`.
-- [ ] Test cases: single conversation, re-processed conversation with per-message timestamps, persona extraction from header, workflow conversation, tool call/result pairing via tool_call_id, content as string vs ContentBlock array, sub-agent file filtering, compaction record skipping, extension_block skipping
+- [x] **History path discovery (R-4):** Reads `{vault}/.obsidian/plugins/notor/data.json`, parses JSON, extracts `history_path` field (vault-relative). Resolves relative to vault root. Default: `{vault}/.obsidian/plugins/notor/history/`. The spec's placeholder `{vault}/notor/history/` is incorrect.
+- [x] **File discovery (R-4):** Lists all `*.jsonl` files in the history directory. Filters out sub-agent files (filenames containing `_subagent_`). Each remaining file is one conversation.
+- [x] **JSONL parsing (R-4):** Line 1 parsed as conversation header (`_type: "conversation"` — contains id, created_at, updated_at, provider_id, model_id, persona/workflow metadata). Lines 2+ parsed as messages (`_type: "message"`). Uses `_type` field to discriminate.
+- [x] **Role normalization (R-4):** Notor uses 6 roles: `user`, `assistant`, `tool_call`, `tool_result`, `system`, `extension_block`. Maps `user` → user, `assistant` → assistant. Skips `extension_block` messages (internal plugin state). Skips `system` messages that are compaction records (`JSON.parse(content).type === "compaction"`). `tool_call` and `tool_result` are collapsed into tool summaries on the preceding assistant message.
+- [x] **Tool call/result pairing (R-4):** Pairs adjacent `tool_call` + `tool_result` messages via `tool_call.id` ↔ `tool_result.tool_call_id`. Generates summary using tool_name, parameters, success/error status, and result. Collapses into `tool_uses` entries on the preceding assistant message.
+- [x] **Content extraction (R-4):** Content field can be plain string OR ContentBlock array. If string, use directly. If array, filter to `type: "text"` blocks and join with newline. Skip image/document/custom_block content blocks.
+- [x] **Per-message timestamps (R-4):** Uses the `timestamp` field on every message line (ISO 8601 with ms precision, UTC). Compares each message's `timestamp` to `last_processed` to set `previously_processed` flag individually — same approach as Claude Code translator.
+- [x] **Persona/workflow metadata (R-4):** Extracts `workflow_name`, `workflow_path`, `persona_name`, and `is_background` from conversation header (line 1). Surfaces in intermediate format conversation header metadata for routing decisions.
+- [x] **Workflow instruction filtering (R-4):** Messages with `is_workflow_message: true` can be flagged so the extraction prompt can optionally skip verbose workflow instruction text.
+- [x] Populates conversation header with source_harness="notor", source_path, persona_name, workflow_name, project_dir (vault root)
+- [x] **Sub-agent conversations (R-4):** Skips files with `_subagent_` in filename. Sub-agent output already captured in parent conversation's `tool_result`.
+- [x] Test cases: single conversation, re-processed conversation with per-message timestamps, persona extraction from header, workflow conversation, tool call/result pairing via tool_call_id, content as string vs ContentBlock array, sub-agent file filtering, compaction record skipping, extension_block skipping
 
 ### TRN-004: Tool Interaction Summarization
 **Description:** Implement summarization of tool call/result pairs — mechanical templates for small interactions, LLM for large ones per contracts/intermediate-format.md.
@@ -320,11 +320,11 @@ _Corresponds to plan.md Phase B. Builds harness-specific conversation translator
 - `internal/translate/summarize_test.go`
 **Dependencies:** TRN-001, FND-011
 **Acceptance Criteria:**
-- [ ] Small interactions (<~1K tokens by estimate): uses mechanical template `"{tool_name}: {brief action} — {brief result}"`
-- [ ] Large interactions (≥~1K tokens): delegates to Bedrock LLM via `translation.summarization_model_id` (interface dependency; actual Bedrock call wired in EXT-001)
-- [ ] Template patterns: Read → "Read file X (N lines)", Bash → "Ran 'cmd' — brief result", Write → "Wrote file X", Edit → "Edited file X"
-- [ ] LLM summarization produces a 1-2 sentence summary of the tool interaction
-- [ ] Test cases: small Read interaction, small Bash interaction, large interaction (mocked LLM), threshold boundary
+- [x] Small interactions (<~1K tokens by estimate): uses mechanical template `"{tool_name}: {brief action} — {brief result}"`
+- [x] Large interactions (≥~1K tokens): delegates to Bedrock LLM via `translation.summarization_model_id` (interface dependency; actual Bedrock call wired in EXT-001)
+- [x] Template patterns: Read → "Read file X (N lines)", Bash → "Ran 'cmd' — brief result", Write → "Wrote file X", Edit → "Edited file X"
+- [x] LLM summarization produces a 1-2 sentence summary of the tool interaction
+- [x] Test cases: small Read interaction, small Bash interaction, large interaction (mocked LLM), threshold boundary
 
 ---
 
