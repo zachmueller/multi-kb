@@ -16,3 +16,6 @@ mise.toml
 .env
 .env.local
 .env.*.local
+
+# private directory
+private/
