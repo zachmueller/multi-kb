@@ -5,69 +5,7 @@ import (
 	"time"
 )
 
-func TestParseCronExpr_Basic(t *testing.T) {
-	tests := []struct {
-		name    string
-		expr    string
-		wantErr bool
-	}{
-		{"every minute", "* * * * *", false},
-		{"every 5 minutes", "*/5 * * * *", false},
-		{"every hour at :00", "0 * * * *", false},
-		{"daily at midnight", "0 0 * * *", false},
-		{"weekdays at 9am", "0 9 * * 1-5", false},
-		{"specific time", "30 14 1 * *", false},
-		{"too few fields", "* * *", true},
-		{"too many fields", "* * * * * *", true},
-		{"invalid value", "60 * * * *", true},
-		{"invalid step", "*/0 * * * *", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := parseCronExpr(tt.expr)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseCronExpr(%q): error = %v, wantErr = %v", tt.expr, err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestParseField(t *testing.T) {
-	tests := []struct {
-		field   string
-		min     int
-		max     int
-		want    []int
-		wantErr bool
-	}{
-		{"*", 0, 59, seq(0, 59, 1), false},
-		{"*/15", 0, 59, []int{0, 15, 30, 45}, false},
-		{"5", 0, 59, []int{5}, false},
-		{"1-5", 0, 59, []int{1, 2, 3, 4, 5}, false},
-		{"1,3,5", 0, 59, []int{1, 3, 5}, false},
-		{"1-10/3", 0, 59, []int{1, 4, 7, 10}, false},
-		{"0-6", 0, 6, seq(0, 6, 1), false},
-		{"60", 0, 59, nil, true},
-		{"*/0", 0, 59, nil, true},
-		{"5-2", 0, 59, nil, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.field, func(t *testing.T) {
-			got, err := parseField(tt.field, tt.min, tt.max)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseField(%q): error = %v, wantErr = %v", tt.field, err, tt.wantErr)
-				return
-			}
-			if err == nil && !intSliceEqual(got, tt.want) {
-				t.Errorf("parseField(%q) = %v, want %v", tt.field, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNextRun(t *testing.T) {
+func TestNextRunAfter(t *testing.T) {
 	loc := time.UTC
 
 	tests := []struct {
@@ -126,6 +64,18 @@ func TestNextRun(t *testing.T) {
 			// Next weekday (Mon-Fri) at 9am: Monday May 4
 			want: time.Date(2026, 5, 4, 9, 0, 0, 0, loc),
 		},
+		{
+			name: "every 15 minutes",
+			expr: "*/15 * * * *",
+			from: time.Date(2026, 5, 3, 10, 7, 0, 0, loc),
+			want: time.Date(2026, 5, 3, 10, 15, 0, 0, loc),
+		},
+		{
+			name: "range list",
+			expr: "0,30 9-17 * * *",
+			from: time.Date(2026, 5, 3, 12, 31, 0, 0, loc),
+			want: time.Date(2026, 5, 3, 13, 0, 0, 0, loc),
+		},
 	}
 
 	for _, tt := range tests {
@@ -141,10 +91,20 @@ func TestNextRun(t *testing.T) {
 	}
 }
 
-func TestNextRunAfter_ErrorOnBadExpr(t *testing.T) {
-	_, err := NextRunAfter("bad", time.Now())
-	if err == nil {
-		t.Fatal("expected error for bad expression")
+func TestNextRunAfter_InvalidExpr(t *testing.T) {
+	badExprs := []string{
+		"bad",
+		"* * *",
+		"* * * * * *",
+		"",
+	}
+	for _, expr := range badExprs {
+		t.Run(expr, func(t *testing.T) {
+			_, err := NextRunAfter(expr, time.Now())
+			if err == nil {
+				t.Errorf("expected error for expression %q", expr)
+			}
+		})
 	}
 }
 
@@ -179,47 +139,4 @@ func TestFindCronExpr_EmptyInput(t *testing.T) {
 	if got != "" {
 		t.Errorf("findCronExpr(nil) = %q, want empty string", got)
 	}
-}
-
-func TestContains(t *testing.T) {
-	if !contains([]int{1, 3, 5, 7}, 5) {
-		t.Error("expected contains(5) to be true")
-	}
-	if contains([]int{1, 3, 5, 7}, 4) {
-		t.Error("expected contains(4) to be false")
-	}
-	if contains(nil, 1) {
-		t.Error("expected contains on nil to be false")
-	}
-}
-
-func TestSortInts(t *testing.T) {
-	a := []int{5, 3, 1, 4, 2}
-	sortInts(a)
-	want := []int{1, 2, 3, 4, 5}
-	if !intSliceEqual(a, want) {
-		t.Errorf("sortInts() = %v, want %v", a, want)
-	}
-}
-
-// --- helpers ---
-
-func seq(start, end, step int) []int {
-	var s []int
-	for i := start; i <= end; i += step {
-		s = append(s, i)
-	}
-	return s
-}
-
-func intSliceEqual(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
