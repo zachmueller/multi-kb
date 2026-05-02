@@ -540,8 +540,8 @@ _Corresponds to plan.md Phase F._
 - `test/constructs/compute.test.ts`
 **Dependencies:** STR-001 (bucket ARN), STR-002 (repo ARN), STR-003 (queue ARN), SRC-001 (collection ARN), KBS-001 (KB ARN), KBS-003 (data source ID), ENV-002 (CLI binary S3 URI, model IDs)
 **Acceptance Criteria:**
-- [ ] IAM role with trust policy for `ec2.amazonaws.com`
-- [ ] Permissions (all scoped to specific resource ARNs):
+- [x] IAM role with trust policy for `ec2.amazonaws.com`
+- [x] Permissions (all scoped to specific resource ARNs):
   - `sqs:ReceiveMessage`, `sqs:DeleteMessage`, `sqs:GetQueueAttributes` on queue ARN
   - `codecommit:GitPull`, `codecommit:GitPush` on repo ARN
   - `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket` on KB bucket ARN
@@ -550,9 +550,9 @@ _Corresponds to plan.md Phase F._
   - `bedrock:InvokeModel` on consolidation model ARN
   - `bedrock-agent:StartIngestionJob`, `bedrock-agent:GetIngestionJob` (scoped to KB/data source)
   - SSM Session Manager permissions (`ssm:UpdateInstanceInformation`, `ssmmessages:*`, `ec2messages:*`)
-- [ ] Instance profile created from role
-- [ ] Exports: role, role ARN, instance profile
-- [ ] CDK assertion test: role trust policy; each permission statement verified for specific ARN (no wildcards except SSM messages); instance profile exists
+- [x] Instance profile created from role
+- [x] Exports: role, role ARN, instance profile
+- [x] CDK assertion test: role trust policy; each permission statement verified for specific ARN (no wildcards except SSM messages); instance profile exists
 
 ### CMP-002: Launch Template
 **Description:** Create the EC2 launch template with Amazon Linux 2023, instance type, and security group per spec FR-4.
@@ -561,13 +561,13 @@ _Corresponds to plan.md Phase F._
 - `test/constructs/compute.test.ts`
 **Dependencies:** CMP-001, NET-004 (EC2 SG)
 **Acceptance Criteria:**
-- [ ] Amazon Linux 2023 AMI (latest, ARM64 or x86_64 matching instance type)
-- [ ] Instance type from `ec2InstanceType` prop (default: `t3.small`)
-- [ ] Instance profile from CMP-001
-- [ ] Security group: EC2 SG from NET-004
-- [ ] No public IP (private subnet only)
-- [ ] User data script from CMP-003
-- [ ] CDK assertion test: launch template with correct instance type; no associate public IP
+- [x] Amazon Linux 2023 AMI (latest, ARM64 or x86_64 matching instance type)
+- [x] Instance type from `ec2InstanceType` prop (default: `t3.small`)
+- [x] Instance profile from CMP-001
+- [x] Security group: EC2 SG from NET-004
+- [x] No public IP (private subnet only)
+- [x] User data script from CMP-003
+- [x] CDK assertion test: launch template with correct instance type; no associate public IP
 
 ### CMP-003: User Data Script
 **Description:** Implement the EC2 user data script that bootstraps the instance per spec FR-4 and research.md R-3.
@@ -576,20 +576,20 @@ _Corresponds to plan.md Phase F._
 **Dependencies:** CMP-001, CMP-004 (for `addSignalOnExitCommand`), STR-001, STR-002, STR-003, SRC-001, KBS-001, KBS-003, ENV-002, OBS-001 (log group name)
 **Contract:** [server-config.md](contracts/server-config.md) — defines the exact config.yaml fields to template and their CDK output sources
 **Acceptance Criteria:**
-- [ ] Uses `UserData.forLinux()` with `set -euxo pipefail` as first command
-- [ ] Step 1: Install packages — `dnf install -y amazon-cloudwatch-agent` (git is pre-installed on AL2023; do NOT install git separately to avoid ambiguity)
-- [ ] Step 2: Download CLI binary — wrap in retry loop (3 attempts, exponential backoff: 1s/2s/4s): `aws s3 cp ${cliBinaryS3Uri} /usr/local/bin/multi-kb && chmod +x /usr/local/bin/multi-kb` (raw `addCommands`, NOT `addS3DownloadCommand` — S3 URI is a string prop, not an `IBucket` reference)
-- [ ] Step 3: Git credential helper — `git config --system credential.helper '!aws codecommit credential-helper $@'` and `git config --system credential.UseHttpPath true` (use `--system` not `--global` so it applies to all users)
-- [ ] Step 4: Clone CodeCommit repo — wrap in retry loop (3 attempts, exponential backoff: 1s/2s/4s): `git clone https://git-codecommit.{region}.amazonaws.com/v1/repos/{repoName} /opt/multi-kb/repo` with `|| { git init ... }` fallback for empty repos on first deploy
-- [ ] Step 5: Template `config.yaml` at `/opt/multi-kb/config.yaml` — interpolate all CDK-resolved values per [server-config.md](contracts/server-config.md) field mapping table. Use line-by-line `addCommands()` with heredoc and template literal interpolation for CDK tokens.
-- [ ] Step 6: Configure CloudWatch agent — use `Stack.toJsonString()` to safely serialize JSON config containing CDK token (`logGroupName`). Config at `/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json`. Log stream name uses `{instance_id}` (CloudWatch agent variable, NOT a CDK token). Start agent with `amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:...`.
-- [ ] Step 7: Create systemd unit file at `/etc/systemd/system/multi-kb.service` — `Type=simple`, `Restart=on-failure`, `RestartSec=5`, `WorkingDirectory=/opt/multi-kb/repo`, `StandardOutput=append:/var/log/multi-kb/server.log`, `StandardError=append:/var/log/multi-kb/server.log`, `Environment=AWS_REGION={region}`, `Environment=HOME=/root`. Create `/var/log/multi-kb/` directory first.
-- [ ] Step 8: Start services — `systemctl daemon-reload`, start CloudWatch agent via `amazon-cloudwatch-agent-ctl`, then `systemctl enable --now multi-kb`
-- [ ] **cfn-signal integration:** Call `userData.addSignalOnExitCommand(asg)` AFTER all other `addCommands()` calls. ASG uses `Signals.waitForAll({ timeout: Duration.minutes(15) })`.
-- [ ] All `${...}` values resolved from CDK construct outputs at synthesis time via template literal interpolation in `addCommands()`
-- [ ] Launch template sets `requireImdsv2: true` (security best practice; AWS CLI v2 on AL2023 supports IMDSv2)
-- [ ] Process runs as root for MVP (no dedicated user)
-- [ ] CDK assertion test: user data is non-empty; launch template has IMDSv2 enforced
+- [x] Uses `UserData.forLinux()` with `set -euxo pipefail` as first command
+- [x] Step 1: Install packages — `dnf install -y amazon-cloudwatch-agent` (git is pre-installed on AL2023; do NOT install git separately to avoid ambiguity)
+- [x] Step 2: Download CLI binary — wrap in retry loop (3 attempts, exponential backoff: 1s/2s/4s): `aws s3 cp ${cliBinaryS3Uri} /usr/local/bin/multi-kb && chmod +x /usr/local/bin/multi-kb` (raw `addCommands`, NOT `addS3DownloadCommand` — S3 URI is a string prop, not an `IBucket` reference)
+- [x] Step 3: Git credential helper — `git config --system credential.helper '!aws codecommit credential-helper $@'` and `git config --system credential.UseHttpPath true` (use `--system` not `--global` so it applies to all users)
+- [x] Step 4: Clone CodeCommit repo — wrap in retry loop (3 attempts, exponential backoff: 1s/2s/4s): `git clone https://git-codecommit.{region}.amazonaws.com/v1/repos/{repoName} /opt/multi-kb/repo` with `|| { git init ... }` fallback for empty repos on first deploy
+- [x] Step 5: Template `config.yaml` at `/opt/multi-kb/config.yaml` — interpolate all CDK-resolved values per [server-config.md](contracts/server-config.md) field mapping table. Use line-by-line `addCommands()` with heredoc and template literal interpolation for CDK tokens.
+- [x] Step 6: Configure CloudWatch agent — use `Stack.toJsonString()` to safely serialize JSON config containing CDK token (`logGroupName`). Config at `/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json`. Log stream name uses `{instance_id}` (CloudWatch agent variable, NOT a CDK token). Start agent with `amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:...`.
+- [x] Step 7: Create systemd unit file at `/etc/systemd/system/multi-kb.service` — `Type=simple`, `Restart=on-failure`, `RestartSec=5`, `WorkingDirectory=/opt/multi-kb/repo`, `StandardOutput=append:/var/log/multi-kb/server.log`, `StandardError=append:/var/log/multi-kb/server.log`, `Environment=AWS_REGION={region}`, `Environment=HOME=/root`. Create `/var/log/multi-kb/` directory first.
+- [x] Step 8: Start services — `systemctl daemon-reload`, start CloudWatch agent via `amazon-cloudwatch-agent-ctl`, then `systemctl enable --now multi-kb`
+- [x] **cfn-signal integration:** Call `userData.addSignalOnExitCommand(asg)` AFTER all other `addCommands()` calls. ASG uses `Signals.waitForAll({ timeout: Duration.minutes(15) })`.
+- [x] All `${...}` values resolved from CDK construct outputs at synthesis time via template literal interpolation in `addCommands()`
+- [x] Launch template sets `requireImdsv2: true` (security best practice; AWS CLI v2 on AL2023 supports IMDSv2)
+- [x] Process runs as root for MVP (no dedicated user)
+- [x] CDK assertion test: user data is non-empty; launch template has IMDSv2 enforced
 
 ### CMP-004: Auto Scaling Group
 **Description:** Create the ASG with min/max/desired=1, pinned to single AZ per spec FR-4.
@@ -598,13 +598,13 @@ _Corresponds to plan.md Phase F._
 - `test/constructs/compute.test.ts`
 **Dependencies:** CMP-002, NET-001 (subnet)
 **Acceptance Criteria:**
-- [ ] Min capacity: 1, max capacity: 1, desired capacity: 1
-- [ ] Pinned to single AZ (same as VPC endpoints)
-- [ ] Uses launch template from CMP-002
-- [ ] Health check: EC2 status checks (default)
-- [ ] Instance replacement on termination: ASG launches new instance, user data re-bootstraps
-- [ ] **Signals integration (R-3):** `signals: Signals.waitForAll({ timeout: Duration.minutes(15) })` — CloudFormation waits for cfn-signal from user data script before marking resource as created. On script failure, stack rolls back.
-- [ ] CDK assertion test: ASG with min=max=desired=1; subnet specified; CreationPolicy present with 15-minute timeout
+- [x] Min capacity: 1, max capacity: 1, desired capacity: 1
+- [x] Pinned to single AZ (same as VPC endpoints)
+- [x] Uses launch template from CMP-002
+- [x] Health check: EC2 status checks (default)
+- [x] Instance replacement on termination: ASG launches new instance, user data re-bootstraps
+- [x] **Signals integration (R-3):** `signals: Signals.waitForAll({ timeout: Duration.minutes(15) })` — CloudFormation waits for cfn-signal from user data script before marking resource as created. On script failure, stack rolls back.
+- [x] CDK assertion test: ASG with min=max=desired=1; subnet specified; CreationPolicy present with 15-minute timeout
 
 ### CMP-005: Stack Output — Compute
 **Description:** Add CloudFormation output for EC2 instance.
@@ -612,8 +612,8 @@ _Corresponds to plan.md Phase F._
 - `lib/multi-kb-stack.ts` — CfnOutput
 **Dependencies:** CMP-004
 **Acceptance Criteria:**
-- [ ] Output `Ec2InstanceId`: EC2 instance ID (note: may need to be a custom resource or reference since ASG manages the instance)
-- [ ] CDK assertion test: output exists
+- [x] Output `Ec2InstanceId`: EC2 instance ID (note: may need to be a custom resource or reference since ASG manages the instance)
+- [x] CDK assertion test: output exists
 
 ---
 
@@ -628,11 +628,11 @@ _Corresponds to plan.md Phase G._
 - `test/constructs/observability.test.ts`
 **Dependencies:** API-001, LMB-003, LMB-005
 **Acceptance Criteria:**
-- [ ] API Gateway access log group (referenced by API stage)
-- [ ] Lambda function log groups (auto-created by Lambda, but set retention)
-- [ ] EC2 CLI process log group (for CloudWatch agent to ship to)
-- [ ] Retention: 30 days (configurable, reasonable default for MVP)
-- [ ] CDK assertion test: log group resources exist with retention policy
+- [x] API Gateway access log group (referenced by API stage)
+- [x] Lambda function log groups (auto-created by Lambda, but set retention)
+- [x] EC2 CLI process log group (for CloudWatch agent to ship to)
+- [x] Retention: 30 days (configurable, reasonable default for MVP)
+- [x] CDK assertion test: log group resources exist with retention policy
 
 ### OBS-002 [P]: CloudWatch Alarms
 **Description:** Create CloudWatch alarms per spec NFR-4.
@@ -641,11 +641,11 @@ _Corresponds to plan.md Phase G._
 - `test/constructs/observability.test.ts`
 **Dependencies:** STR-003 (DLQ), CMP-004 (ASG)
 **Acceptance Criteria:**
-- [ ] Alarm: DLQ `ApproximateNumberOfMessagesVisible` > 0 (indicates processing failures)
-- [ ] Alarm: ASG `GroupInServiceInstances` < 1 (EC2 instance unhealthy)
-- [ ] Alarm: Dream cycle lock held > 60 minutes (custom metric from CLI logs — metric filter on log group)
-- [ ] No alarm actions (metrics only for MVP — operators poll console)
-- [ ] CDK assertion test: 3 alarm resources; no action configuration; correct metric references
+- [x] Alarm: DLQ `ApproximateNumberOfMessagesVisible` > 0 (indicates processing failures)
+- [x] Alarm: ASG `GroupInServiceInstances` < 1 (EC2 instance unhealthy)
+- [x] Alarm: Dream cycle lock held > 60 minutes (custom metric from CLI logs — metric filter on log group)
+- [x] No alarm actions (metrics only for MVP — operators poll console)
+- [x] CDK assertion test: 3 alarm resources; no action configuration; correct metric references
 
 ---
 

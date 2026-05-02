@@ -985,11 +985,11 @@ _Corresponds to plan.md Phase I._
 - `goreleaser.yml` (optional) — if using goreleaser
 **Dependencies:** ENV-003
 **Acceptance Criteria:**
-- [ ] Builds for: Linux (amd64, arm64), macOS (amd64, arm64), Windows (amd64)
-- [ ] All builds use `CGO_ENABLED=0` for fully static binaries
-- [ ] Binary naming convention: `multi-kb-<os>-<arch>[.exe]`
-- [ ] `make build-all` produces all 5 binaries
-- [ ] Each binary runs `--version` successfully on its target platform (or via cross-testing where available)
+- [x] Builds for: Linux (amd64, arm64), macOS (amd64, arm64), Windows (amd64)
+- [x] All builds use `CGO_ENABLED=0` for fully static binaries
+- [x] Binary naming convention: `multi-kb-<os>-<arch>[.exe]`
+- [x] `make build-all` produces all 5 binaries
+- [x] Each binary runs `--version` successfully on its target platform (or via cross-testing where available)
 
 ### BLD-002 [P]: Binary Size Optimization
 **Description:** Audit and optimize binary size using ldflags and build tags.
@@ -997,10 +997,10 @@ _Corresponds to plan.md Phase I._
 - `Makefile` — add optimization flags
 **Dependencies:** BLD-001
 **Acceptance Criteria:**
-- [ ] Uses `-ldflags="-s -w"` to strip debug info and DWARF symbols
-- [ ] Evaluates `upx` compression (optional, document trade-offs)
-- [ ] Documents final binary sizes per platform
-- [ ] Binary size is reasonable for a Go CLI with embedded web assets (<30MB target)
+- [x] Uses `-ldflags="-s -w"` to strip debug info and DWARF symbols
+- [x] Evaluates `upx` compression (optional, document trade-offs)
+- [x] Documents final binary sizes per platform
+- [x] Binary size is reasonable for a Go CLI with embedded web assets (<30MB target)
 
 ---
 
