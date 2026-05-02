@@ -602,12 +602,12 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - `internal/dreamcycle/cycle_test.go`
 **Dependencies:** FND-003, FND-002
 **Acceptance Criteria:**
-- [ ] Acquires lock with activity="dream_cycle"
-- [ ] Executes phases 0-4 in sequence
-- [ ] Phase 0: no-op for local (returns immediately)
-- [ ] Releases lock on completion or error
-- [ ] Records run log entry (dream_cycle type) on completion
-- [ ] If any phase fails: already-committed batches preserved, remaining pending notes left for next run
+- [x] Acquires lock with activity="dream_cycle"
+- [x] Executes phases 0-4 in sequence
+- [x] Phase 0: no-op for local (returns immediately)
+- [x] Releases lock on completion or error
+- [x] Records run log entry (dream_cycle type) on completion
+- [x] If any phase fails: already-committed batches preserved, remaining pending notes left for next run
 - [ ] Test cases: successful full cycle (mocked phases), failure mid-cycle, lock acquisition failure
 
 ### DRM-002: Phase 1 — Singleton Batch Creation
@@ -617,10 +617,10 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - `internal/dreamcycle/phase1_test.go`
 **Dependencies:** FND-005, FND-006
 **Acceptance Criteria:**
-- [ ] Scans local KB for all notes with `status: pending` in frontmatter
-- [ ] Each pending note becomes its own batch (singleton — no similarity grouping for local)
-- [ ] Returns list of batches, each containing one note
-- [ ] Empty list if no pending notes (dream cycle exits early)
+- [x] Scans local KB for all notes with `status: pending` in frontmatter
+- [x] Each pending note becomes its own batch (singleton — no similarity grouping for local)
+- [x] Returns list of batches, each containing one note
+- [x] Empty list if no pending notes (dream cycle exits early)
 - [ ] Test cases: multiple pending notes, no pending notes, mixed pending/active notes
 
 ### DRM-003: Phase 2 — Git Grep Related Note Retrieval
@@ -630,11 +630,11 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - `internal/dreamcycle/phase2_test.go`
 **Dependencies:** FND-007
 **Acceptance Criteria:**
-- [ ] Derives keywords mechanically from the note's title and key terms (no LLM call — unlike hook recall)
-- [ ] Runs `git grep` per keyword against the local KB
-- [ ] Filters to `status: active` notes only
-- [ ] Returns up to 10 related active notes per batch
-- [ ] Ranks by match count (same as recall ranking)
+- [x] Derives keywords mechanically from the note's title and key terms (no LLM call — unlike hook recall)
+- [x] Runs `git grep` per keyword against the local KB
+- [x] Filters to `status: active` notes only
+- [x] Returns up to 10 related active notes per batch
+- [x] Ranks by match count (same as recall ranking)
 - [ ] Test cases: note with matching active notes, no related notes, keyword derivation from title
 
 ### DRM-004: Phase 3 — LLM Consolidation and Action Application
@@ -648,17 +648,17 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 **Dependencies:** EXT-001, FND-006, FND-005, PRM-002
 **Contract:** [consolidation-output.md](contracts/consolidation-output.md)
 **Acceptance Criteria:**
-- [ ] **Interface abstraction:** Action application (file reads, writes, deletes, commits) uses a `NoteStore` interface with methods: `ReadNote(uid) -> Note`, `WriteNote(note)`, `DeleteNote(uid)`, `CommitBatch(message)`. Local mode implements with `internal/git/repo.go` operations; server mode implements with `internal/server/codecommit.go` operations. DRM-004 depends on the interface, not the concrete implementation.
-- [ ] Constructs consolidation prompt with: the pending note (singleton batch) + related active notes
-- [ ] Calls `dream_cycle.model_id` via Bedrock
-- [ ] Parses LLM response into action types: keep, merge, split, consolidate
-- [ ] **keep:** flip pending note to `status: active`, update `last-updated`
-- [ ] **merge:** merge content into target note, delete source note, update `consolidated-from-notes` on target
-- [ ] **split:** create multiple new active notes from one pending note, delete original
-- [ ] **consolidate:** create one new active note from multiple notes, delete originals, update `consolidated-from-notes`
-- [ ] **Content length heuristic for consolidate:** If a `consolidate` action references active notes, warn-log if the new `content` length is less than 80% of the combined source content length. The action still proceeds (it's a warning, not a block), but the warning is recorded in the run log for auditability.
-- [ ] Per-batch git commit after applying all actions
-- [ ] Git commit message for consolidate actions explicitly lists deleted active note UIDs (e.g., `dream-cycle: consolidate — deleted active notes ABC123, DEF456`)
+- [x] **Interface abstraction:** Action application (file reads, writes, deletes, commits) uses a `NoteStore` interface with methods: `ReadNote(uid) -> Note`, `WriteNote(note)`, `DeleteNote(uid)`, `CommitBatch(message)`. Local mode implements with `internal/git/repo.go` operations; server mode implements with `internal/server/codecommit.go` operations. DRM-004 depends on the interface, not the concrete implementation.
+- [x] Constructs consolidation prompt with: the pending note (singleton batch) + related active notes
+- [x] Calls `dream_cycle.model_id` via Bedrock
+- [x] Parses LLM response into action types: keep, merge, split, consolidate
+- [x] **keep:** flip pending note to `status: active`, update `last-updated`
+- [x] **merge:** merge content into target note, delete source note, update `consolidated-from-notes` on target
+- [x] **split:** create multiple new active notes from one pending note, delete original
+- [x] **consolidate:** create one new active note from multiple notes, delete originals, update `consolidated-from-notes`
+- [x] **Content length heuristic for consolidate:** If a `consolidate` action references active notes, warn-log if the new `content` length is less than 80% of the combined source content length. The action still proceeds (it's a warning, not a block), but the warning is recorded in the run log for auditability.
+- [x] Per-batch git commit after applying all actions
+- [x] Git commit message for consolidate actions explicitly lists deleted active note UIDs (e.g., `dream-cycle: consolidate — deleted active notes ABC123, DEF456`)
 - [ ] Test cases: keep action, merge action, split action, consolidate action, consolidate with active notes (verify warning heuristic), LLM failure (skip batch)
 
 ### DRM-005: Dream Cycle Commands
@@ -668,10 +668,10 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - `internal/cmd/run.go` — full implementation replacing stub
 **Dependencies:** DRM-001, EXT-008
 **Acceptance Criteria:**
-- [ ] `multi-kb dream-cycle`: acquires lock, runs dream cycle, releases lock
-- [ ] `multi-kb run`: acquires lock once, runs capture processing then dream cycle sequentially, releases lock
-- [ ] Both respect lock file: if held, manual commands print message with lock holder info and exit; scheduled runs skip silently
-- [ ] Both append appropriate run log entries
+- [x] `multi-kb dream-cycle`: acquires lock, runs dream cycle, releases lock
+- [x] `multi-kb run`: acquires lock once, runs capture processing then dream cycle sequentially, releases lock
+- [x] Both respect lock file: if held, manual commands print message with lock holder info and exit; scheduled runs skip silently
+- [x] Both append appropriate run log entries
 - [ ] Test cases: standalone dream cycle, combined run, lock contention
 
 ---
@@ -686,17 +686,17 @@ _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 - `internal/cmd/setup.go` — partial implementation (wizard flow Phase 1 form + async discovery)
 **Dependencies:** ENV-002, FND-001
 **Acceptance Criteria:**
-- [ ] **Uses `charm.land/huh/v2` + `charm.land/bubbletea/v2` (R-1).** Form components from `huh`, parent bubbletea program manages inter-step async logic.
-- [ ] **Phase 1 Form** — `huh.NewForm` with Groups:
+- [x] **Uses `charm.land/huh/v2` + `charm.land/bubbletea/v2` (R-1).** Form components from `huh`, parent bubbletea program manages inter-step async logic.
+- [x] **Phase 1 Form** — `huh.NewForm` with Groups:
   - Group 1: `huh.NewNote` welcome + `huh.NewMultiSelect` for harness selection (Notor, Claude Code)
   - Group 2 (conditional via `WithHideFunc`): Claude Code directory path input (`huh.NewInput` with path validation via `Validate(func(s string) error {...})`)
   - Group 3 (conditional via `WithHideFunc`): Notor vault path input (`huh.NewInput` or `huh.NewFilePicker` with `DirAllowed(true)`)
-- [ ] **Conditional group visibility (R-1):** Use `WithHideFunc` closures watching the `selectedHarnesses` variable — only show Claude Code directory group if Claude Code selected, only show Notor group if Notor selected
-- [ ] **Async discovery step** (between Phase 1 and Phase 2 forms): Run inside bubbletea parent program with spinner. Auto-discovers chat history locations:
+- [x] **Conditional group visibility (R-1):** Use `WithHideFunc` closures watching the `selectedHarnesses` variable — only show Claude Code directory group if Claude Code selected, only show Notor group if Notor selected
+- [x] **Async discovery step** (between Phase 1 and Phase 2 forms): Run inside bubbletea parent program with spinner. Auto-discovers chat history locations:
   - Claude Code: reads from `~/.claude/projects/`, matches user-pointed directory to project subdirectory (R-3 path mapping), presents summary via `huh.NewNote`
   - Notor: reads `{vault}/.obsidian/plugins/notor/data.json` for `history_path` (R-4), checks path exists, presents summary
-- [ ] User confirms discovered sources via `huh.NewConfirm`
-- [ ] **Accessibility (R-1):** Support `WithAccessible(true)` for screen readers (falls back to sequential prompts)
+- [x] User confirms discovered sources via `huh.NewConfirm`
+- [x] **Accessibility (R-1):** Support `WithAccessible(true)` for screen readers (falls back to sequential prompts)
 - [ ] Test cases: single harness selection, both harnesses, directory validation, source discovery, conditional group hiding
 
 ### WIZ-002: Terminal Wizard — KB Configuration and Routing
@@ -705,20 +705,20 @@ _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 - `internal/cmd/setup.go` — partial implementation (wizard flow Phases 2 and 3)
 **Dependencies:** WIZ-001, FND-005
 **Acceptance Criteria:**
-- [ ] **Phase 2 Form** (R-1 — `huh.NewForm`):
+- [x] **Phase 2 Form** (R-1 — `huh.NewForm`):
   - `huh.NewConfirm` for discovery summary
   - `huh.NewConfirm` to add remote KB (loop via sequential forms — "Add another?" pattern)
   - For each remote KB: `huh.NewInput` (name, endpoint URL), `huh.NewSelect` (auth type: iam/federate), conditional `huh.NewInput` (AWS profile, shown via `WithHideFunc` only when auth=iam), `huh.NewInput` (region, description)
   - `huh.NewSelect` per directory-KB pair for routing mode (always/consider) and approval mode presets (`huh.NewSelect` with 3 presets: auto-approve always, always require manual, select per group)
-- [ ] **Phase 3 Form** (R-1 — `huh.NewForm`):
+- [x] **Phase 3 Form** (R-1 — `huh.NewForm`):
   - `huh.NewInput` for author identity string with `ValidateNotEmpty()` + `ValidateMaxLength(100)`
   - `huh.NewText` for exclusion rules (multi-line, optional — user can leave empty)
   - `huh.NewNote` showing setup summary
   - `huh.NewConfirm` to finalize
-- [ ] **Dynamic fields (R-1):** Use `OptionsFunc` for routing target selection — options regenerate based on configured KBs
-- [ ] Creates default local KB automatically (`~/.multi-kb/local/default/`)
-- [ ] Writes complete `config.yaml` and initial empty `state.yaml`
-- [ ] **No looping within single form (R-1 gotcha):** "Add another KB?" uses sequential form invocations, not in-form loops
+- [x] **Dynamic fields (R-1):** Use `OptionsFunc` for routing target selection — options regenerate based on configured KBs
+- [x] Creates default local KB automatically (`~/.multi-kb/local/default/`)
+- [x] Writes complete `config.yaml` and initial empty `state.yaml`
+- [x] **No looping within single form (R-1 gotcha):** "Add another KB?" uses sequential form invocations, not in-form loops
 - [ ] Test cases: minimal setup (local only), with remote KB, with overrides, with exclusion rules, accessible mode
 
 ### WIZ-003: Hook Auto-Registration During Setup
@@ -727,11 +727,11 @@ _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 - `internal/cmd/setup.go` — hook registration step
 **Dependencies:** WIZ-001, HKI-001, HKI-002
 **Acceptance Criteria:**
-- [ ] For each selected harness, calls the appropriate hook registration function
-- [ ] Claude Code: registers `user_prompt_submit` hook
-- [ ] Notor: registers conversation-start hook
-- [ ] Appends alongside existing hooks (never overwrites)
-- [ ] Reports registration status to user
+- [x] For each selected harness, calls the appropriate hook registration function
+- [x] Claude Code: registers `user_prompt_submit` hook
+- [x] Notor: registers conversation-start hook
+- [x] Appends alongside existing hooks (never overwrites)
+- [x] Reports registration status to user
 - [ ] Test cases: single harness hook registration, both harnesses, pre-existing hooks preserved
 
 ### WIZ-004: Cron Registration
@@ -743,18 +743,18 @@ _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 - `internal/schedule/cron_windows_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] **macOS/Linux crontab (R-8):** Read-modify-write pattern via `crontab -l` → modify in memory → `crontab -` (stdin replacement). Never directly edit crontab files.
-- [ ] **Empty crontab handling (R-8):** `crontab -l` exits code 1 on empty crontab — treat as empty (not error). Check `exitErr.ExitCode() == 1`.
-- [ ] **Inline marker (R-8):** Append `# multi-kb scheduled run` as trailing comment on the cron entry line. Use `strings.Contains(line, marker)` for idempotency detection.
-- [ ] **Idempotency (R-8):** Before appending, filter out any existing line containing the marker. Read-filter-append-write guarantees exactly one multi-kb entry regardless of how many times setup runs.
-- [ ] **Absolute binary path (R-8):** Use `os.Executable()` + `filepath.EvalSymlinks()` to resolve the binary's absolute path. Cron runs with minimal PATH — binary may not be found otherwise.
-- [ ] **Output redirection (R-8):** Append `>> ~/.multi-kb/logs/cron.log 2>&1` to prevent cron mail accumulation. Expand `~` to absolute path at registration time via `os.UserHomeDir()`.
-- [ ] **Cron entry format:** `{cronExpr} {absPath} run --config {absConfigPath} >> {absLogPath} 2>&1 # multi-kb scheduled run`
-- [ ] **Uninstall (R-8):** Filter out marker line and write back. If result is empty, use `crontab -r`.
-- [ ] **Windows Task Scheduler (R-8):** `schtasks.exe /Create /SC MINUTE /MO {interval} /TN "multi-kb-run" /TR "cmd /c \"{absPath} run --config {configPath} >> {logPath} 2>&1\"" /F /NP /RL LIMITED`. `/F` provides idempotency. `/NP` prevents password prompting. No admin needed.
-- [ ] **Windows uninstall:** `schtasks.exe /Delete /TN "multi-kb-run" /F`
-- [ ] **Build tags:** `//go:build unix` and `//go:build windows` with file naming convention `_unix.go` / `_windows.go`
-- [ ] **Scheduler interface:** Define `Scheduler` interface with `Install(cronExpr, binaryPath, configPath)`, `Uninstall()`, `IsInstalled()` — platform-specific `New()` factory
+- [x] **macOS/Linux crontab (R-8):** Read-modify-write pattern via `crontab -l` → modify in memory → `crontab -` (stdin replacement). Never directly edit crontab files.
+- [x] **Empty crontab handling (R-8):** `crontab -l` exits code 1 on empty crontab — treat as empty (not error). Check `exitErr.ExitCode() == 1`.
+- [x] **Inline marker (R-8):** Append `# multi-kb scheduled run` as trailing comment on the cron entry line. Use `strings.Contains(line, marker)` for idempotency detection.
+- [x] **Idempotency (R-8):** Before appending, filter out any existing line containing the marker. Read-filter-append-write guarantees exactly one multi-kb entry regardless of how many times setup runs.
+- [x] **Absolute binary path (R-8):** Use `os.Executable()` + `filepath.EvalSymlinks()` to resolve the binary's absolute path. Cron runs with minimal PATH — binary may not be found otherwise.
+- [x] **Output redirection (R-8):** Append `>> ~/.multi-kb/logs/cron.log 2>&1` to prevent cron mail accumulation. Expand `~` to absolute path at registration time via `os.UserHomeDir()`.
+- [x] **Cron entry format:** `{cronExpr} {absPath} run --config {absConfigPath} >> {absLogPath} 2>&1 # multi-kb scheduled run`
+- [x] **Uninstall (R-8):** Filter out marker line and write back. If result is empty, use `crontab -r`.
+- [x] **Windows Task Scheduler (R-8):** `schtasks.exe /Create /SC MINUTE /MO {interval} /TN "multi-kb-run" /TR "cmd /c \"{absPath} run --config {configPath} >> {logPath} 2>&1\"" /F /NP /RL LIMITED`. `/F` provides idempotency. `/NP` prevents password prompting. No admin needed.
+- [x] **Windows uninstall:** `schtasks.exe /Delete /TN "multi-kb-run" /F`
+- [x] **Build tags:** `//go:build unix` and `//go:build windows` with file naming convention `_unix.go` / `_windows.go`
+- [x] **Scheduler interface:** Define `Scheduler` interface with `Install(cronExpr, binaryPath, configPath)`, `Uninstall()`, `IsInstalled()` — platform-specific `New()` factory
 - [ ] Test cases: register fresh, idempotent re-register, unregister, existing crontab preserved, empty crontab edge case
 
 ### WIZ-005: Cron Expression Parsing for Status Display
@@ -764,12 +764,12 @@ _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 - `internal/schedule/parse_test.go`
 **Dependencies:** WIZ-004
 **Acceptance Criteria:**
-- [ ] **macOS/Linux (R-8):** Reads user's crontab via `crontab -l`, finds the `multi-kb run` entry by marker comment `# multi-kb scheduled run`, extracts the cron expression (first 5 space-separated fields)
-- [ ] **Next-run computation (R-8):** Uses `github.com/robfig/cron/v3` library — `cron.ParseStandard(expr).Next(time.Now())` to compute next occurrence
-- [ ] **Windows (R-8):** Reads schedule via `schtasks.exe /Query /TN "multi-kb-run" /FO CSV /NH`, parses the next run time from the CSV output
-- [ ] Returns absolute timestamp (e.g., "2026-05-01 14:30:00")
-- [ ] Returns nil/error if no cron entry or scheduled task found
-- [ ] **Go dependency:** `github.com/robfig/cron/v3` (well-maintained, 15k+ stars, supports standard 5-field expressions)
+- [x] **macOS/Linux (R-8):** Reads user's crontab via `crontab -l`, finds the `multi-kb run` entry by marker comment `# multi-kb scheduled run`, extracts the cron expression (first 5 space-separated fields)
+- [x] **Next-run computation (R-8):** Uses `github.com/robfig/cron/v3` library — `cron.ParseStandard(expr).Next(time.Now())` to compute next occurrence
+- [x] **Windows (R-8):** Reads schedule via `schtasks.exe /Query /TN "multi-kb-run" /FO CSV /NH`, parses the next run time from the CSV output
+- [x] Returns absolute timestamp (e.g., "2026-05-01 14:30:00")
+- [x] Returns nil/error if no cron entry or scheduled task found
+- [x] **Go dependency:** `github.com/robfig/cron/v3` (well-maintained, 15k+ stars, supports standard 5-field expressions)
 - [ ] Test cases: common intervals (every 30 min, hourly, daily), next occurrence calculation, missing entry, Windows CSV parsing
 
 ### WIZ-006 [P]: Standalone Subcommands — add-source and add-kb
@@ -779,10 +779,10 @@ _Corresponds to plan.md Phase F. Builds interactive setup and cron integration._
 - `internal/cmd/addkb.go` — full implementation (interactive prompts for new remote KB)
 **Dependencies:** FND-001, WIZ-001
 **Acceptance Criteria:**
-- [ ] `multi-kb add-source`: prompts for directory, harness(es), routing targets, writes to existing config.yaml
-- [ ] `multi-kb add-kb`: prompts for name, endpoint, auth type, profile, region, description, writes to existing config.yaml
-- [ ] Both validate input against config validation rules
-- [ ] Both handle the case where config doesn't exist (suggests running setup first)
+- [x] `multi-kb add-source`: prompts for directory, harness(es), routing targets, writes to existing config.yaml
+- [x] `multi-kb add-kb`: prompts for name, endpoint, auth type, profile, region, description, writes to existing config.yaml
+- [x] Both validate input against config validation rules
+- [x] Both handle the case where config doesn't exist (suggests running setup first)
 - [ ] Test cases: add source to existing config, add KB to existing config, validation failures
 
 ---
@@ -800,14 +800,14 @@ _Corresponds to plan.md Phase G. Builds on-demand approval web server._
 - `internal/approve/assets/embed.go` — `embed.FS` declaration
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] UI lists all pending notes with: title, content preview, target KBs, source conversation, extraction timestamp
-- [ ] Each target KB shown as individual approval target (approve/reject per KB)
-- [ ] Inline edit: title and content fields are editable before approving
-- [ ] Approve button sends POST to `/api/notes/:filename/approve`
-- [ ] Reject button sends POST to `/api/notes/:filename/reject`
-- [ ] UI updates dynamically after each action (removes resolved targets, removes fully resolved notes)
-- [ ] `embed.FS` embeds all assets at compile time
-- [ ] Responsive, functional design (not polished — visual design deferred per spec Out of Scope)
+- [x] UI lists all pending notes with: title, content preview, target KBs, source conversation, extraction timestamp
+- [x] Each target KB shown as individual approval target (approve/reject per KB)
+- [x] Inline edit: title and content fields are editable before approving
+- [x] Approve button sends POST to `/api/notes/:filename/approve`
+- [x] Reject button sends POST to `/api/notes/:filename/reject`
+- [x] UI updates dynamically after each action (removes resolved targets, removes fully resolved notes)
+- [x] `embed.FS` embeds all assets at compile time
+- [x] Responsive, functional design (not polished — visual design deferred per spec Out of Scope)
 
 ### APR-002: HTTP Server Lifecycle
 **Description:** Implement the approval web server lifecycle: auto-port, browser launch, idle timeout, shutdown per spec FR-9.
@@ -816,13 +816,13 @@ _Corresponds to plan.md Phase G. Builds on-demand approval web server._
 - `internal/approve/server_test.go`
 **Dependencies:** APR-001
 **Acceptance Criteria:**
-- [ ] Binds to `localhost` on auto-selected available port
-- [ ] Prints URL to terminal (e.g., "Approval UI running at http://localhost:52431")
-- [ ] Opens user's default browser to the URL
-- [ ] Tracks activity: any HTTP request resets the idle timer
-- [ ] Shuts down after configurable idle timeout (default 5 minutes)
-- [ ] Shuts down immediately when all pending notes are resolved
-- [ ] Ctrl+C terminates immediately (graceful shutdown)
+- [x] Binds to `localhost` on auto-selected available port
+- [x] Prints URL to terminal (e.g., "Approval UI running at http://localhost:52431")
+- [x] Opens user's default browser to the URL
+- [x] Tracks activity: any HTTP request resets the idle timer
+- [x] Shuts down after configurable idle timeout (default 5 minutes)
+- [x] Shuts down immediately when all pending notes are resolved
+- [x] Ctrl+C terminates immediately (graceful shutdown)
 - [ ] Test cases: server starts, idle timeout fires, all-resolved shutdown, manual shutdown
 
 ### APR-003: API Handlers
@@ -832,21 +832,21 @@ _Corresponds to plan.md Phase G. Builds on-demand approval web server._
 - `internal/approve/handlers_test.go`
 **Dependencies:** APR-002, FND-008, FND-006, EXT-007
 **Acceptance Criteria:**
-- [ ] `GET /` — serves embedded HTML
-- [ ] `GET /api/notes` — returns JSON array of all pending notes from `~/.multi-kb/pending/`
-- [ ] `POST /api/notes/:filename/approve` — body: {target_kb, title, content}
+- [x] `GET /` — serves embedded HTML
+- [x] `GET /api/notes` — returns JSON array of all pending notes from `~/.multi-kb/pending/`
+- [x] `POST /api/notes/:filename/approve` — body: {target_kb, title, content}
   - Submits to target KB:
     - **Local KB:** generates UID at approval time via GenerateUID() (FND-004), writes `<UID>.md` file with frontmatter + content
     - **Remote KB:** calls submitKnowledge API (server generates UID)
   - On successful submission: removes target from pending file's target_kbs; deletes file if no targets remain
   - Edits to title/content persist in pending file for remaining targets
   - Returns {remaining_targets}
-- [ ] `POST /api/notes/:filename/reject` — body: {target_kb}
+- [x] `POST /api/notes/:filename/reject` — body: {target_kb}
   - Removes target from target_kbs
   - Deletes file if no targets remain
   - Returns {remaining_targets}
-- [ ] Error responses: 404 (file not found), 400 (target not in array), 502 (submission failed — pending file left unchanged, target NOT removed, user can retry)
-- [ ] **Approval error handling:** On remote KB submission failure (400/401/5xx), return HTTP 502 with error details to the UI. Leave the pending file unchanged (target not removed). No retry logic, no LLM correction — keep the approval flow simple. User can retry from the UI.
+- [x] Error responses: 404 (file not found), 400 (target not in array), 502 (submission failed — pending file left unchanged, target NOT removed, user can retry)
+- [x] **Approval error handling:** On remote KB submission failure (400/401/5xx), return HTTP 502 with error details to the UI. Leave the pending file unchanged (target not removed). No retry logic, no LLM correction — keep the approval flow simple. User can retry from the UI.
 - [ ] Test cases: list notes, approve for one target (local KB — verify UID generated), approve for remote KB, approve last target (file deleted), reject, edit before approve, 404, 400, remote submission failure (502 returned, pending unchanged)
 
 ### APR-004: Approve Command Wiring
@@ -855,10 +855,10 @@ _Corresponds to plan.md Phase G. Builds on-demand approval web server._
 - `internal/cmd/approve.go` — full implementation replacing stub
 **Dependencies:** APR-002, APR-003
 **Acceptance Criteria:**
-- [ ] Starts the approval web server
-- [ ] Checks for pending notes first; if none, prints "No notes awaiting approval" and exits
-- [ ] Prints server URL to terminal
-- [ ] Blocks until server shuts down (idle timeout, all resolved, or Ctrl+C)
+- [x] Starts the approval web server
+- [x] Checks for pending notes first; if none, prints "No notes awaiting approval" and exits
+- [x] Prints server URL to terminal
+- [x] Blocks until server shuts down (idle timeout, all resolved, or Ctrl+C)
 - [ ] Test cases: launch with pending notes, launch with no pending notes
 
 ---
