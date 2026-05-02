@@ -115,7 +115,11 @@ func RunInjection(ctx context.Context, cfg *config.Config, query, sourceDir, har
 					resultsCh <- kbResults{name: t.name, err: err}
 					return
 				}
-				resultsCh <- kbResults{name: t.name, results: recall.LocalResultsToMerged(local)}
+				merged := recall.LocalResultsToMerged(local)
+				for i := range merged {
+					merged[i].SourceKB = t.name
+				}
+				resultsCh <- kbResults{name: t.name, results: merged}
 			} else {
 				remote, err := recall.RecallFromRemoteKB(ctx,
 					t.kbConfig.Endpoint,
@@ -128,7 +132,11 @@ func RunInjection(ctx context.Context, cfg *config.Config, query, sourceDir, har
 					resultsCh <- kbResults{name: t.name, err: err}
 					return
 				}
-				resultsCh <- kbResults{name: t.name, results: recall.RemoteResultsToMerged(remote)}
+				merged := recall.RemoteResultsToMerged(remote)
+				for i := range merged {
+					merged[i].SourceKB = t.name
+				}
+				resultsCh <- kbResults{name: t.name, results: merged}
 			}
 		}(target)
 	}

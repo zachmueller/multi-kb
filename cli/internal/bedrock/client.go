@@ -65,6 +65,11 @@ func (c *Client) InvokeModel(ctx context.Context, systemPrompt, userMessage stri
 	})
 }
 
+// Summarize delegates to InvokeModel, satisfying the translate.LLMSummarizer interface.
+func (c *Client) Summarize(ctx context.Context, systemPrompt, userContent string) (string, error) {
+	return c.InvokeModel(ctx, systemPrompt, userContent)
+}
+
 func (c *Client) invokeOnce(ctx context.Context, systemPrompt, userMessage string) (string, error) {
 	reqBody := claudeRequest{
 		AnthropicVersion: "bedrock-2023-05-31",

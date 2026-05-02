@@ -7,15 +7,13 @@ import (
 	"unicode"
 
 	"github.com/zmueller/multi-kb/internal/bedrock"
+	"github.com/zmueller/multi-kb/internal/recall/prompts"
 )
-
-const keywordSystemPrompt = `Extract 3-5 key search terms from the user's message.
-Return ONLY a JSON array of strings. No explanation. Example: ["kubernetes", "pod scheduling", "node affinity"]`
 
 // DeriveKeywords calls the summarization LLM to derive 3-5 search keywords from a user query.
 // Falls back to mechanical keyword extraction if the LLM call fails.
 func DeriveKeywords(ctx context.Context, client *bedrock.Client, query string) ([]string, error) {
-	text, err := client.InvokeModel(ctx, keywordSystemPrompt, query)
+	text, err := client.InvokeModel(ctx, prompts.KeywordDerivationPrompt, query)
 	if err != nil {
 		return MechanicalKeywords(query), nil
 	}

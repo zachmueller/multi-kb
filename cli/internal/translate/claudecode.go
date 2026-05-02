@@ -200,6 +200,8 @@ func (t *ClaudeCodeTranslator) buildConversation(sessionPath string, rawLines []
 				if block.Text != "" {
 					textParts = append(textParts, block.Text)
 				}
+			case "image":
+				textParts = append(textParts, "[Image]")
 			case "tool_use":
 				result := toolResults[block.ID]
 				summary := summarizeToolUse(block.Name, block.Input, result)

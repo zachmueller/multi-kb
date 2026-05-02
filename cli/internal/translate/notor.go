@@ -208,15 +208,26 @@ func (t *NotorTranslator) buildConversation(sessionPath string, headerRaw []byte
 			continue
 
 		case "system":
+			contentStr := extractNotorContent(msg.Content)
 			// Skip compaction records
 			var parsed map[string]interface{}
-			contentStr := extractNotorContent(msg.Content)
 			if err := json.Unmarshal([]byte(contentStr), &parsed); err == nil {
 				if parsed["type"] == "compaction" {
 					continue
 				}
 			}
-			continue
+			lowerContent := strings.ToLower(contentStr)
+			if strings.Contains(lowerContent, "compaction") || strings.Contains(lowerContent, "context window") {
+				continue
+			}
+			// Non-compaction system messages are kept with role "system"
+			ts, _ := time.Parse(time.RFC3339Nano, msg.Timestamp)
+			if ts.IsZero() {
+				ts = time.Now()
+			}
+			prevProcessed := !ts.After(t.LastProcessed)
+			messages = append(messages, NewMessage("system", contentStr, ts, prevProcessed, nil))
+			lastRole = msg.Role
 
 		case "tool_call":
 			// Pair with result and attach to preceding assistant

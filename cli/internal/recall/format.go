@@ -18,8 +18,12 @@ func FormatInjection(results []MergedResult, kbName string, pendingCount int) st
 		sb.WriteString("## Relevant Knowledge\n\n")
 		for _, r := range results {
 			sb.WriteString(fmt.Sprintf("### %s\n", r.Title))
-			if kbName != "" {
-				sb.WriteString(fmt.Sprintf("*Source: %s*\n\n", kbName))
+			source := r.SourceKB
+			if source == "" {
+				source = kbName
+			}
+			if source != "" {
+				sb.WriteString(fmt.Sprintf("*Source: %s*\n\n", source))
 			}
 			sb.WriteString(r.Content)
 			sb.WriteString("\n\n")

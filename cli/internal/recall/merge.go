@@ -2,10 +2,11 @@ package recall
 
 // MergedResult is a recall result from any KB source (local or remote).
 type MergedResult struct {
-	UID     string
-	Title   string
-	Content string
-	Score   float64 // 0.0 for local results (match-count based)
+	UID      string
+	Title    string
+	Content  string
+	Score    float64 // 0.0 for local results (match-count based)
+	SourceKB string  // name of the KB this result came from; set by callers
 }
 
 // InterleaveResults merges ranked result lists from multiple KBs via round-robin interleaving.

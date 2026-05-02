@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -118,7 +119,7 @@ func runProcess(ctx context.Context, cfgPath, trigger string) error {
 			routed := route.RouteNotes(cfg, notes, source.Directory, session.harness, session.persona)
 			for _, rn := range routed {
 				for _, target := range rn.Targets {
-					if err := submitNote(ctx, cfg, target, rn.Note, skippedKBs); err != nil {
+					if err := submitNote(ctx, cfg, target, rn.Note, skippedKBs, bedrockClient); err != nil {
 						var authErr *submit.AuthError
 						if errors.As(err, &authErr) {
 							skippedKBs[target.KB] = true
@@ -173,6 +174,7 @@ type sessionEntry struct {
 }
 
 // discoverSessions finds all session files to process for a source directory.
+// Files with modification time <= lastProcessed are skipped (already processed).
 func discoverSessions(source config.Source, lastProcessed time.Time) ([]sessionEntry, error) {
 	var sessions []sessionEntry
 
@@ -204,6 +206,23 @@ func discoverSessions(source config.Source, lastProcessed time.Time) ([]sessionE
 				sessions = append(sessions, sessionEntry{path: p, harness: "notor"})
 			}
 		}
+	}
+
+	// Filter out files whose modification time is at or before lastProcessed.
+	// The translators' Discover() methods return all matching files without
+	// time-based filtering, so we apply the filter here.
+	if !lastProcessed.IsZero() {
+		filtered := sessions[:0]
+		for _, s := range sessions {
+			fi, err := os.Stat(s.path)
+			if err != nil {
+				continue // skip files we can't stat
+			}
+			if fi.ModTime().After(lastProcessed) {
+				filtered = append(filtered, s)
+			}
+		}
+		sessions = filtered
 	}
 
 	return sessions, nil
@@ -255,12 +274,16 @@ func translateSession(session sessionEntry, source config.Source, lastProcessed 
 }
 
 // submitNote dispatches a routed note to its target KB based on approval mode.
+// For remote KBs, if the server returns HTTP 400 (ValidationError), the note is
+// sent to the extraction LLM for correction and retried up to 2 times. On
+// persistent validation failure, the note is staged in the pending queue.
 func submitNote(
 	ctx context.Context,
 	cfg *config.Config,
 	target route.ResolvedTarget,
 	note extract.Note,
 	skippedKBs map[string]bool,
+	bedrockClient *bedrock.Client,
 ) error {
 	if skippedKBs[target.KB] {
 		return nil
@@ -295,14 +318,111 @@ func submitNote(
 	if kb == nil {
 		return fmt.Errorf("submit: KB %q not found in config", target.KB)
 	}
-	_, err := submit.SubmitToRemoteKB(ctx, kb.Endpoint, kb.Auth, kb.AWSProfile, kb.AWSRegion,
-		submit.RemoteSubmitRequest{
-			Title:   note.Title,
-			Content: note.Content,
-			Author:  cfg.Author,
-		},
+
+	currentNote := note
+	const maxCorrectionRetries = 2
+
+	for attempt := 0; ; attempt++ {
+		_, err := submit.SubmitToRemoteKB(ctx, kb.Endpoint, kb.Auth, kb.AWSProfile, kb.AWSRegion,
+			submit.RemoteSubmitRequest{
+				Title:   currentNote.Title,
+				Content: currentNote.Content,
+				Author:  cfg.Author,
+			},
+		)
+		if err == nil {
+			return nil
+		}
+
+		// Check for validation error (HTTP 400)
+		var valErr *submit.ValidationError
+		if !errors.As(err, &valErr) {
+			// Not a validation error — return as-is (auth errors, network errors, etc.)
+			return err
+		}
+
+		// Exhausted correction retries — stage in pending queue
+		if attempt >= maxCorrectionRetries {
+			fmt.Fprintf(os.Stderr, "process: persistent validation error for %q after %d correction attempts, staging in pending queue\n",
+				currentNote.Title, maxCorrectionRetries)
+			_, pendErr := route.CreatePending(pendingDir, route.PendingEntry{
+				Title:     currentNote.Title,
+				Content:   currentNote.Content,
+				Author:    cfg.Author,
+				TargetKBs: []string{target.KB},
+			})
+			if pendErr != nil {
+				return fmt.Errorf("submit: staging pending after validation failure: %w", pendErr)
+			}
+			return nil
+		}
+
+		// Ask the extraction LLM to correct the note
+		corrected, corrErr := correctNoteViaLLM(ctx, bedrockClient, currentNote, valErr.Body)
+		if corrErr != nil {
+			// LLM correction itself failed — stage in pending queue
+			fmt.Fprintf(os.Stderr, "process: LLM correction failed for %q: %v, staging in pending queue\n",
+				currentNote.Title, corrErr)
+			_, pendErr := route.CreatePending(pendingDir, route.PendingEntry{
+				Title:     currentNote.Title,
+				Content:   currentNote.Content,
+				Author:    cfg.Author,
+				TargetKBs: []string{target.KB},
+			})
+			if pendErr != nil {
+				return fmt.Errorf("submit: staging pending after LLM correction failure: %w", pendErr)
+			}
+			return nil
+		}
+
+		currentNote = *corrected
+	}
+}
+
+// correctNoteViaLLM sends a rejected note and the server's error to the extraction LLM
+// for correction. Returns the corrected note or an error.
+func correctNoteViaLLM(ctx context.Context, client *bedrock.Client, note extract.Note, serverError string) (*extract.Note, error) {
+	prompt := fmt.Sprintf(
+		"The following note was rejected by the server with this error: %s\n\n"+
+			"Original note:\nTitle: %s\nContent: %s\n\n"+
+			"Please fix the note and return corrected JSON with {title, content} fields only.",
+		serverError, note.Title, note.Content,
 	)
-	return err
+
+	response, err := client.InvokeModel(ctx, "You are a helpful assistant that corrects knowledge base notes to fix validation errors. Return only a JSON object with \"title\" and \"content\" fields.", prompt)
+	if err != nil {
+		return nil, fmt.Errorf("LLM correction invoke failed: %w", err)
+	}
+
+	// Parse the corrected note from LLM response
+	response = strings.TrimSpace(response)
+	// Strip markdown code fences if present
+	if strings.HasPrefix(response, "```") {
+		lines := strings.SplitN(response, "\n", 2)
+		if len(lines) == 2 {
+			response = lines[1]
+		}
+		response = strings.TrimSuffix(strings.TrimSpace(response), "```")
+		response = strings.TrimSpace(response)
+	}
+
+	var corrected struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(response), &corrected); err != nil {
+		return nil, fmt.Errorf("LLM correction returned invalid JSON: %w", err)
+	}
+
+	if strings.TrimSpace(corrected.Title) == "" || strings.TrimSpace(corrected.Content) == "" {
+		return nil, fmt.Errorf("LLM correction returned empty title or content")
+	}
+
+	return &extract.Note{
+		Title:              corrected.Title,
+		Content:            corrected.Content,
+		SuggestedTargetKBs: note.SuggestedTargetKBs,
+	}, nil
 }
 
 func findKBConfig(cfg *config.Config, name string) *config.KnowledgeBase {
