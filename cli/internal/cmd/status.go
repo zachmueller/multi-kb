@@ -8,6 +8,7 @@ import (
 	"github.com/zmueller/multi-kb/internal/config"
 	"github.com/zmueller/multi-kb/internal/logging"
 	"github.com/zmueller/multi-kb/internal/route"
+	"github.com/zmueller/multi-kb/internal/schedule"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -90,9 +91,16 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(out, "\n⚠  %d note(s) awaiting approval. Run 'multi-kb approve' to review.\n", count)
 	}
 
-	// Next scheduled run (placeholder until cron parsing in WIZ-005)
+	// Next scheduled run
 	fmt.Fprintln(out, "\n=== Scheduled Run ===")
-	fmt.Fprintln(out, "Next run: (run 'multi-kb setup' to configure cron schedule)")
+	nextRun, err := schedule.ParseNextRun()
+	if err != nil {
+		fmt.Fprintf(out, "Next run: error reading schedule: %v\n", err)
+	} else if nextRun == nil {
+		fmt.Fprintln(out, "Next run: (run 'multi-kb setup' to configure cron schedule)")
+	} else {
+		fmt.Fprintf(out, "Next run: %s\n", nextRun.Format("2006-01-02 15:04 MST"))
+	}
 
 	return nil
 }
