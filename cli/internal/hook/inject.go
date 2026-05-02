@@ -9,7 +9,6 @@ import (
 
 	"github.com/zmueller/multi-kb/internal/bedrock"
 	"github.com/zmueller/multi-kb/internal/config"
-	"github.com/zmueller/multi-kb/internal/git"
 	"github.com/zmueller/multi-kb/internal/logging"
 	"github.com/zmueller/multi-kb/internal/recall"
 	"github.com/zmueller/multi-kb/internal/route"

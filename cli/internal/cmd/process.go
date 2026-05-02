@@ -36,9 +36,9 @@ func newProcessCmd() *cobra.Command {
 func runProcess(ctx context.Context, cfgPath, trigger string) error {
 	start := time.Now()
 
-	cfg, err := config.LoadConfig(cfgPath)
-	if err != nil {
-		return fmt.Errorf("process: load config: %w", err)
+	cfg, errs := config.Load(cfgPath)
+	if len(errs) > 0 {
+		return fmt.Errorf("process: load config: %w", errs[0])
 	}
 
 	statePath := config.DefaultStatePath()

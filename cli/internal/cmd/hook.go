@@ -89,9 +89,9 @@ func runHook(cfgPath, harness string) error {
 		os.Exit(1)
 	}
 
-	cfg, err := config.LoadConfig(cfgPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hook: load config: %v\n", err)
+	cfg, errs := config.Load(cfgPath)
+	if len(errs) > 0 {
+		fmt.Fprintf(os.Stderr, "hook: load config: %v\n", errs[0])
 		os.Exit(1)
 	}
 
