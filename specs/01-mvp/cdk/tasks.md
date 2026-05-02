@@ -220,14 +220,14 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/constructs/search.test.ts`
 **Dependencies:** ENV-002, SRC-002 (encryption policy must exist before collection)
 **Acceptance Criteria:**
-- [ ] Uses `CfnCollection` (L1) from `aws-cdk-lib/aws-opensearchserverless`
-- [ ] Type: `VECTORSEARCH`
-- [ ] Collection name: configurable, must match `^[a-z][a-z0-9-]{2,27}$`
-- [ ] `standbyReplicas: 'DISABLED'` for MVP cost savings
-- [ ] **`collection.addDependency(encryptionPolicy)`** — collection FAILS without this
-- [ ] **`collection.addDependency(networkPolicy)`** — recommended so network access is ready when collection comes online
-- [ ] Exports: `collection.attrArn`, `collection.attrCollectionEndpoint`, `collection.attrId`, collection name
-- [ ] CDK assertion test: collection resource with type `VECTORSEARCH`; `DependsOn` includes encryption policy
+- [x] Uses `CfnCollection` (L1) from `aws-cdk-lib/aws-opensearchserverless`
+- [x] Type: `VECTORSEARCH`
+- [x] Collection name: configurable, must match `^[a-z][a-z0-9-]{2,27}$`
+- [x] `standbyReplicas: 'DISABLED'` for MVP cost savings
+- [x] **`collection.addDependency(encryptionPolicy)`** — collection FAILS without this
+- [x] **`collection.addDependency(networkPolicy)`** — recommended so network access is ready when collection comes online
+- [x] Exports: `collection.attrArn`, `collection.attrCollectionEndpoint`, `collection.attrId`, collection name
+- [x] CDK assertion test: collection resource with type `VECTORSEARCH`; `DependsOn` includes encryption policy
 
 ### SRC-002: Encryption Policy
 **Description:** Create the OpenSearch Serverless encryption policy per spec FR-7 and research.md R-1.
@@ -252,15 +252,15 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/constructs/search.test.ts`
 **Dependencies:** NET-003 (for AOSS VPC endpoint ID)
 **Acceptance Criteria:**
-- [ ] Uses `CfnSecurityPolicy` with type `network`
-- [ ] **`AllowFromPublic: false`** — do NOT set to `true` (it silently overrides `SourceVPCEs` and `SourceServices`, making the collection fully public)
-- [ ] `SourceVPCEs: [<aoss-vpc-endpoint-id>]` — enables EC2 direct access via VPC endpoint. Note: field name is `SourceVPCEs` (NOT `SourceVPCEndpoints`)
-- [ ] `SourceServices: ["bedrock.amazonaws.com"]` — enables Bedrock service access via AWS internal networking
-- [ ] All field names are case-sensitive: `AllowFromPublic`, `SourceVPCEs`, `SourceServices`, `ResourceType`, `Resource`
-- [ ] Policy JSON is an **array** (unlike encryption policy which is a single object)
-- [ ] Both access paths work: EC2 via VPC endpoint, Bedrock via service private networking
-- [ ] Three-layer security model: network policy (origin) + data access policy (principal) + IAM
-- [ ] CDK assertion test: network security policy exists with `AllowFromPublic: false`, `SourceVPCEs`, and `SourceServices`
+- [x] Uses `CfnSecurityPolicy` with type `network`
+- [x] **`AllowFromPublic: false`** — do NOT set to `true` (it silently overrides `SourceVPCEs` and `SourceServices`, making the collection fully public)
+- [x] `SourceVPCEs: [<aoss-vpc-endpoint-id>]` — enables EC2 direct access via VPC endpoint. Note: field name is `SourceVPCEs` (NOT `SourceVPCEndpoints`)
+- [x] `SourceServices: ["bedrock.amazonaws.com"]` — enables Bedrock service access via AWS internal networking
+- [x] All field names are case-sensitive: `AllowFromPublic`, `SourceVPCEs`, `SourceServices`, `ResourceType`, `Resource`
+- [x] Policy JSON is an **array** (unlike encryption policy which is a single object)
+- [x] Both access paths work: EC2 via VPC endpoint, Bedrock via service private networking
+- [x] Three-layer security model: network policy (origin) + data access policy (principal) + IAM
+- [x] CDK assertion test: network security policy exists with `AllowFromPublic: false`, `SourceVPCEs`, and `SourceServices`
 
 ### SRC-004: Data Access Policy
 **Description:** Create the OpenSearch Serverless data access policy granting access to EC2 role, Bedrock KB service role, and index creation Lambda role per research.md R-1.
@@ -269,16 +269,16 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/constructs/search.test.ts`
 **Dependencies:** SRC-001 (collection name), CMP-001 (EC2 role ARN), KBS-002 (Bedrock KB service role ARN), SRC-006 (index creation Lambda role ARN)
 **Acceptance Criteria:**
-- [ ] Uses `CfnAccessPolicy` with `type: 'data'`
-- [ ] Policy name must match `^[a-z][a-z0-9-]{2,31}$`
-- [ ] **Principals:** EC2 instance role ARN + Bedrock KB service role ARN + index creation Lambda role ARN (all passed as CDK tokens via `JSON.stringify()`)
-- [ ] CDK tokens in `JSON.stringify()` resolve to `Fn::Join`/`Fn::Sub` intrinsics — this is well-supported
-- [ ] Index-level permissions: `aoss:ReadDocument`, `aoss:WriteDocument`, `aoss:CreateIndex`, `aoss:DeleteIndex`, `aoss:UpdateIndex`, `aoss:DescribeIndex`
-- [ ] Collection-level permissions: `aoss:CreateCollectionItems`, `aoss:DeleteCollectionItems`, `aoss:UpdateCollectionItems`, `aoss:DescribeCollectionItems`
-- [ ] Resources: `index/<collection-name>/*` and `collection/<collection-name>`
-- [ ] **No circular dependency:** CDK tokens resolve all forward references. Roles reference collection ARN; policy references role ARNs. CloudFormation determines creation order via implicit `DependsOn`.
-- [ ] **Principals must ALSO have IAM-level `aoss:APIAccessAll`** on the collection ARN in their own IAM policies (AOSS data access policy and IAM policy work together)
-- [ ] CDK assertion test: access policy exists with correct principals and permissions
+- [x] Uses `CfnAccessPolicy` with `type: 'data'`
+- [x] Policy name must match `^[a-z][a-z0-9-]{2,31}$`
+- [x] **Principals:** EC2 instance role ARN + Bedrock KB service role ARN + index creation Lambda role ARN (all passed as CDK tokens via `JSON.stringify()`)
+- [x] CDK tokens in `JSON.stringify()` resolve to `Fn::Join`/`Fn::Sub` intrinsics — this is well-supported
+- [x] Index-level permissions: `aoss:ReadDocument`, `aoss:WriteDocument`, `aoss:CreateIndex`, `aoss:DeleteIndex`, `aoss:UpdateIndex`, `aoss:DescribeIndex`
+- [x] Collection-level permissions: `aoss:CreateCollectionItems`, `aoss:DeleteCollectionItems`, `aoss:UpdateCollectionItems`, `aoss:DescribeCollectionItems`
+- [x] Resources: `index/<collection-name>/*` and `collection/<collection-name>`
+- [x] **No circular dependency:** CDK tokens resolve all forward references. Roles reference collection ARN; policy references role ARNs. CloudFormation determines creation order via implicit `DependsOn`.
+- [x] **Principals must ALSO have IAM-level `aoss:APIAccessAll`** on the collection ARN in their own IAM policies (AOSS data access policy and IAM policy work together)
+- [x] CDK assertion test: access policy exists with correct principals and permissions
 
 ### KBS-001: Bedrock Knowledge Base
 **Description:** Create the Bedrock Knowledge Base with OpenSearch Serverless as the vector store per spec FR-8 and research.md R-2.
@@ -287,19 +287,19 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/constructs/knowledge-base.test.ts`
 **Dependencies:** SRC-001 (collection ARN), KBS-002 (service role), **SRC-006 (vector index must exist before KB creation)**
 **Acceptance Criteria:**
-- [ ] Uses `CfnKnowledgeBase` (L1) from `aws-cdk-lib/aws-bedrock`
-- [ ] `knowledgeBaseConfiguration.type`: `'VECTOR'`
-- [ ] Embedding model: `embeddingModelArn` constructed from configurable model ID (default: `arn:aws:bedrock:{region}::foundation-model/amazon.titan-embed-text-v2:0`)
-- [ ] `storageConfiguration.type`: `'OPENSEARCH_SERVERLESS'`
-- [ ] `opensearchServerlessConfiguration`: `collectionArn`, `vectorIndexName`, and `fieldMapping` (all three fields required)
-- [ ] **Field mappings must match the pre-created index schema (SRC-006):**
+- [x] Uses `CfnKnowledgeBase` (L1) from `aws-cdk-lib/aws-bedrock`
+- [x] `knowledgeBaseConfiguration.type`: `'VECTOR'`
+- [x] Embedding model: `embeddingModelArn` constructed from configurable model ID (default: `arn:aws:bedrock:{region}::foundation-model/amazon.titan-embed-text-v2:0`)
+- [x] `storageConfiguration.type`: `'OPENSEARCH_SERVERLESS'`
+- [x] `opensearchServerlessConfiguration`: `collectionArn`, `vectorIndexName`, and `fieldMapping` (all three fields required)
+- [x] **Field mappings must match the pre-created index schema (SRC-006):**
   - `vectorField`: `'bedrock-knowledge-base-default-vector'`
   - `textField`: `'AMAZON_BEDROCK_TEXT_CHUNK'`
   - `metadataField`: `'AMAZON_BEDROCK_METADATA'`
-- [ ] Role ARN: Bedrock KB service role (KBS-002)
-- [ ] KB depends on SRC-006 custom resource (index must exist before KB)
-- [ ] Exports: `attrKnowledgeBaseId`, `attrKnowledgeBaseArn`
-- [ ] CDK assertion test: KB resource with correct embedding model ARN, storage type, collection ARN, and field mappings
+- [x] Role ARN: Bedrock KB service role (KBS-002)
+- [x] KB depends on SRC-006 custom resource (index must exist before KB)
+- [x] Exports: `attrKnowledgeBaseId`, `attrKnowledgeBaseArn`
+- [x] CDK assertion test: KB resource with correct embedding model ARN, storage type, collection ARN, and field mappings
 
 ### KBS-002: Bedrock KB Service Role
 **Description:** Create the IAM role assumed by Bedrock to access S3, OpenSearch, and the embedding model per research.md R-2.
@@ -308,14 +308,14 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/constructs/knowledge-base.test.ts`
 **Dependencies:** STR-001 (S3 bucket ARN), SRC-001 (collection ARN), ENV-002 (embedding model ID)
 **Acceptance Criteria:**
-- [ ] IAM role with trust policy for `bedrock.amazonaws.com` service principal
-- [ ] Trust policy conditions: `aws:SourceAccount` (account ID) + `ArnLike` condition on `arn:aws:bedrock:{region}:{account}:knowledge-base/*`
-- [ ] Permissions: `s3:GetObject` on `{bucket-arn}/*` + `s3:ListBucket` on bucket ARN (both with `aws:ResourceAccount` condition)
-- [ ] Permissions: `aoss:APIAccessAll` on the collection ARN
-- [ ] **Permissions: `bedrock:InvokeModel` on the foundation model ARN** (e.g., `arn:aws:bedrock:{region}::foundation-model/amazon.titan-embed-text-v2:0`). Note: model ARN uses empty account ID (`::`) because foundation models are AWS-owned.
-- [ ] Least-privilege: no wildcard permissions, all scoped to specific ARNs
-- [ ] Exports: role, role ARN (needed by SRC-004 data access policy and KBS-001)
-- [ ] CDK assertion test: role with correct trust policy (including conditions), 4 permission statements on specific ARNs
+- [x] IAM role with trust policy for `bedrock.amazonaws.com` service principal
+- [x] Trust policy conditions: `aws:SourceAccount` (account ID) + `ArnLike` condition on `arn:aws:bedrock:{region}:{account}:knowledge-base/*`
+- [x] Permissions: `s3:GetObject` on `{bucket-arn}/*` + `s3:ListBucket` on bucket ARN (both with `aws:ResourceAccount` condition)
+- [x] Permissions: `aoss:APIAccessAll` on the collection ARN
+- [x] **Permissions: `bedrock:InvokeModel` on the foundation model ARN** (e.g., `arn:aws:bedrock:{region}::foundation-model/amazon.titan-embed-text-v2:0`). Note: model ARN uses empty account ID (`::`) because foundation models are AWS-owned.
+- [x] Least-privilege: no wildcard permissions, all scoped to specific ARNs
+- [x] Exports: role, role ARN (needed by SRC-004 data access policy and KBS-001)
+- [x] CDK assertion test: role with correct trust policy (including conditions), 4 permission statements on specific ARNs
 
 ### KBS-003: Bedrock KB Data Source (S3)
 **Description:** Create the Bedrock Knowledge Base data source pointing to the S3 bucket with "no chunking" strategy per spec FR-8.
@@ -324,12 +324,12 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/constructs/knowledge-base.test.ts`
 **Dependencies:** KBS-001 (KB ID), STR-001 (S3 bucket ARN)
 **Acceptance Criteria:**
-- [ ] Uses `CfnDataSource` (L1) from `aws-bedrock`
-- [ ] Linked to the Knowledge Base (KBS-001)
-- [ ] S3 configuration: points to the KB bucket
-- [ ] Chunking strategy: `NONE` (each note is its own chunk)
-- [ ] Exports: data source ID (needed by EC2 config for StartIngestionJob)
-- [ ] CDK assertion test: data source resource with chunking strategy `NONE` and correct S3 bucket
+- [x] Uses `CfnDataSource` (L1) from `aws-bedrock`
+- [x] Linked to the Knowledge Base (KBS-001)
+- [x] S3 configuration: points to the KB bucket
+- [x] Chunking strategy: `NONE` (each note is its own chunk)
+- [x] Exports: data source ID (needed by EC2 config for StartIngestionJob)
+- [x] CDK assertion test: data source resource with chunking strategy `NONE` and correct S3 bucket
 
 ### SRC-006: Custom Resource — OpenSearch Vector Index Creation
 **Description:** Create a CDK custom resource (Lambda-backed) that pre-creates the OpenSearch vector index. Bedrock KB does NOT auto-create the index via CloudFormation — this is a console-only feature (research.md R-2).
@@ -339,22 +339,22 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `test/lambda/custom-resource/create-index.test.ts` — handler unit tests
 **Dependencies:** SRC-001 (collection endpoint, collection name), SRC-004 (data access policy — index creation Lambda needs access), NET-003 (AOSS VPC endpoint — Lambda must be in VPC to reach collection)
 **Acceptance Criteria:**
-- [ ] CDK `Provider` + `CustomResource` construct backed by a Lambda function
-- [ ] Lambda sends PUT request to OpenSearch collection endpoint to create index with schema:
+- [x] CDK `Provider` + `CustomResource` construct backed by a Lambda function
+- [x] Lambda sends PUT request to OpenSearch collection endpoint to create index with schema:
   - `settings.index.knn`: `true`
   - `bedrock-knowledge-base-default-vector` field: `knn_vector`, 1024 dimensions, `faiss` engine, `hnsw` method, `l2` space type
   - `AMAZON_BEDROCK_TEXT_CHUNK` field: `text`, `index: true`
   - `AMAZON_BEDROCK_METADATA` field: `text`, `index: false`
-- [ ] Index name configurable (default: `'bedrock-kb-index'`)
-- [ ] Lambda is VPC-attached (needs to reach collection via AOSS VPC endpoint)
-- [ ] Lambda security group: same EC2 SG or a separate SG with outbound 443 to endpoint SG
-- [ ] Lambda IAM role: `aoss:APIAccessAll` on collection ARN
-- [ ] Lambda role must be listed in AOSS data access policy (SRC-004) principals
-- [ ] **Dependency ordering:** The Lambda IAM role is created as part of this construct (before the custom resource executes). The role ARN is passed to SRC-004 for inclusion in the data access policy. The custom resource execution (`CustomResource` node) must depend on SRC-004 being created — use `customResource.node.addDependency(dataAccessPolicy)` to ensure the policy grants access before the Lambda attempts to create the index.
-- [ ] On Create: creates the index; on Update: no-op (index schema is immutable); on Delete: optionally deletes the index
-- [ ] Idempotent: if index already exists, succeeds without error
-- [ ] Vector dimension (1024) matches the embedding model configuration in KBS-001
-- [ ] CDK assertion test: custom resource exists; Lambda is VPC-attached; IAM role has `aoss:APIAccessAll`
+- [x] Index name configurable (default: `'bedrock-kb-index'`)
+- [x] Lambda is VPC-attached (needs to reach collection via AOSS VPC endpoint)
+- [x] Lambda security group: same EC2 SG or a separate SG with outbound 443 to endpoint SG
+- [x] Lambda IAM role: `aoss:APIAccessAll` on collection ARN
+- [x] Lambda role must be listed in AOSS data access policy (SRC-004) principals
+- [x] **Dependency ordering:** The Lambda IAM role is created as part of this construct (before the custom resource executes). The role ARN is passed to SRC-004 for inclusion in the data access policy. The custom resource execution (`CustomResource` node) must depend on SRC-004 being created — use `customResource.node.addDependency(dataAccessPolicy)` to ensure the policy grants access before the Lambda attempts to create the index.
+- [x] On Create: creates the index; on Update: no-op (index schema is immutable); on Delete: optionally deletes the index
+- [x] Idempotent: if index already exists, succeeds without error
+- [x] Vector dimension (1024) matches the embedding model configuration in KBS-001
+- [x] CDK assertion test: custom resource exists; Lambda is VPC-attached; IAM role has `aoss:APIAccessAll`
 
 ### SRC-005: Stack Outputs — Search
 **Description:** Add CloudFormation outputs for search infrastructure.
@@ -407,14 +407,14 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - `test/lambda/submit.test.ts` — handler unit tests
 **Dependencies:** LMB-001
 **Acceptance Criteria:**
-- [ ] Parses `event.body` (JSON string from API Gateway proxy)
-- [ ] Calls validation; returns HTTP 400 with `{ errors: {...} }` on failure (only failed fields)
-- [ ] Generates UID (16-char Crockford base32) and `submitted_at` (ISO 8601 current time)
-- [ ] Sends SQS message: `{ uid, title, content, author, submitted_at }` serialized as JSON body
-- [ ] Returns HTTP 202: `{ uid, request_id: event.requestContext.requestId }`
-- [ ] On SQS failure: returns HTTP 500 with generic message; logs full error
-- [ ] Reads `SQS_QUEUE_URL` from `process.env`
-- [ ] Test (mocked SQS): valid submission, each field validation failure (6 cases), whitespace-only fields, SQS send failure
+- [x] Parses `event.body` (JSON string from API Gateway proxy)
+- [x] Calls validation; returns HTTP 400 with `{ errors: {...} }` on failure (only failed fields)
+- [x] Generates UID (16-char Crockford base32) and `submitted_at` (ISO 8601 current time)
+- [x] Sends SQS message: `{ uid, title, content, author, submitted_at }` serialized as JSON body
+- [x] Returns HTTP 202: `{ uid, request_id: event.requestContext.requestId }`
+- [x] On SQS failure: returns HTTP 500 with generic message; logs full error
+- [x] Reads `SQS_QUEUE_URL` from `process.env`
+- [x] Test (mocked SQS): valid submission, each field validation failure (6 cases), whitespace-only fields, SQS send failure
 
 ### LMB-003: submitKnowledge CDK Construct
 **Description:** Create the CDK construct that provisions the submitKnowledge Lambda with correct runtime, permissions, and environment.
@@ -423,13 +423,13 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - `test/constructs/submit-lambda.test.ts`
 **Dependencies:** LMB-002, STR-003 (SQS queue)
 **Acceptance Criteria:**
-- [ ] Uses `NodejsFunction` with esbuild bundling
-- [ ] Runtime: `nodejs22.x`, architecture: ARM64
-- [ ] Memory: 256 MB, timeout: 10 seconds
-- [ ] Environment variable: `SQS_QUEUE_URL` from queue construct
-- [ ] IAM: `sqs:SendMessage` scoped to queue ARN only
-- [ ] Exports: Lambda function (for API Gateway integration)
-- [ ] CDK assertion test: Lambda runtime, memory, timeout; IAM policy with `sqs:SendMessage` on specific ARN; environment variable set
+- [x] Uses `NodejsFunction` with esbuild bundling
+- [x] Runtime: `nodejs22.x`, architecture: ARM64
+- [x] Memory: 256 MB, timeout: 10 seconds
+- [x] Environment variable: `SQS_QUEUE_URL` from queue construct
+- [x] IAM: `sqs:SendMessage` scoped to queue ARN only
+- [x] Exports: Lambda function (for API Gateway integration)
+- [x] CDK assertion test: Lambda runtime, memory, timeout; IAM policy with `sqs:SendMessage` on specific ARN; environment variable set
 
 ### LMB-004: recallKnowledge Lambda Handler
 **Description:** Implement the recallKnowledge Lambda per spec FR-9 and contracts/recall-knowledge.md.
@@ -438,23 +438,23 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - `test/lambda/recall.test.ts` — handler unit tests
 **Dependencies:** LMB-001, R-2 research (Bedrock KB metadata extraction — determines how uid/title are extracted from Retrieve results), PRM-003 (coverage assessment prompt)
 **Acceptance Criteria:**
-- [ ] Parses `event.body` — extracts `query` (required, string) and `limit` (optional, integer, default 10)
-- [ ] Validates `query`: present, non-empty string; returns HTTP 400 on failure
-- [ ] Validates `limit`: must be integer >= 1 and <= 100; returns HTTP 400 with `{ errors: { limit: "must be an integer between 1 and 100" } }` if out of range. Non-integer values return 400. Default 10 if omitted.
-- [ ] Calls Bedrock Retrieve API with `knowledgeBaseId`, `retrievalQuery.text = query`
-- [ ] Optionally filters to `status: active` when `EXCLUDE_PENDING` is `true`
-- [ ] Maps Retrieve response to `[{ uid, title, content, score }]` sorted by descending score
-- [ ] Coverage assessment: if top score < `COVERAGE_SCORE_THRESHOLD`:
+- [x] Parses `event.body` — extracts `query` (required, string) and `limit` (optional, integer, default 10)
+- [x] Validates `query`: present, non-empty string; returns HTTP 400 on failure
+- [x] Validates `limit`: must be integer >= 1 and <= 100; returns HTTP 400 with `{ errors: { limit: "must be an integer between 1 and 100" } }` if out of range. Non-integer values return 400. Default 10 if omitted.
+- [x] Calls Bedrock Retrieve API with `knowledgeBaseId`, `retrievalQuery.text = query`
+- [x] Optionally filters to `status: active` when `EXCLUDE_PENDING` is `true`
+- [x] Maps Retrieve response to `[{ uid, title, content, score }]` sorted by descending score
+- [x] Coverage assessment: if top score < `COVERAGE_SCORE_THRESHOLD`:
   - Calls InvokeModel (coverage LLM) with query + result summaries
   - If gap detected: follow-up Retrieve query
   - Deduplicates by UID, sorts by score, truncates to `limit`
   - On any coverage failure: falls back to original results silently
-- [ ] Coverage model ARN construction: `arn:aws:bedrock:${AWS_REGION}::foundation-model/${COVERAGE_MODEL_ID}` (empty account ID for AWS-owned foundation models; see [contracts/recall-knowledge.md](contracts/recall-knowledge.md#coverage-model-arn-construction))
-- [ ] Writes recall log to S3 synchronously: `recall-logs/<YYYY-MM-DD>/<request-id>.json` (date partition is UTC)
+- [x] Coverage model ARN construction: `arn:aws:bedrock:${AWS_REGION}::foundation-model/${COVERAGE_MODEL_ID}` (empty account ID for AWS-owned foundation models; see [contracts/recall-knowledge.md](contracts/recall-knowledge.md#coverage-model-arn-construction))
+- [x] Writes recall log to S3 synchronously: `recall-logs/<YYYY-MM-DD>/<request-id>.json` (date partition is UTC)
   - Best-effort: S3 failure logged but doesn't affect response
-- [ ] Returns HTTP 200 with results array (or empty array)
-- [ ] Reads env vars: `KNOWLEDGE_BASE_ID`, `BUCKET_NAME`, `COVERAGE_MODEL_ID`, `COVERAGE_SCORE_THRESHOLD`, `EXCLUDE_PENDING`
-- [ ] Test (mocked Bedrock/S3): successful recall, empty results, coverage assessment trigger, coverage fallback, S3 write failure, validation error, limit=0 → 400, limit=-1 → 400, limit=101 → 400, limit=50 → 200, limit omitted → uses default 10
+- [x] Returns HTTP 200 with results array (or empty array)
+- [x] Reads env vars: `KNOWLEDGE_BASE_ID`, `BUCKET_NAME`, `COVERAGE_MODEL_ID`, `COVERAGE_SCORE_THRESHOLD`, `EXCLUDE_PENDING`
+- [x] Test (mocked Bedrock/S3): successful recall, empty results, coverage assessment trigger, coverage fallback, S3 write failure, validation error, limit=0 → 400, limit=-1 → 400, limit=101 → 400, limit=50 → 200, limit omitted → uses default 10
 
 ### LMB-005: recallKnowledge CDK Construct
 **Description:** Create the CDK construct that provisions the recallKnowledge Lambda with correct runtime, permissions, and environment.
@@ -463,14 +463,14 @@ _Corresponds to plan.md Phase D. Builds API handler functions._
 - `test/constructs/recall-lambda.test.ts`
 **Dependencies:** LMB-004, KBS-001 (KB ID), STR-001 (S3 bucket)
 **Acceptance Criteria:**
-- [ ] Uses `NodejsFunction` with esbuild bundling
-- [ ] Runtime: `nodejs22.x`, architecture: ARM64
-- [ ] Memory: 1024 MB, timeout: 30 seconds
-- [ ] Environment variables: `KNOWLEDGE_BASE_ID`, `BUCKET_NAME`, `COVERAGE_MODEL_ID`, `COVERAGE_SCORE_THRESHOLD`, `EXCLUDE_PENDING`
-- [ ] IAM: `bedrock:Retrieve` on KB ARN; `bedrock:InvokeModel` on `arn:aws:bedrock:{region}::foundation-model/{coverageModelId}` (empty account ID for AWS-owned foundation models); `s3:PutObject` on `{bucket-arn}/recall-logs/*`
-- [ ] Lambda is NOT VPC-attached (calls public Bedrock endpoints)
-- [ ] Exports: Lambda function (for API Gateway integration)
-- [ ] CDK assertion test: Lambda runtime, memory, timeout; IAM with three permission sets scoped to specific ARNs; environment variables; NOT in VPC
+- [x] Uses `NodejsFunction` with esbuild bundling
+- [x] Runtime: `nodejs22.x`, architecture: ARM64
+- [x] Memory: 1024 MB, timeout: 30 seconds
+- [x] Environment variables: `KNOWLEDGE_BASE_ID`, `BUCKET_NAME`, `COVERAGE_MODEL_ID`, `COVERAGE_SCORE_THRESHOLD`, `EXCLUDE_PENDING`
+- [x] IAM: `bedrock:Retrieve` on KB ARN; `bedrock:InvokeModel` on `arn:aws:bedrock:{region}::foundation-model/{coverageModelId}` (empty account ID for AWS-owned foundation models); `s3:PutObject` on `{bucket-arn}/recall-logs/*`
+- [x] Lambda is NOT VPC-attached (calls public Bedrock endpoints)
+- [x] Exports: Lambda function (for API Gateway integration)
+- [x] CDK assertion test: Lambda runtime, memory, timeout; IAM with three permission sets scoped to specific ARNs; environment variables; NOT in VPC
 
 ---
 

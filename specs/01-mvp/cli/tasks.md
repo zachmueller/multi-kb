@@ -342,18 +342,18 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/bedrock/client_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Creates AWS config with named SSO profile support via `config.WithSharedConfigProfile()` (R-2 Section 1)
-- [ ] Configures BedrockRuntime client for specified region via `config.WithRegion()`
-- [ ] Sets HTTP client timeout to 5 minutes via `config.WithHTTPClient()` (R-2 Section 8 — Claude models can take minutes for large context windows)
-- [ ] InvokeModel sends `anthropic_version: "bedrock-2023-05-31"` + system prompt + user message in Claude Messages API format (R-2 Section 3)
-- [ ] Model ID set in `InvokeModelInput.ModelId`, NOT in the JSON body; `ContentType` set to `"application/json"` (R-2 Section 2)
-- [ ] Parses response body JSON, extracts text from `content` array blocks where `type == "text"` (R-2 Section 3)
-- [ ] SDK-level retry: 5 attempts via `config.WithRetryMaxAttempts(5)` — handles ThrottlingException, ServiceUnavailableException, InternalServerException, network errors automatically (R-2 Section 6)
-- [ ] Application-level retry: generic `RetryWithBackoff[T]` function for malformed JSON output and ModelTimeoutException (R-2 Section 6)
-- [ ] Error classification via `classifyError()` using `errors.As()` to match 12 Bedrock error types + SSO `InvalidTokenError` and wrap with sentinel errors (R-2 Section 6)
-- [ ] Detects expired SSO credentials (`ssocreds.InvalidTokenError`) and surfaces user-friendly "run `aws sso login`" message (R-2 Section 7)
-- [ ] Supports configurable model ID (e.g., `anthropic.claude-sonnet-4-20250514`, cross-region `us.anthropic.claude-sonnet-4-20250514`)
-- [ ] Test cases: successful invocation (mocked), retry on throttle, retry exhaustion, profile resolution, SSO expired detection, malformed JSON retry, ModelTimeout retry
+- [x] Creates AWS config with named SSO profile support via `config.WithSharedConfigProfile()` (R-2 Section 1)
+- [x] Configures BedrockRuntime client for specified region via `config.WithRegion()`
+- [x] Sets HTTP client timeout to 5 minutes via `config.WithHTTPClient()` (R-2 Section 8 — Claude models can take minutes for large context windows)
+- [x] InvokeModel sends `anthropic_version: "bedrock-2023-05-31"` + system prompt + user message in Claude Messages API format (R-2 Section 3)
+- [x] Model ID set in `InvokeModelInput.ModelId`, NOT in the JSON body; `ContentType` set to `"application/json"` (R-2 Section 2)
+- [x] Parses response body JSON, extracts text from `content` array blocks where `type == "text"` (R-2 Section 3)
+- [x] SDK-level retry: 5 attempts via `config.WithRetryMaxAttempts(5)` — handles ThrottlingException, ServiceUnavailableException, InternalServerException, network errors automatically (R-2 Section 6)
+- [x] Application-level retry: generic `RetryWithBackoff[T]` function for malformed JSON output and ModelTimeoutException (R-2 Section 6)
+- [x] Error classification via `classifyError()` using `errors.As()` to match 12 Bedrock error types + SSO `InvalidTokenError` and wrap with sentinel errors (R-2 Section 6)
+- [x] Detects expired SSO credentials (`ssocreds.InvalidTokenError`) and surfaces user-friendly "run `aws sso login`" message (R-2 Section 7)
+- [x] Supports configurable model ID (e.g., `anthropic.claude-sonnet-4-20250514`, cross-region `us.anthropic.claude-sonnet-4-20250514`)
+- [x] Test cases: successful invocation (mocked), retry on throttle, retry exhaustion, profile resolution, SSO expired detection, malformed JSON retry, ModelTimeout retry
 
 ### EXT-002: Extraction System Prompt Construction
 **Description:** Build the extraction system prompt from hardcoded base + exclusion rules + optional append file per contracts/extraction-output.md.
@@ -362,11 +362,11 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/extract/prompt_test.go`
 **Dependencies:** FND-001
 **Acceptance Criteria:**
-- [ ] Hardcoded base prompt defines: extraction task, output format (JSON array of {title, content, suggested_target_kbs}), quality guidelines, previously_processed handling
-- [ ] Appends exclusion rules section when `exclusion_rules` is non-empty: header "Content exclusion rules — never include in notes destined for non-local KBs" + bulleted list of strings
-- [ ] Reads and appends `~/.multi-kb/prompts/extraction-append.md` if it exists (fresh read each call)
-- [ ] Returns combined prompt string
-- [ ] Test cases: base only, with exclusion rules, with append file, with both, append file missing (no error)
+- [x] Hardcoded base prompt defines: extraction task, output format (JSON array of {title, content, suggested_target_kbs}), quality guidelines, previously_processed handling
+- [x] Appends exclusion rules section when `exclusion_rules` is non-empty: header "Content exclusion rules — never include in notes destined for non-local KBs" + bulleted list of strings
+- [x] Reads and appends `~/.multi-kb/prompts/extraction-append.md` if it exists (fresh read each call)
+- [x] Returns combined prompt string
+- [x] Test cases: base only, with exclusion rules, with append file, with both, append file missing (no error)
 
 ### EXT-003: Single-Pass Extraction
 **Description:** Implement single-pass extraction: send translated conversation to Bedrock, parse JSON array output per contracts/extraction-output.md.
@@ -377,13 +377,13 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/extract/parse_test.go`
 **Dependencies:** EXT-001, EXT-002, TRN-001
 **Acceptance Criteria:**
-- [ ] Sends full intermediate JSONL conversation as user message with constructed system prompt
-- [ ] Parses JSON array response into []Note structs (title, content, suggested_target_kbs)
-- [ ] Partial acceptance: valid entries accepted, invalid entries logged and dropped
-- [ ] Empty array is valid (no knowledge extracted)
-- [ ] Validates extracted notes: title non-empty ≤255 chars, content non-empty ≤100,000 characters, suggested_target_kbs is string array
-- [ ] Notes with content exceeding 100K characters are logged as extraction warnings and dropped (not included in results)
-- [ ] Test cases: successful extraction, empty result, partial valid JSON, completely invalid JSON, field validation
+- [x] Sends full intermediate JSONL conversation as user message with constructed system prompt
+- [x] Parses JSON array response into []Note structs (title, content, suggested_target_kbs)
+- [x] Partial acceptance: valid entries accepted, invalid entries logged and dropped
+- [x] Empty array is valid (no knowledge extracted)
+- [x] Validates extracted notes: title non-empty ≤255 chars, content non-empty ≤100,000 characters, suggested_target_kbs is string array
+- [x] Notes with content exceeding 100K characters are logged as extraction warnings and dropped (not included in results)
+- [x] Test cases: successful extraction, empty result, partial valid JSON, completely invalid JSON, field validation
 
 ### EXT-004: Chunked Extraction for Oversized Conversations
 **Description:** Implement conversation chunking for >700K token conversations per spec FR-5.
@@ -391,14 +391,14 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/extract/extract.go` — ExtractChunked (splits, summarizes, iterates)
 **Dependencies:** EXT-003, FND-011, PRM-005
 **Acceptance Criteria:**
-- [ ] Detects when translated conversation exceeds 700K tokens (conservative threshold from FND-011's `ChunkingThreshold` constant, leaves headroom for token estimation error)
-- [ ] Splits at message boundaries (never mid-message) near the 700K mark
-- [ ] First chunk processed normally via Extract
-- [ ] Each processed chunk summarized to ~10-20K tokens using extraction model with summarization-specific prompt (PRM-005)
-- [ ] **Latest summary only** carried forward: each chunk's summary replaces the previous chunk's summary as the preamble for the next chunk (not accumulated). Keeps preamble bounded at ~10-20K regardless of conversation length.
-- [ ] Context preamble formatted as a leading section in the user message (before the JSONL conversation content)
-- [ ] All extracted notes from all chunks combined into single result
-- [ ] Test cases: conversation under threshold (no chunking), over threshold (2 chunks), very large (3+ chunks), split at message boundary, verify preamble replacement (not accumulation)
+- [x] Detects when translated conversation exceeds 700K tokens (conservative threshold from FND-011's `ChunkingThreshold` constant, leaves headroom for token estimation error)
+- [x] Splits at message boundaries (never mid-message) near the 700K mark
+- [x] First chunk processed normally via Extract
+- [x] Each processed chunk summarized to ~10-20K tokens using extraction model with summarization-specific prompt (PRM-005)
+- [x] **Latest summary only** carried forward: each chunk's summary replaces the previous chunk's summary as the preamble for the next chunk (not accumulated). Keeps preamble bounded at ~10-20K regardless of conversation length.
+- [x] Context preamble formatted as a leading section in the user message (before the JSONL conversation content)
+- [x] All extracted notes from all chunks combined into single result
+- [x] Test cases: conversation under threshold (no chunking), over threshold (2 chunks), very large (3+ chunks), split at message boundary, verify preamble replacement (not accumulation)
 
 ### EXT-005: Extraction Error Handling
 **Description:** Implement retry logic and error logging for extraction failures per spec FR-6 and contracts/extraction-output.md.
@@ -406,12 +406,12 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/extract/extract.go` — retry wrapper around extraction calls
 **Dependencies:** EXT-003, FND-009
 **Acceptance Criteria:**
-- [ ] Bedrock API failures (throttle, timeout, network): retry up to 3 times with exponential backoff
-- [ ] Malformed JSON output: retry up to 3 times (fresh API call each retry)
-- [ ] Partially valid JSON arrays: accept valid entries, log invalid ones
-- [ ] After 3 retries with no usable output: skip conversation, log to `extraction-errors.jsonl`
-- [ ] Error log entry includes: conversation_id, source_path, error details, retry count
-- [ ] Test cases: successful after retry, exhausted retries, partial acceptance
+- [x] Bedrock API failures (throttle, timeout, network): retry up to 3 times with exponential backoff
+- [x] Malformed JSON output: retry up to 3 times (fresh API call each retry)
+- [x] Partially valid JSON arrays: accept valid entries, log invalid ones
+- [x] After 3 retries with no usable output: skip conversation, log to `extraction-errors.jsonl`
+- [x] Error log entry includes: conversation_id, source_path, error details, retry count
+- [x] Test cases: successful after retry, exhausted retries, partial acceptance
 
 ### EXT-006: Routing Engine
 **Description:** Implement routing rules that determine which KBs receive each extracted note per spec FR-3 and contracts/extraction-output.md Routing Integration.
@@ -420,14 +420,14 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/route/route_test.go`
 **Dependencies:** FND-001, FND-008
 **Acceptance Criteria:**
-- [ ] For each note, collects target KBs:
+- [x] For each note, collects target KBs:
   - All `always`-mode KBs for the directory → unconditionally added
   - `consider`-mode KBs whose names appear in `suggested_target_kbs` → added
-- [ ] Applies per-harness and per-harness+persona overrides (overrides replace, not merge)
-- [ ] Suggested KB names not matching any configured KB → silently dropped
-- [ ] If no targets after resolution + no always-mode KBs → fallback to `local/default`
-- [ ] For each target: checks approval mode → dispatches to auto-approve or pending queue
-- [ ] Test cases: always-mode routing, consider-mode routing, override resolution, empty suggestions (fallback), mixed approval modes, unknown KB names dropped
+- [x] Applies per-harness and per-harness+persona overrides (overrides replace, not merge)
+- [x] Suggested KB names not matching any configured KB → silently dropped
+- [x] If no targets after resolution + no always-mode KBs → fallback to `local/default`
+- [x] For each target: checks approval mode → dispatches to auto-approve or pending queue
+- [x] Test cases: always-mode routing, consider-mode routing, override resolution, empty suggestions (fallback), mixed approval modes, unknown KB names dropped
 
 ### EXT-007: Remote KB submitKnowledge Client
 **Description:** Implement the remote KB submission client per contracts/submit-knowledge.md.
@@ -436,15 +436,15 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/submit/remote_test.go`
 **Dependencies:** EXT-001, FND-001
 **Acceptance Criteria:**
-- [ ] Sends SigV4-signed POST to `{endpoint}/submitKnowledge` with {title, content, author}
-- [ ] For `iam` auth: signs with configured AWS profile via SigV4; for `federate` auth: sends plain HTTP POST with no auth headers (the network layer handles identity transparently)
-- [ ] Pre-flight validation: title ≤255 chars, content ≤100K chars, author ≤100 chars
-- [ ] Self-throttle: max 10 requests/second per target KB
-- [ ] HTTP 202: success (UID logged but not stored)
-- [ ] HTTP 400: pass error + original note to extraction LLM for correction, retry up to 2 times; on persistent failure, stage in pending queue. **Note:** This LLM correction only applies in the capture processing pipeline (EXT-008 path). The approval web server (APR-003) does NOT use LLM correction — it returns 502 immediately.
-- [ ] HTTP 401/403: log error, skip remaining submissions to this KB for the run, surface credential refresh guidance
-- [ ] HTTP 5xx / network: retry 3 times with exponential backoff; on persistent failure, log and continue
-- [ ] Test cases: successful submission, throttling, 400 correction flow, 401 skip behavior, 5xx retry
+- [x] Sends SigV4-signed POST to `{endpoint}/submitKnowledge` with {title, content, author}
+- [x] For `iam` auth: signs with configured AWS profile via SigV4; for `federate` auth: sends plain HTTP POST with no auth headers (the network layer handles identity transparently)
+- [x] Pre-flight validation: title ≤255 chars, content ≤100K chars, author ≤100 chars
+- [x] Self-throttle: max 10 requests/second per target KB
+- [x] HTTP 202: success (UID logged but not stored)
+- [x] HTTP 400: pass error + original note to extraction LLM for correction, retry up to 2 times; on persistent failure, stage in pending queue. **Note:** This LLM correction only applies in the capture processing pipeline (EXT-008 path). The approval web server (APR-003) does NOT use LLM correction — it returns 502 immediately.
+- [x] HTTP 401/403: log error, skip remaining submissions to this KB for the run, surface credential refresh guidance
+- [x] HTTP 5xx / network: retry 3 times with exponential backoff; on persistent failure, log and continue
+- [x] Test cases: successful submission, throttling, 400 correction flow, 401 skip behavior, 5xx retry
 
 ### EXT-008: Capture Processing Orchestrator (`multi-kb process`)
 **Description:** Wire up the full capture pipeline: scan directories → translate → extract → route → submit/stage per spec FR-3.
@@ -452,16 +452,16 @@ _Corresponds to plan.md Phase C. Builds LLM-powered extraction and routing._
 - `internal/cmd/process.go` — full implementation replacing stub
 **Dependencies:** FND-001, FND-002, FND-003, FND-006, FND-009, TRN-002, TRN-003, TRN-004, EXT-003, EXT-004, EXT-005, EXT-006, EXT-007
 **Acceptance Criteria:**
-- [ ] Acquires lock (exits with message if held)
-- [ ] Reads config and state
-- [ ] For each tracked directory: identifies conversations modified since `last_processed`
-- [ ] For each modified conversation: translates → extracts → routes → submits/stages
-- [ ] Updates `last_processed` to the last-modified time of the final processed file per directory
-- [ ] Writes atomic state update
-- [ ] Appends run log entry with all counts
-- [ ] Releases lock
-- [ ] Handles partial failures: continues processing remaining conversations/directories after errors
-- [ ] Test cases: end-to-end with mocked Bedrock (happy path), no new conversations (no-op), lock contention, extraction failure + continue
+- [x] Acquires lock (exits with message if held)
+- [x] Reads config and state
+- [x] For each tracked directory: identifies conversations modified since `last_processed`
+- [x] For each modified conversation: translates → extracts → routes → submits/stages
+- [x] Updates `last_processed` to the last-modified time of the final processed file per directory
+- [x] Writes atomic state update
+- [x] Appends run log entry with all counts
+- [x] Releases lock
+- [x] Handles partial failures: continues processing remaining conversations/directories after errors
+- [x] Test cases: end-to-end with mocked Bedrock (happy path), no new conversations (no-op), lock contention, extraction failure + continue
 
 ---
 
@@ -476,8 +476,8 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - `internal/hook/claudecode_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] **Settings file (R-5):** Reads and writes `~/.claude/settings.json` using JSON read-modify-write. Handles cases: file doesn't exist, `hooks` key absent, `UserPromptSubmit` key absent.
-- [ ] **Hook entry format (R-5):** Adds entry to `hooks.UserPromptSubmit` array:
+- [x] **Settings file (R-5):** Reads and writes `~/.claude/settings.json` using JSON read-modify-write. Handles cases: file doesn't exist, `hooks` key absent, `UserPromptSubmit` key absent.
+- [x] **Hook entry format (R-5):** Adds entry to `hooks.UserPromptSubmit` array:
   ```json
   {
     "matcher": "*",
@@ -490,11 +490,11 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
     ]
   }
   ```
-- [ ] Appends alongside any pre-existing hooks in the `UserPromptSubmit` array (never overwrites other entries)
-- [ ] **Idempotency (R-5):** Before appending, scans existing entries for a command containing `multi-kb hook`. If found, updates the existing entry rather than duplicating.
-- [ ] UnregisterClaudeCodeHook removes only the multi-kb hook entry from the array
-- [ ] Preserves all other settings in the file (permissions, env, model, other hook events)
-- [ ] Test cases: register to empty settings, register alongside existing hooks, idempotent re-register, unregister, file doesn't exist yet, malformed settings file
+- [x] Appends alongside any pre-existing hooks in the `UserPromptSubmit` array (never overwrites other entries)
+- [x] **Idempotency (R-5):** Before appending, scans existing entries for a command containing `multi-kb hook`. If found, updates the existing entry rather than duplicating.
+- [x] UnregisterClaudeCodeHook removes only the multi-kb hook entry from the array
+- [x] Preserves all other settings in the file (permissions, env, model, other hook events)
+- [x] Test cases: register to empty settings, register alongside existing hooks, idempotent re-register, unregister, file doesn't exist yet, malformed settings file
 
 ### HKI-002 [P]: Notor Hook Registration
 **Description:** Implement programmatic registration of a conversation-start hook in Notor per [research.md R-6](research.md#r-6-notor-hook-registration) and spec FR-7. Uses the user automation approach: writes a Markdown automation file to the vault.
@@ -503,14 +503,14 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - `internal/hook/notor_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] **Automation file approach (R-6):** Writes a Markdown automation file to `{vault}/notor/automations/multi-kb-recall.md`. Does NOT modify Notor's `data.json` plugin settings.
-- [ ] **Automation file contents:** Frontmatter with `notor-type: automation`, `notor-trigger: on_conversation_start`, `notor-blocking: true`, `notor-blocking-emit-kind: multi_kb_recall`, `notor-blocking-timeout: 10000`, `notor-automation-order: 100`. Code fence with TypeScript that calls `utils.executeShellCommand("multi-kb hook --harness notor", ...)` passing `context.firstMessage` and `context.conversationId` via stdin JSON, then calls `chatBlocks.emit()` with the CLI's stdout.
-- [ ] Creates `{vault}/notor/automations/` directory if it doesn't exist
-- [ ] **Idempotency (R-6):** Checks if `multi-kb-recall.md` already exists. If so, overwrites it (filename is the unique key). Re-running setup produces the same result.
-- [ ] Coexists with any pre-existing automations (each automation is a separate file; no interference)
-- [ ] UnregisterNotorHook deletes `{vault}/notor/automations/multi-kb-recall.md` if it exists
-- [ ] The vault path is resolved from the source directory in `config.yaml`
-- [ ] Test cases: register to empty automations dir, register when dir doesn't exist (creates it), idempotent re-register (overwrite), unregister, coexistence with other automation files
+- [x] **Automation file approach (R-6):** Writes a Markdown automation file to `{vault}/notor/automations/multi-kb-recall.md`. Does NOT modify Notor's `data.json` plugin settings.
+- [x] **Automation file contents:** Frontmatter with `notor-type: automation`, `notor-trigger: on_conversation_start`, `notor-blocking: true`, `notor-blocking-emit-kind: multi_kb_recall`, `notor-blocking-timeout: 10000`, `notor-automation-order: 100`. Code fence with TypeScript that calls `utils.executeShellCommand("multi-kb hook --harness notor", ...)` passing `context.firstMessage` and `context.conversationId` via stdin JSON, then calls `chatBlocks.emit()` with the CLI's stdout.
+- [x] Creates `{vault}/notor/automations/` directory if it doesn't exist
+- [x] **Idempotency (R-6):** Checks if `multi-kb-recall.md` already exists. If so, overwrites it (filename is the unique key). Re-running setup produces the same result.
+- [x] Coexists with any pre-existing automations (each automation is a separate file; no interference)
+- [x] UnregisterNotorHook deletes `{vault}/notor/automations/multi-kb-recall.md` if it exists
+- [x] The vault path is resolved from the source directory in `config.yaml`
+- [x] Test cases: register to empty automations dir, register when dir doesn't exist (creates it), idempotent re-register (overwrite), unregister, coexistence with other automation files
 
 ### HKI-003: Remote KB recallKnowledge Client
 **Description:** Implement the remote KB recall client per contracts/recall-knowledge.md.
@@ -519,13 +519,13 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - `internal/recall/remote_test.go`
 **Dependencies:** EXT-001, FND-001
 **Acceptance Criteria:**
-- [ ] Sends SigV4-signed POST to `{endpoint}/recallKnowledge` with {query, limit}
-- [ ] Parses response: JSON array of {uid, title, content, score}
-- [ ] Handles `iam` vs `federate` auth: `iam` uses SigV4 signing; `federate` sends plain HTTP POST with no auth headers
-- [ ] Respects configurable timeout (from hook.timeout)
-- [ ] Returns partial results on timeout (context cancellation)
-- [ ] HTTP 400 response: logs warning with error body, returns empty result set (no injection). Does not retry.
-- [ ] Test cases: successful recall, timeout, auth error, empty results, HTTP 400 (invalid query)
+- [x] Sends SigV4-signed POST to `{endpoint}/recallKnowledge` with {query, limit}
+- [x] Parses response: JSON array of {uid, title, content, score}
+- [x] Handles `iam` vs `federate` auth: `iam` uses SigV4 signing; `federate` sends plain HTTP POST with no auth headers
+- [x] Respects configurable timeout (from hook.timeout)
+- [x] Returns partial results on timeout (context cancellation)
+- [x] HTTP 400 response: logs warning with error body, returns empty result set (no injection). Does not retry.
+- [x] Test cases: successful recall, timeout, auth error, empty results, HTTP 400 (invalid query)
 
 ### HKI-004: LLM-Derived Keyword Generation
 **Description:** Implement keyword derivation from natural language queries for local KB recall per spec FR-8.
@@ -534,11 +534,11 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - `internal/recall/keywords_test.go`
 **Dependencies:** EXT-001
 **Acceptance Criteria:**
-- [ ] Calls `translation.summarization_model_id` (e.g., Claude Haiku) to derive 3-5 search keywords from user's first message
-- [ ] System prompt instructs: extract 3-5 key search terms, return as JSON array of strings
-- [ ] Parses response as string array
-- [ ] Fallback: if LLM call fails, use mechanical keyword extraction (split on whitespace, remove stop words)
-- [ ] Test cases: successful derivation (mocked), fallback on failure, various query types
+- [x] Calls `translation.summarization_model_id` (e.g., Claude Haiku) to derive 3-5 search keywords from user's first message
+- [x] System prompt instructs: extract 3-5 key search terms, return as JSON array of strings
+- [x] Parses response as string array
+- [x] Fallback: if LLM call fails, use mechanical keyword extraction (split on whitespace, remove stop words)
+- [x] Test cases: successful derivation (mocked), fallback on failure, various query types
 
 ### HKI-005: Rank-Based Result Interleaving
 **Description:** Implement merging of results from multiple KBs via rank-based interleaving per spec FR-7.
@@ -547,12 +547,12 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - `internal/recall/merge_test.go`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] Accepts ranked result lists from multiple KBs (remote sorted by score, local by match count)
-- [ ] Interleaves by rank: top-ranked from each KB first, then second-ranked, etc.
-- [ ] If one KB has fewer results, remaining slots filled from KBs with results remaining
-- [ ] Truncates to 10 total notes
-- [ ] Deduplicates by UID (if same note appears from multiple KBs)
-- [ ] Test cases: equal-length lists, unequal lengths, single KB, no results, duplicate UIDs, more than 10 total
+- [x] Accepts ranked result lists from multiple KBs (remote sorted by score, local by match count)
+- [x] Interleaves by rank: top-ranked from each KB first, then second-ranked, etc.
+- [x] If one KB has fewer results, remaining slots filled from KBs with results remaining
+- [x] Truncates to 10 total notes
+- [x] Deduplicates by UID (if same note appears from multiple KBs)
+- [x] Test cases: equal-length lists, unequal lengths, single KB, no results, duplicate UIDs, more than 10 total
 
 ### HKI-006: Markdown Injection Formatting
 **Description:** Format recalled notes for injection into harness hook output, including pending notice per spec FR-7.
@@ -561,12 +561,12 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - `internal/recall/format_test.go`
 **Dependencies:** FND-008
 **Acceptance Criteria:**
-- [ ] FormatInjection produces a Markdown string with each note's title (as heading), source KB name, and full content
-- [ ] When pending queue is non-empty: includes notice at the end (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
-- [ ] Empty results produce empty string (silent — no "no results found" message)
-- [ ] **Claude Code output format (R-5):** FormatHookOutput for `claude-code` harness wraps the Markdown in a JSON object: `{"systemMessage": "<markdown>"}`. The `systemMessage` field is what Claude Code injects into the system context.
-- [ ] **Notor output format (R-6):** FormatHookOutput for `notor` harness outputs raw Markdown to stdout (no JSON wrapper). The Notor automation TypeScript code reads this stdout and calls `chatBlocks.emit()` to inject it as an extension block visible to the LLM.
-- [ ] Test cases: multiple notes from multiple KBs, single note, pending notice, no pending, empty results, Claude Code JSON wrapping, Notor raw output
+- [x] FormatInjection produces a Markdown string with each note's title (as heading), source KB name, and full content
+- [x] When pending queue is non-empty: includes notice at the end (e.g., "3 notes awaiting approval — run `multi-kb approve` to review")
+- [x] Empty results produce empty string (silent — no "no results found" message)
+- [x] **Claude Code output format (R-5):** FormatHookOutput for `claude-code` harness wraps the Markdown in a JSON object: `{"systemMessage": "<markdown>"}`. The `systemMessage` field is what Claude Code injects into the system context.
+- [x] **Notor output format (R-6):** FormatHookOutput for `notor` harness outputs raw Markdown to stdout (no JSON wrapper). The Notor automation TypeScript code reads this stdout and calls `chatBlocks.emit()` to inject it as an extension block visible to the LLM.
+- [x] Test cases: multiple notes from multiple KBs, single note, pending notice, no pending, empty results, Claude Code JSON wrapping, Notor raw output
 
 ### HKI-007: Hook Entry Point Command (`multi-kb hook`)
 **Description:** Wire up the hook subcommand that orchestrates the full injection flow per spec FR-7. Behavior reshaped by [research.md R-5](research.md#r-5-claude-code-hook-registration) and [R-6](research.md#r-6-notor-hook-registration) findings.
@@ -575,19 +575,19 @@ _Corresponds to plan.md Phase D. Builds harness hook system._
 - `internal/hook/inject.go` — core injection orchestrator
 **Dependencies:** FND-001, FND-007, FND-009, HKI-003, HKI-004, HKI-005, HKI-006
 **Acceptance Criteria:**
-- [ ] Accepts `--harness` flag (claude-code or notor)
-- [ ] **Claude Code stdin parsing (R-5):** Reads JSON from stdin containing `user_prompt`, `session_id`, `transcript_path`, `cwd`. Parses the `user_prompt` field as the query text. Uses `cwd` (or `$CLAUDE_PROJECT_DIR` env var) to identify the current directory for routing config.
-- [ ] **Notor stdin parsing (R-6):** Reads JSON from stdin containing `first_message`, `conversation_id`, `timestamp` (passed by the Notor automation wrapper). Parses the `first_message` field as the query text. Uses the vault root (CWD, since Notor sets CWD to vault root) to identify the current directory for routing config.
-- [ ] **First-message guard (R-5):** For Claude Code only — reads the `transcript_path` file and counts `user`-type JSONL lines. If count >= 1 (prior user messages exist), this is not the first message — exit immediately with code 0 and no stdout output. If count is 0 (transcript empty, missing, or contains no user-type entries), this is the first message — proceed with injection. Note: the hook fires before the current prompt is written to the transcript, so count=0 means the current prompt is the first message. **No first-message guard needed for Notor** — the `on_conversation_start` trigger only fires on the first message.
-- [ ] **Pre-flight validation:** If the extracted query (user's first message) is empty or whitespace-only, skip recall entirely — exit with code 0 and no stdout output. Do not send empty queries to KBs.
-- [ ] Identifies target KBs for the current directory from config
-- [ ] Queries all target KBs concurrently (local via git grep with LLM keywords, remote via recallKnowledge)
-- [ ] Merges results via rank-based interleaving → top 10
-- [ ] **Output format (R-5, R-6):** For Claude Code, writes JSON to stdout: `{"systemMessage": "<formatted markdown>"}`. For Notor, writes raw Markdown to stdout (no JSON wrapper — the automation TypeScript code handles `chatBlocks.emit()`). Exit code 0 on success.
-- [ ] Enforces configurable timeout (default 8s) — partial results from responsive KBs used if others time out
-- [ ] On complete timeout (no KBs respond): exit code 0 with no stdout output, warning logged to `hook-errors.jsonl`
-- [ ] **Error handling (R-5):** On fatal error, exit with non-0/non-2 code (non-blocking error — both Claude Code and Notor proceed without injection). Never exit with code 2 for Claude Code (blocking error). For Notor, any non-zero exit from the shell command is handled by the automation wrapper.
-- [ ] Test cases: full injection path (mocked), first-message guard via transcript for Claude Code (pass/block), stdin JSON parsing for both harnesses, JSON output format for Claude Code, raw Markdown output for Notor, timeout handling, partial results, error exit codes
+- [x] Accepts `--harness` flag (claude-code or notor)
+- [x] **Claude Code stdin parsing (R-5):** Reads JSON from stdin containing `user_prompt`, `session_id`, `transcript_path`, `cwd`. Parses the `user_prompt` field as the query text. Uses `cwd` (or `$CLAUDE_PROJECT_DIR` env var) to identify the current directory for routing config.
+- [x] **Notor stdin parsing (R-6):** Reads JSON from stdin containing `first_message`, `conversation_id`, `timestamp` (passed by the Notor automation wrapper). Parses the `first_message` field as the query text. Uses the vault root (CWD, since Notor sets CWD to vault root) to identify the current directory for routing config.
+- [x] **First-message guard (R-5):** For Claude Code only — reads the `transcript_path` file and counts `user`-type JSONL lines. If count >= 1 (prior user messages exist), this is not the first message — exit immediately with code 0 and no stdout output. If count is 0 (transcript empty, missing, or contains no user-type entries), this is the first message — proceed with injection. Note: the hook fires before the current prompt is written to the transcript, so count=0 means the current prompt is the first message. **No first-message guard needed for Notor** — the `on_conversation_start` trigger only fires on the first message.
+- [x] **Pre-flight validation:** If the extracted query (user's first message) is empty or whitespace-only, skip recall entirely — exit with code 0 and no stdout output. Do not send empty queries to KBs.
+- [x] Identifies target KBs for the current directory from config
+- [x] Queries all target KBs concurrently (local via git grep with LLM keywords, remote via recallKnowledge)
+- [x] Merges results via rank-based interleaving → top 10
+- [x] **Output format (R-5, R-6):** For Claude Code, writes JSON to stdout: `{"systemMessage": "<formatted markdown>"}`. For Notor, writes raw Markdown to stdout (no JSON wrapper — the automation TypeScript code handles `chatBlocks.emit()`). Exit code 0 on success.
+- [x] Enforces configurable timeout (default 8s) — partial results from responsive KBs used if others time out
+- [x] On complete timeout (no KBs respond): exit code 0 with no stdout output, warning logged to `hook-errors.jsonl`
+- [x] **Error handling (R-5):** On fatal error, exit with non-0/non-2 code (non-blocking error — both Claude Code and Notor proceed without injection). Never exit with code 2 for Claude Code (blocking error). For Notor, any non-zero exit from the shell command is handled by the automation wrapper.
+- [x] Test cases: full injection path (mocked), first-message guard via transcript for Claude Code (pass/block), stdin JSON parsing for both harnesses, JSON output format for Claude Code, raw Markdown output for Notor, timeout handling, partial results, error exit codes
 
 ---
 
