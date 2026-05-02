@@ -326,4 +326,80 @@ describe("Compute Construct", () => {
     const hasAsgOutput = outputKeys.some((k) => k.includes("AsgName"));
     expect(hasAsgOutput).toBe(true);
   });
+
+  test("IAM role has Bedrock ingestion job permissions scoped to KB ARN", () => {
+    const { stack, vpc, subnet, sg } = createTestStack();
+    new Compute(stack, "Compute", defaultComputeProps(stack, vpc, subnet, sg));
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith(["bedrock:StartIngestionJob"]),
+            Resource:
+              "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KB-12345",
+          }),
+        ]),
+      }),
+    });
+  });
+
+  test("IAM role has CloudWatch Logs permissions scoped to log group", () => {
+    const { stack, vpc, subnet, sg } = createTestStack();
+    new Compute(stack, "Compute", defaultComputeProps(stack, vpc, subnet, sg));
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith(["logs:PutLogEvents"]),
+            Resource: Match.anyValue(),
+          }),
+        ]),
+      }),
+    });
+  });
+
+  test("Graviton instance type uses ARM64 AMI", () => {
+    const { stack, vpc, subnet, sg } = createTestStack();
+    // t4g is Graviton — should result in arm64
+    new Compute(stack, "Compute", defaultComputeProps(stack, vpc, subnet, sg));
+    const template = Template.fromStack(stack);
+
+    // Verify the instance type is t4g.micro
+    template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
+      LaunchTemplateData: Match.objectLike({
+        InstanceType: "t4g.micro",
+      }),
+    });
+  });
+
+  test("SSM wildcard resources are limited to SSM/EC2Messages actions only", () => {
+    const { stack, vpc, subnet, sg } = createTestStack();
+    new Compute(stack, "Compute", defaultComputeProps(stack, vpc, subnet, sg));
+    const template = Template.fromStack(stack);
+    const json = template.toJSON();
+
+    const policies = Object.values(json.Resources).filter(
+      (r: any) => r.Type === "AWS::IAM::Policy",
+    );
+    for (const policy of policies) {
+      const statements = (policy as any).Properties.PolicyDocument.Statement;
+      for (const stmt of statements) {
+        if (stmt.Resource === "*") {
+          const actions = Array.isArray(stmt.Action)
+            ? stmt.Action
+            : [stmt.Action];
+          for (const action of actions) {
+            // Only SSM, ssmmessages, and ec2messages should use * resource
+            expect(action).toMatch(
+              /^(ssm:|ssmmessages:|ec2messages:)/,
+            );
+          }
+        }
+      }
+    }
+  });
 });

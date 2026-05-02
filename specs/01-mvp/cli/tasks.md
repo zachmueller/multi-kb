@@ -876,11 +876,11 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 **Dependencies:** FND-001
 **Contract:** CDK [server-config.md](../cdk/contracts/server-config.md) — defines the fields the CDK user data script templates; CLI validation must match
 **Acceptance Criteria:**
-- [ ] Parses all server-mode fields: sqs.queue_url, sqs.batch_size, codecommit.repo_name/region, s3.bucket/region, opensearch.endpoint/region, bedrock_kb.knowledge_base_id/data_source_id, tick_interval, dream_cycle.interval/model_id, recall_log.schedule
-- [ ] Server-mode fields only validated when `mode: server`
-- [ ] Required fields for server mode: sqs.queue_url, codecommit.repo_name, s3.bucket, opensearch.endpoint, bedrock_kb.knowledge_base_id/data_source_id
-- [ ] Duration fields (`tick_interval`, `dream_cycle.interval`) validated using `time.ParseDuration` (same rules as FND-001); `recall_log.schedule` validated as `HH:MM` UTC
-- [ ] Test cases: valid server config, missing required server fields, client mode ignores server fields, invalid duration for tick_interval, invalid schedule format
+- [x] Parses all server-mode fields: sqs.queue_url, sqs.batch_size, codecommit.repo_name/region, s3.bucket/region, opensearch.endpoint/region, bedrock_kb.knowledge_base_id/data_source_id, tick_interval, dream_cycle.interval/model_id, recall_log.schedule
+- [x] Server-mode fields only validated when `mode: server`
+- [x] Required fields for server mode: sqs.queue_url, codecommit.repo_name, s3.bucket, opensearch.endpoint, bedrock_kb.knowledge_base_id/data_source_id
+- [x] Duration fields (`tick_interval`, `dream_cycle.interval`) validated using `time.ParseDuration` (same rules as FND-001); `recall_log.schedule` validated as `HH:MM` UTC
+- [x] Test cases: valid server config, missing required server fields, client mode ignores server fields, invalid duration for tick_interval, invalid schedule format
 
 ### SRV-002: Tick Loop and Activity Dispatch
 **Description:** Implement the server-mode main loop: periodic tick, dream cycle vs ingestion dispatch per spec FR-12.
@@ -889,15 +889,15 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - `internal/server/server_test.go`
 **Dependencies:** SRV-001, FND-003
 **Acceptance Criteria:**
-- [ ] Runs as long-lived process (not short-lived)
-- [ ] Wakes every `tick_interval` (default 5 minutes)
-- [ ] On each tick: checks if dream cycle is due (elapsed > dream_cycle.interval, default 3h)
+- [x] Runs as long-lived process (not short-lived)
+- [x] Wakes every `tick_interval` (default 5 minutes)
+- [x] On each tick: checks if dream cycle is due (elapsed > dream_cycle.interval, default 3h)
   - If due: runs dream cycle
   - Otherwise: runs SQS ingestion + recall log processing (if daily threshold crossed)
-- [ ] If previous tick still running, skips current tick (no concurrent processing)
-- [ ] Maintains lock file with heartbeat
-- [ ] Handles SIGTERM/SIGINT for graceful shutdown (systemd integration)
-- [ ] Test cases: tick dispatching logic, dream cycle scheduling, skip-on-busy, graceful shutdown
+- [x] If previous tick still running, skips current tick (no concurrent processing)
+- [x] Maintains lock file with heartbeat
+- [x] Handles SIGTERM/SIGINT for graceful shutdown (systemd integration)
+- [x] Test cases: tick dispatching logic, dream cycle scheduling, skip-on-busy, graceful shutdown
 
 ### SRV-003 [P]: SQS Polling and Batching
 **Description:** Implement SQS message polling, batching, and acknowledgement per spec FR-12 SQS Ingestion.
@@ -906,12 +906,12 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - `internal/server/ingest_test.go`
 **Dependencies:** SRV-001
 **Acceptance Criteria:**
-- [ ] Polls configured SQS queue via AWS SDK
-- [ ] Batches ~5-10 messages (configurable batch_size)
-- [ ] Parses each message: {uid, title, content, author, submitted_at}
-- [ ] Hands batch to CodeCommit operations for commit
-- [ ] Deletes successfully processed messages from queue
-- [ ] Failed messages left in queue for SQS retry (up to 3 attempts before DLQ)
+- [x] Polls configured SQS queue via AWS SDK
+- [x] Batches ~5-10 messages (configurable batch_size)
+- [x] Parses each message: {uid, title, content, author, submitted_at}
+- [x] Hands batch to CodeCommit operations for commit
+- [x] Deletes successfully processed messages from queue
+- [x] Failed messages left in queue for SQS retry (up to 3 attempts before DLQ)
 - [ ] Test cases: successful batch, partial failure, empty queue, malformed message
 
 ### SRV-004 [P]: CodeCommit Git Operations
@@ -921,10 +921,10 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 **Dependencies:** FND-005
 **Implementation Note:** Uses `os/exec` shell-out to `git` binary. CodeCommit credential helper configured via `git config` (set up by CDK user data script). Sanitize SQS message fields (UID, title, author) before use in file names or git commit messages.
 **Acceptance Criteria:**
-- [ ] Clones CodeCommit repository via HTTPS (git-codecommit VPC endpoint)
-- [ ] Creates `<UID>.md` Markdown files with full frontmatter per data-model.md Entity 1: uid, title, status: pending, author, last-updated (from submitted_at), empty last-linked-to/last-recalled/consolidated-from-notes
-- [ ] Commits entire batch as a single git commit
-- [ ] Handles git push to CodeCommit
+- [x] Clones CodeCommit repository via HTTPS (git-codecommit VPC endpoint)
+- [x] Creates `<UID>.md` Markdown files with full frontmatter per data-model.md Entity 1: uid, title, status: pending, author, last-updated (from submitted_at), empty last-linked-to/last-recalled/consolidated-from-notes
+- [x] Commits entire batch as a single git commit
+- [x] Handles git push to CodeCommit
 - [ ] Test cases: clone, commit single note, commit batch, push
 
 ### SRV-005 [P]: Incremental S3 Sync
@@ -934,12 +934,12 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - `internal/server/s3sync_test.go`
 **Dependencies:** SRV-004
 **Acceptance Criteria:**
-- [ ] Uses `git diff` between previous and current commit to determine changeset
-- [ ] Files added/modified → S3 PutObject
-- [ ] Files deleted → S3 DeleteObject
-- [ ] Not a full repo comparison — incremental only
-- [ ] Retry up to 3 times with exponential backoff on sync failure
-- [ ] On persistent failure: log error and continue (next sync or Phase 0 catches missed files)
+- [x] Uses `git diff` between previous and current commit to determine changeset
+- [x] Files added/modified → S3 PutObject
+- [x] Files deleted → S3 DeleteObject
+- [x] Not a full repo comparison — incremental only
+- [x] Retry up to 3 times with exponential backoff on sync failure
+- [x] On persistent failure: log error and continue (next sync or Phase 0 catches missed files)
 - [ ] Test cases: upload new files, delete files, retry on failure, empty diff (no-op)
 
 ### SRV-006: Server Dream Cycle (OpenSearch-Backed Phases)
@@ -950,11 +950,11 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 **Dependencies:** DRM-004, SRV-004, SRV-005
 **Contract:** [consolidation-output.md](contracts/consolidation-output.md) — Phase 3 shares logic with DRM-004
 **Acceptance Criteria:**
-- [ ] Phase 0: syncs CodeCommit→S3, triggers `StartIngestionJob`, polls `GetIngestionJob` with 10-min hard cutoff (proceeds best-effort if timeout)
-- [ ] Phase 1: queries OpenSearch (via VPC endpoint) for `status: pending` notes; groups into batches by similarity (max 10 per batch): pick ungrouped seed, query for similar pending notes, form batch, repeat
-- [ ] Phase 2: for each batch, queries OpenSearch for related `status: active` notes (max 10 per batch)
-- [ ] Phase 3: identical to local mode (DRM-004 — shared logic)
-- [ ] Phase 4: final S3 sync, triggers StartIngestionJob, polls for completion, updates dream cycle timestamp, releases lock
+- [x] Phase 0: syncs CodeCommit→S3, triggers `StartIngestionJob`, polls `GetIngestionJob` with 10-min hard cutoff (proceeds best-effort if timeout)
+- [x] Phase 1: queries OpenSearch (via VPC endpoint) for `status: pending` notes; groups into batches by similarity (max 10 per batch): pick ungrouped seed, query for similar pending notes, form batch, repeat
+- [x] Phase 2: for each batch, queries OpenSearch for related `status: active` notes (max 10 per batch)
+- [x] Phase 3: identical to local mode (DRM-004 — shared logic)
+- [x] Phase 4: final S3 sync, triggers StartIngestionJob, polls for completion, updates dream cycle timestamp, releases lock
 - [ ] Test cases: full cycle with mocked OpenSearch/Bedrock, Phase 0 timeout, similarity grouping
 
 ### SRV-007: Daily Recall Log Processing
@@ -964,12 +964,12 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - `internal/server/recalllog_test.go`
 **Dependencies:** SRV-004, SRV-005
 **Acceptance Criteria:**
-- [ ] Runs once per day (tracked by last-run timestamp; first eligible non-dream-cycle tick after daily threshold)
-- [ ] Scans S3 objects under `recall-logs/<previous-day-YYYY-MM-DD>/` prefix
-- [ ] Parses each recall log JSON: {timestamp, query, recalled_uids}
-- [ ] For each unique UID: updates `last-recalled` frontmatter in the CodeCommit note
-- [ ] Silently skips UIDs for notes that no longer exist
-- [ ] Commits all `last-recalled` updates as a single git commit
+- [x] Runs once per day (tracked by last-run timestamp; first eligible non-dream-cycle tick after daily threshold)
+- [x] Scans S3 objects under `recall-logs/<previous-day-YYYY-MM-DD>/` prefix
+- [x] Parses each recall log JSON: {timestamp, query, recalled_uids}
+- [x] For each unique UID: updates `last-recalled` frontmatter in the CodeCommit note
+- [x] Silently skips UIDs for notes that no longer exist
+- [x] Commits all `last-recalled` updates as a single git commit
 - [ ] Test cases: process logs with multiple UIDs, missing notes, empty log day, already processed
 
 ---

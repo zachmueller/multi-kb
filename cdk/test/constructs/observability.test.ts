@@ -138,4 +138,52 @@ describe("Observability Construct", () => {
       ]),
     });
   });
+
+  test("skips ASG alarm when asgName is undefined", () => {
+    const { stack, dlq } = createTestStack();
+    new Observability(stack, "Obs", {
+      ...defaultObsProps(dlq),
+      asgName: undefined,
+    });
+    const template = Template.fromStack(stack);
+
+    // Should only have DLQ alarm + dream cycle lock alarm (no ASG alarm)
+    template.resourceCountIs("AWS::CloudWatch::Alarm", 2);
+  });
+
+  test("EC2 log group has DESTROY removal policy", () => {
+    const { stack, dlq } = createTestStack();
+    new Observability(stack, "Obs", defaultObsProps(dlq));
+    const template = Template.fromStack(stack);
+
+    const logGroups = template.findResources("AWS::Logs::LogGroup");
+    const ec2LogGroup = Object.entries(logGroups).find(
+      ([, r]: [string, any]) =>
+        r.Properties?.LogGroupName === "/multi-kb/ec2/server",
+    );
+    expect(ec2LogGroup).toBeDefined();
+    expect(ec2LogGroup![1].DeletionPolicy).toBe("Delete");
+  });
+
+  test("DLQ alarm has TreatMissingData NOT_BREACHING", () => {
+    const { stack, dlq } = createTestStack();
+    new Observability(stack, "Obs", defaultObsProps(dlq));
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      AlarmName: "multi-kb-dlq-messages",
+      TreatMissingData: "notBreaching",
+    });
+  });
+
+  test("ASG alarm has TreatMissingData BREACHING", () => {
+    const { stack, dlq } = createTestStack();
+    new Observability(stack, "Obs", defaultObsProps(dlq));
+    const template = Template.fromStack(stack);
+
+    template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      AlarmName: "multi-kb-ec2-unhealthy",
+      TreatMissingData: "breaching",
+    });
+  });
 });

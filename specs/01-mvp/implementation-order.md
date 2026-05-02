@@ -3,7 +3,7 @@
 **Created:** 2026-05-01
 **CDK Tasks:** [cdk/tasks.md](cdk/tasks.md) (56 tasks)
 **CLI Tasks:** [cli/tasks.md](cli/tasks.md) (87 tasks)
-**Status:** In Progress — Wave 5 complete
+**Status:** In Progress — Wave 6 complete
 
 ## Overview
 

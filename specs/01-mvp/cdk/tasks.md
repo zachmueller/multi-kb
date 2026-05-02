@@ -659,12 +659,12 @@ _Bring all constructs together in the main stack._
 - `lib/multi-kb-stack.ts` — complete wiring
 **Dependencies:** All Phase 1-7 construct tasks
 **Acceptance Criteria:**
-- [ ] Instantiates all constructs in dependency order: Networking → Storage → Search → KnowledgeBase → Lambdas → API → Compute → Observability
-- [ ] Passes correct references between constructs (queue to Lambda, bucket to Lambda, KB ID to Lambda, VPC to endpoints, etc.)
-- [ ] Resolves the circular dependency between OpenSearch data access policy ↔ EC2 role / Bedrock KB role (CDK `addDependency()` or post-creation policy update)
-- [ ] All 7 stack outputs defined: `ApiEndpoint`, `ApiId`, `RepoCloneUrl`, `KnowledgeBaseId`, `BucketName`, `CollectionEndpoint`, `Ec2InstanceId`
-- [ ] `cdk synth` produces valid CloudFormation template
-- [ ] Template contains all expected resource types
+- [x] Instantiates all constructs in dependency order: Networking → Storage → Search → KnowledgeBase → Lambdas → API → Compute → Observability
+- [x] Passes correct references between constructs (queue to Lambda, bucket to Lambda, KB ID to Lambda, VPC to endpoints, etc.)
+- [x] Resolves the circular dependency between OpenSearch data access policy ↔ EC2 role / Bedrock KB role (CDK `addDependency()` or post-creation policy update)
+- [x] All 7 stack outputs defined: `ApiEndpoint`, `ApiId`, `RepoCloneUrl`, `KnowledgeBaseId`, `BucketName`, `CollectionEndpoint`, `Ec2InstanceId`
+- [x] `cdk synth` produces valid CloudFormation template
+- [x] Template contains all expected resource types
 
 ### WIR-002: Stack Snapshot Test
 **Description:** Create a snapshot test for the fully wired stack to catch unintended changes.
@@ -672,14 +672,14 @@ _Bring all constructs together in the main stack._
 - `test/multi-kb-stack.test.ts` — snapshot test + key assertions
 **Dependencies:** WIR-001
 **Acceptance Criteria:**
-- [ ] Snapshot test captures synthesized template
-- [ ] Fine-grained assertions verify critical cross-construct relationships:
+- [x] Snapshot test captures synthesized template
+- [x] Fine-grained assertions verify critical cross-construct relationships:
   - submitKnowledge Lambda env var references the actual SQS queue URL
   - recallKnowledge Lambda env var references the actual KB ID
   - EC2 IAM role has permissions on the actual SQS/S3/CodeCommit/OpenSearch ARNs
   - API Gateway methods reference the actual Lambda functions
   - VPC endpoints are in the same subnet as the ASG
-- [ ] Test: `npm test` passes with snapshot matching
+- [x] Test: `npm test` passes with snapshot matching
 
 ---
 
@@ -716,15 +716,15 @@ _Research items must complete before their dependent implementation phases._
 **Files:** All `test/constructs/*.test.ts` files
 **Dependencies:** All construct tasks
 **Acceptance Criteria:**
-- [ ] Every construct file has a corresponding test file
-- [ ] IAM policies tested for least-privilege (specific ARNs, no wildcards beyond SSM)
-- [ ] Security groups tested for correct rules (no overly permissive rules)
-- [ ] VPC endpoints tested for correct service names and subnet placement
-- [ ] Lambda configurations tested (runtime, memory, timeout, environment, architecture)
-- [ ] SQS tested for DLQ configuration
-- [ ] S3 tested for encryption and public access block
-- [ ] API Gateway tested for IAM authorization on both methods
-- [ ] `npm test` passes with all assertions green
+- [x] Every construct file has a corresponding test file
+- [x] IAM policies tested for least-privilege (specific ARNs, no wildcards beyond SSM)
+- [x] Security groups tested for correct rules (no overly permissive rules)
+- [x] VPC endpoints tested for correct service names and subnet placement
+- [x] Lambda configurations tested (runtime, memory, timeout, environment, architecture)
+- [x] SQS tested for DLQ configuration
+- [x] S3 tested for encryption and public access block
+- [x] API Gateway tested for IAM authorization on both methods
+- [x] `npm test` passes with all assertions green
 
 ### QAT-002 [P]: Lambda Handler Unit Tests
 **Description:** Ensure comprehensive unit test coverage for Lambda handler business logic.
@@ -734,33 +734,33 @@ _Research items must complete before their dependent implementation phases._
 - `test/lambda/shared/*.test.ts`
 **Dependencies:** LMB-001, LMB-002, LMB-004
 **Acceptance Criteria:**
-- [ ] **submitKnowledge tests:** valid input → 202, missing title → 400, empty title → 400, long title → 400, missing content → 400, empty content → 400, long content → 400, missing author → 400, empty author → 400, long author → 400, SQS failure → 500, multiple validation errors → single 400 with all errors
-- [ ] **recallKnowledge tests:** valid query → 200 with results, empty query → 400, empty results → 200 with `[]`, coverage trigger (low score) → follow-up query, coverage fallback on error, S3 write failure → still returns results, limit parameter respected
-- [ ] **UID tests:** length=16, valid Crockford alphabet, no I/L/O/U, uniqueness, deterministic encoding of 5 shared test vectors from R-5 (matching CLI R-7 Go implementation)
-- [ ] All AWS SDK calls mocked (no real AWS calls in unit tests)
-- [ ] `npm test` passes
+- [x] **submitKnowledge tests:** valid input → 202, missing title → 400, empty title → 400, long title → 400, missing content → 400, empty content → 400, long content → 400, missing author → 400, empty author → 400, long author → 400, SQS failure → 500, multiple validation errors → single 400 with all errors
+- [x] **recallKnowledge tests:** valid query → 200 with results, empty query → 400, empty results → 200 with `[]`, coverage trigger (low score) → follow-up query, coverage fallback on error, S3 write failure → still returns results, limit parameter respected
+- [x] **UID tests:** length=16, valid Crockford alphabet, no I/L/O/U, uniqueness, deterministic encoding of 5 shared test vectors from R-5 (matching CLI R-7 Go implementation)
+- [x] All AWS SDK calls mocked (no real AWS calls in unit tests)
+- [x] `npm test` passes
 
 ### QAT-003 [P]: Security Review
 **Description:** Validate security requirements per spec NFR-3.
 **Dependencies:** WIR-001
 **Acceptance Criteria:**
-- [ ] API Gateway: both methods require `AWS_IAM` auth (no anonymous access)
-- [ ] EC2 instance: private subnet, no public IP
-- [ ] EC2 IAM role: least-privilege (verify each policy statement scoped to specific ARNs)
-- [ ] S3 bucket: public access blocked, SSE-S3 encryption
-- [ ] OpenSearch: data access policy restricts to specific principals only
-- [ ] Lambda IAM roles: minimum permissions per function
-- [ ] No secrets in code, environment variables, or CDK context (only IAM role-based auth)
-- [ ] VPC endpoint security groups: only HTTPS/443 from EC2 SG
+- [x] API Gateway: both methods require `AWS_IAM` auth (no anonymous access)
+- [x] EC2 instance: private subnet, no public IP
+- [x] EC2 IAM role: least-privilege (verify each policy statement scoped to specific ARNs)
+- [x] S3 bucket: public access blocked, SSE-S3 encryption
+- [x] OpenSearch: data access policy restricts to specific principals only
+- [x] Lambda IAM roles: minimum permissions per function
+- [x] No secrets in code, environment variables, or CDK context (only IAM role-based auth)
+- [x] VPC endpoint security groups: only HTTPS/443 from EC2 SG
 
 ### QAT-004 [P]: Multi-Tenancy Validation
 **Description:** Verify that the same CDK code can deploy independent instances with different stack names per spec success criteria.
 **Dependencies:** WIR-001
 **Acceptance Criteria:**
-- [ ] `cdk synth --context repoName=team-a-kb ...` and `cdk synth --context repoName=team-b-kb ...` produce independent templates
-- [ ] Resource names derived from props, not hardcoded (S3 bucket, CodeCommit repo, SQS queue, OpenSearch collection)
-- [ ] Two stacks can coexist in the same account/region without resource name conflicts
-- [ ] Stack outputs are unique per deployment
+- [x] `cdk synth --context repoName=team-a-kb ...` and `cdk synth --context repoName=team-b-kb ...` produce independent templates
+- [x] Resource names derived from props, not hardcoded (S3 bucket, CodeCommit repo, SQS queue, OpenSearch collection)
+- [x] Two stacks can coexist in the same account/region without resource name conflicts
+- [x] Stack outputs are unique per deployment
 
 ### QAT-005: Post-Deploy Integration Checklist
 **Description:** Manual integration test checklist for validating a deployed stack end-to-end per spec User Scenarios.

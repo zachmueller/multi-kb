@@ -1,0 +1,2201 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`MultiKbStack - synthesis snapshot 1`] = `
+{
+  "Outputs": {
+    "ApiApiEndpointE2C5D803": {
+      "Description": "API Gateway endpoint URL",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://",
+            {
+              "Ref": "ApiRestApiE35FEAFE",
+            },
+            ".execute-api.us-east-1.",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "ApiRestApiDeploymentStageprodE828476C",
+            },
+            "/",
+          ],
+        ],
+      },
+    },
+    "ApiApiId0792E3A7": {
+      "Description": "API Gateway REST API ID",
+      "Value": {
+        "Ref": "ApiRestApiE35FEAFE",
+      },
+    },
+    "ApiRestApiEndpoint4DEFB5CC": {
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://",
+            {
+              "Ref": "ApiRestApiE35FEAFE",
+            },
+            ".execute-api.us-east-1.",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "ApiRestApiDeploymentStageprodE828476C",
+            },
+            "/",
+          ],
+        ],
+      },
+    },
+    "ComputeAsgNameEAB387B5": {
+      "Description": "Auto Scaling Group name (manages the single EC2 instance)",
+      "Value": {
+        "Ref": "ComputeAsgASG33A9C744",
+      },
+    },
+    "KnowledgeBaseDataSourceIdOutput0C7C03CA": {
+      "Export": {
+        "Name": "DataSourceId",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "KnowledgeBaseDataSource867D63C8",
+          "DataSourceId",
+        ],
+      },
+    },
+    "KnowledgeBaseKnowledgeBaseIdOutput5E6CCB75": {
+      "Export": {
+        "Name": "KnowledgeBaseId",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "KnowledgeBaseB4CDAA8B",
+          "KnowledgeBaseId",
+        ],
+      },
+    },
+    "SearchCollectionEndpointD73389F1": {
+      "Description": "OpenSearch Serverless collection endpoint",
+      "Value": {
+        "Fn::GetAtt": [
+          "SearchCollectionE9B440CC",
+          "CollectionEndpoint",
+        ],
+      },
+    },
+    "StorageBucketNameOutput952603D0": {
+      "Export": {
+        "Name": "BucketName",
+      },
+      "Value": {
+        "Ref": "StorageBucket5CB7C8EA",
+      },
+    },
+    "StorageRepoCloneUrlOutput68C91A1B": {
+      "Export": {
+        "Name": "RepoCloneUrl",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "StorageRepository85438334",
+          "CloneUrlHttp",
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+    "SsmParameterValueawsserviceamiamazonlinuxlatestal2023amikernel61arm64C96584B6F00A464EAD1953AFF4B05118Parameter": {
+      "Default": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64",
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+    },
+  },
+  "Resources": {
+    "ApiAccessLogs50B185DB": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "ApiRestApiAccount598A1DA6": {
+      "DeletionPolicy": "Retain",
+      "DependsOn": [
+        "ApiRestApiE35FEAFE",
+      ],
+      "Properties": {
+        "CloudWatchRoleArn": {
+          "Fn::GetAtt": [
+            "ApiRestApiCloudWatchRoleB7879BFC",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ApiGateway::Account",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "ApiRestApiCloudWatchRoleB7879BFC": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "apigateway.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "ApiRestApiDeploymentDC05A82D06d90e067fc05167bc941f2b080ffbd0": {
+      "DependsOn": [
+        "ApiRestApirecallKnowledgePOST16CE2178",
+        "ApiRestApirecallKnowledge6E48A18B",
+        "ApiRestApisubmitKnowledgePOSTE3A80A61",
+        "ApiRestApisubmitKnowledgeE9E5BE7C",
+      ],
+      "Metadata": {
+        "aws:cdk:do-not-refactor": true,
+      },
+      "Properties": {
+        "Description": "Multi-KB knowledge submission and recall API",
+        "RestApiId": {
+          "Ref": "ApiRestApiE35FEAFE",
+        },
+      },
+      "Type": "AWS::ApiGateway::Deployment",
+    },
+    "ApiRestApiDeploymentStageprodE828476C": {
+      "DependsOn": [
+        "ApiRestApiAccount598A1DA6",
+      ],
+      "Properties": {
+        "AccessLogSetting": {
+          "DestinationArn": {
+            "Fn::GetAtt": [
+              "ApiAccessLogs50B185DB",
+              "Arn",
+            ],
+          },
+          "Format": "{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","user":"$context.identity.user","caller":"$context.identity.caller","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}",
+        },
+        "DeploymentId": {
+          "Ref": "ApiRestApiDeploymentDC05A82D06d90e067fc05167bc941f2b080ffbd0",
+        },
+        "MethodSettings": [
+          {
+            "DataTraceEnabled": false,
+            "HttpMethod": "*",
+            "LoggingLevel": "INFO",
+            "ResourcePath": "/*",
+          },
+        ],
+        "RestApiId": {
+          "Ref": "ApiRestApiE35FEAFE",
+        },
+        "StageName": "prod",
+      },
+      "Type": "AWS::ApiGateway::Stage",
+    },
+    "ApiRestApiE35FEAFE": {
+      "Properties": {
+        "Description": "Multi-KB knowledge submission and recall API",
+        "Name": "multi-kb",
+      },
+      "Type": "AWS::ApiGateway::RestApi",
+    },
+    "ApiRestApirecallKnowledge6E48A18B": {
+      "Properties": {
+        "ParentId": {
+          "Fn::GetAtt": [
+            "ApiRestApiE35FEAFE",
+            "RootResourceId",
+          ],
+        },
+        "PathPart": "recallKnowledge",
+        "RestApiId": {
+          "Ref": "ApiRestApiE35FEAFE",
+        },
+      },
+      "Type": "AWS::ApiGateway::Resource",
+    },
+    "ApiRestApirecallKnowledgePOST16CE2178": {
+      "Properties": {
+        "AuthorizationType": "AWS_IAM",
+        "HttpMethod": "POST",
+        "Integration": {
+          "IntegrationHttpMethod": "POST",
+          "Type": "AWS_PROXY",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":apigateway:us-east-1:lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": [
+                    "RecallLambdaFunction397F529F",
+                    "Arn",
+                  ],
+                },
+                "/invocations",
+              ],
+            ],
+          },
+        },
+        "ResourceId": {
+          "Ref": "ApiRestApirecallKnowledge6E48A18B",
+        },
+        "RestApiId": {
+          "Ref": "ApiRestApiE35FEAFE",
+        },
+      },
+      "Type": "AWS::ApiGateway::Method",
+    },
+    "ApiRestApirecallKnowledgePOSTApiPermissionTestStackApiRestApi914E81ACPOSTrecallKnowledgeB563CADD": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "RecallLambdaFunction397F529F",
+            "Arn",
+          ],
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":execute-api:us-east-1:123456789012:",
+              {
+                "Ref": "ApiRestApiE35FEAFE",
+              },
+              "/",
+              {
+                "Ref": "ApiRestApiDeploymentStageprodE828476C",
+              },
+              "/POST/recallKnowledge",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "ApiRestApirecallKnowledgePOSTApiPermissionTestTestStackApiRestApi914E81ACPOSTrecallKnowledge40029CFA": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "RecallLambdaFunction397F529F",
+            "Arn",
+          ],
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":execute-api:us-east-1:123456789012:",
+              {
+                "Ref": "ApiRestApiE35FEAFE",
+              },
+              "/test-invoke-stage/POST/recallKnowledge",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "ApiRestApisubmitKnowledgeE9E5BE7C": {
+      "Properties": {
+        "ParentId": {
+          "Fn::GetAtt": [
+            "ApiRestApiE35FEAFE",
+            "RootResourceId",
+          ],
+        },
+        "PathPart": "submitKnowledge",
+        "RestApiId": {
+          "Ref": "ApiRestApiE35FEAFE",
+        },
+      },
+      "Type": "AWS::ApiGateway::Resource",
+    },
+    "ApiRestApisubmitKnowledgePOSTApiPermissionTestStackApiRestApi914E81ACPOSTsubmitKnowledge0F7420B2": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "SubmitLambdaFunctionC40AB51D",
+            "Arn",
+          ],
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":execute-api:us-east-1:123456789012:",
+              {
+                "Ref": "ApiRestApiE35FEAFE",
+              },
+              "/",
+              {
+                "Ref": "ApiRestApiDeploymentStageprodE828476C",
+              },
+              "/POST/submitKnowledge",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "ApiRestApisubmitKnowledgePOSTApiPermissionTestTestStackApiRestApi914E81ACPOSTsubmitKnowledgeD1039E30": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "SubmitLambdaFunctionC40AB51D",
+            "Arn",
+          ],
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":execute-api:us-east-1:123456789012:",
+              {
+                "Ref": "ApiRestApiE35FEAFE",
+              },
+              "/test-invoke-stage/POST/submitKnowledge",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "ApiRestApisubmitKnowledgePOSTE3A80A61": {
+      "Properties": {
+        "AuthorizationType": "AWS_IAM",
+        "HttpMethod": "POST",
+        "Integration": {
+          "IntegrationHttpMethod": "POST",
+          "Type": "AWS_PROXY",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":apigateway:us-east-1:lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": [
+                    "SubmitLambdaFunctionC40AB51D",
+                    "Arn",
+                  ],
+                },
+                "/invocations",
+              ],
+            ],
+          },
+        },
+        "ResourceId": {
+          "Ref": "ApiRestApisubmitKnowledgeE9E5BE7C",
+        },
+        "RestApiId": {
+          "Ref": "ApiRestApiE35FEAFE",
+        },
+      },
+      "Type": "AWS::ApiGateway::Method",
+    },
+    "AsgUnhealthyAlarmE78EC951": {
+      "Properties": {
+        "AlarmDescription": "No EC2 instances in service — server mode is down",
+        "AlarmName": "multi-kb-ec2-unhealthy",
+        "ComparisonOperator": "LessThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "AutoScalingGroupName",
+            "Value": {
+              "Ref": "ComputeAsgASG33A9C744",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "GroupInServiceInstances",
+        "Namespace": "AWS/AutoScaling",
+        "Period": 300,
+        "Statistic": "Minimum",
+        "Threshold": 1,
+        "TreatMissingData": "breaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "ComputeAsgASG33A9C744": {
+      "CreationPolicy": {
+        "ResourceSignal": {
+          "Count": 1,
+          "Timeout": "PT15M",
+        },
+      },
+      "Properties": {
+        "DesiredCapacity": "1",
+        "LaunchTemplate": {
+          "LaunchTemplateId": {
+            "Ref": "ComputeLaunchTemplate63F783B2",
+          },
+          "Version": {
+            "Fn::GetAtt": [
+              "ComputeLaunchTemplate63F783B2",
+              "LatestVersionNumber",
+            ],
+          },
+        },
+        "MaxSize": "1",
+        "MinSize": "1",
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+      },
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "UpdatePolicy": {
+        "AutoScalingScheduledAction": {
+          "IgnoreUnmodifiedGroupSizeProperties": true,
+        },
+      },
+    },
+    "ComputeEc2RoleB3EBEEC8": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "ComputeEc2RoleDefaultPolicy0D81FF53": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "sqs:ReceiveMessage",
+                "sqs:DeleteMessage",
+                "sqs:GetQueueAttributes",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "StorageQueueF784EBBA",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "codecommit:GitPull",
+                "codecommit:GitPush",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "StorageRepository85438334",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StorageBucket5CB7C8EA",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "StorageBucket5CB7C8EA",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": "arn:aws:s3:::test-bucket/multi-kb/cli-linux-arm64",
+            },
+            {
+              "Action": "aoss:APIAccessAll",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SearchCollectionE9B440CC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "bedrock:InvokeModel",
+              "Effect": "Allow",
+              "Resource": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514",
+            },
+            {
+              "Action": [
+                "bedrock:StartIngestionJob",
+                "bedrock:GetIngestionJob",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "KnowledgeBaseB4CDAA8B",
+                  "KnowledgeBaseArn",
+                ],
+              },
+            },
+            {
+              "Action": "ssm:UpdateInstanceInformation",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ssmmessages:CreateControlChannel",
+                "ssmmessages:CreateDataChannel",
+                "ssmmessages:OpenControlChannel",
+                "ssmmessages:OpenDataChannel",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ec2messages:AcknowledgeMessage",
+                "ec2messages:DeleteMessage",
+                "ec2messages:FailMessage",
+                "ec2messages:GetEndpoint",
+                "ec2messages:GetMessages",
+                "ec2messages:SendReply",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:aws:logs:us-east-1:123456789012:log-group:",
+                    {
+                      "Ref": "ObservabilityEc2CliLogGroup5914591E",
+                    },
+                    ":*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "cloudformation:SignalResource",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "AWS::StackId",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "ComputeEc2RoleDefaultPolicy0D81FF53",
+        "Roles": [
+          {
+            "Ref": "ComputeEc2RoleB3EBEEC8",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "ComputeLaunchTemplate63F783B2": {
+      "DependsOn": [
+        "ComputeEc2RoleDefaultPolicy0D81FF53",
+        "ComputeEc2RoleB3EBEEC8",
+      ],
+      "Properties": {
+        "LaunchTemplateData": {
+          "IamInstanceProfile": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "ComputeLaunchTemplateProfile2F0B4BCE",
+                "Arn",
+              ],
+            },
+          },
+          "ImageId": {
+            "Ref": "SsmParameterValueawsserviceamiamazonlinuxlatestal2023amikernel61arm64C96584B6F00A464EAD1953AFF4B05118Parameter",
+          },
+          "InstanceType": "t4g.micro",
+          "MetadataOptions": {
+            "HttpTokens": "required",
+          },
+          "NetworkInterfaces": [
+            {
+              "AssociatePublicIpAddress": false,
+              "DeviceIndex": 0,
+              "Groups": [
+                {
+                  "Fn::GetAtt": [
+                    "NetworkingEc2SecurityGroup8078F069",
+                    "GroupId",
+                  ],
+                },
+              ],
+            },
+          ],
+          "TagSpecifications": [
+            {
+              "ResourceType": "instance",
+              "Tags": [
+                {
+                  "Key": "Name",
+                  "Value": "TestStack/Compute/LaunchTemplate",
+                },
+              ],
+            },
+            {
+              "ResourceType": "volume",
+              "Tags": [
+                {
+                  "Key": "Name",
+                  "Value": "TestStack/Compute/LaunchTemplate",
+                },
+              ],
+            },
+          ],
+          "UserData": {
+            "Fn::Base64": {
+              "Fn::Join": [
+                "",
+                [
+                  "#!/bin/bash
+function exitTrap(){
+exitCode=$?
+/opt/aws/bin/cfn-signal --stack TestStack --resource ComputeAsgASG33A9C744 --region us-east-1 -e $exitCode || echo 'Failed to send Cloudformation Signal'
+}
+trap exitTrap EXIT
+set -euxo pipefail
+dnf install -y amazon-cloudwatch-agent
+for i in 1 2 3; do
+  aws s3 cp s3://test-bucket/multi-kb/cli-linux-arm64 /usr/local/bin/multi-kb && chmod +x /usr/local/bin/multi-kb && break
+  echo "CLI binary download attempt $i failed, retrying..."
+  sleep $((2 ** (i - 1)))
+done
+test -x /usr/local/bin/multi-kb
+git config --system credential.helper '!aws codecommit credential-helper $@'
+git config --system credential.UseHttpPath true
+mkdir -p /opt/multi-kb
+for i in 1 2 3; do
+  git clone https://git-codecommit.us-east-1.amazonaws.com/v1/repos/multi-kb /opt/multi-kb/repo && break
+  echo "CodeCommit clone attempt $i failed, retrying..."
+  sleep $((2 ** (i - 1)))
+done
+if [ ! -d /opt/multi-kb/repo/.git ]; then
+  mkdir -p /opt/multi-kb/repo
+  cd /opt/multi-kb/repo
+  git init
+  git remote add origin https://git-codecommit.us-east-1.amazonaws.com/v1/repos/multi-kb
+fi
+cat > /opt/multi-kb/config.yaml << 'CONFIGEOF'
+mode: server
+author: "multi-kb-server"
+
+sqs:
+  queue_url: "",
+                  {
+                    "Ref": "StorageQueueF784EBBA",
+                  },
+                  ""
+  batch_size: 10
+
+codecommit:
+  repo_name: "multi-kb"
+  region: "us-east-1"
+
+s3:
+  bucket: "",
+                  {
+                    "Ref": "StorageBucket5CB7C8EA",
+                  },
+                  ""
+  region: "us-east-1"
+
+opensearch:
+  endpoint: "",
+                  {
+                    "Fn::GetAtt": [
+                      "SearchCollectionE9B440CC",
+                      "CollectionEndpoint",
+                    ],
+                  },
+                  ""
+  region: "us-east-1"
+
+bedrock_kb:
+  knowledge_base_id: "",
+                  {
+                    "Fn::GetAtt": [
+                      "KnowledgeBaseB4CDAA8B",
+                      "KnowledgeBaseId",
+                    ],
+                  },
+                  ""
+  data_source_id: "",
+                  {
+                    "Fn::GetAtt": [
+                      "KnowledgeBaseDataSource867D63C8",
+                      "DataSourceId",
+                    ],
+                  },
+                  ""
+
+tick_interval: "5m"
+
+dream_cycle:
+  interval: "3h"
+  model_id: "anthropic.claude-sonnet-4-20250514"
+
+recall_log:
+  schedule: "02:00"
+CONFIGEOF
+mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'CWEOF'
+{"logs":{"logs_collected":{"files":{"collect_list":[{"file_path":"/var/log/multi-kb/server.log","log_group_name":"",
+                  {
+                    "Ref": "ObservabilityEc2CliLogGroup5914591E",
+                  },
+                  "","log_stream_name":"{instance_id}"}]}}}}
+CWEOF
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+mkdir -p /var/log/multi-kb
+cat > /etc/systemd/system/multi-kb.service << 'UNITEOF'
+[Unit]
+Description=Multi-KB Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/multi-kb server --config /opt/multi-kb/config.yaml
+WorkingDirectory=/opt/multi-kb/repo
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/multi-kb/server.log
+StandardError=append:/var/log/multi-kb/server.log
+Environment=AWS_REGION=us-east-1
+Environment=HOME=/root
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+systemctl daemon-reload
+systemctl enable --now multi-kb",
+                ],
+              ],
+            },
+          },
+        },
+        "TagSpecifications": [
+          {
+            "ResourceType": "launch-template",
+            "Tags": [
+              {
+                "Key": "Name",
+                "Value": "TestStack/Compute/LaunchTemplate",
+              },
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::EC2::LaunchTemplate",
+    },
+    "ComputeLaunchTemplateProfile2F0B4BCE": {
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "ComputeEc2RoleB3EBEEC8",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::InstanceProfile",
+    },
+    "DataAccessPolicy": {
+      "Properties": {
+        "Name": "multi-kb-dap",
+        "Policy": {
+          "Fn::Join": [
+            "",
+            [
+              "[{"Rules":[{"ResourceType":"index","Resource":["index/multi-kb/*"],"Permission":["aoss:ReadDocument","aoss:WriteDocument","aoss:CreateIndex","aoss:DeleteIndex","aoss:UpdateIndex","aoss:DescribeIndex"]},{"ResourceType":"collection","Resource":["collection/multi-kb"],"Permission":["aoss:CreateCollectionItems","aoss:DeleteCollectionItems","aoss:UpdateCollectionItems","aoss:DescribeCollectionItems"]}],"Principal":["",
+              {
+                "Fn::GetAtt": [
+                  "ComputeEc2RoleB3EBEEC8",
+                  "Arn",
+                ],
+              },
+              "","",
+              {
+                "Fn::GetAtt": [
+                  "KnowledgeBaseServiceRole1446004D",
+                  "Arn",
+                ],
+              },
+              "","",
+              {
+                "Fn::GetAtt": [
+                  "SearchIndexCreationLambdaRole0CD0270F",
+                  "Arn",
+                ],
+              },
+              ""]}]",
+            ],
+          ],
+        },
+        "Type": "data",
+      },
+      "Type": "AWS::OpenSearchServerless::AccessPolicy",
+    },
+    "KnowledgeBaseB4CDAA8B": {
+      "DependsOn": [
+        "SearchIndexCustomResource1DA46AEA",
+      ],
+      "Properties": {
+        "KnowledgeBaseConfiguration": {
+          "Type": "VECTOR",
+          "VectorKnowledgeBaseConfiguration": {
+            "EmbeddingModelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0",
+          },
+        },
+        "Name": "multi-kb-kb",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "KnowledgeBaseServiceRole1446004D",
+            "Arn",
+          ],
+        },
+        "StorageConfiguration": {
+          "OpensearchServerlessConfiguration": {
+            "CollectionArn": {
+              "Fn::GetAtt": [
+                "SearchCollectionE9B440CC",
+                "Arn",
+              ],
+            },
+            "FieldMapping": {
+              "MetadataField": "AMAZON_BEDROCK_METADATA",
+              "TextField": "AMAZON_BEDROCK_TEXT_CHUNK",
+              "VectorField": "bedrock-knowledge-base-default-vector",
+            },
+            "VectorIndexName": "bedrock-kb-index",
+          },
+          "Type": "OPENSEARCH_SERVERLESS",
+        },
+      },
+      "Type": "AWS::Bedrock::KnowledgeBase",
+    },
+    "KnowledgeBaseDataSource867D63C8": {
+      "Properties": {
+        "DataSourceConfiguration": {
+          "S3Configuration": {
+            "BucketArn": {
+              "Fn::GetAtt": [
+                "StorageBucket5CB7C8EA",
+                "Arn",
+              ],
+            },
+          },
+          "Type": "S3",
+        },
+        "KnowledgeBaseId": {
+          "Fn::GetAtt": [
+            "KnowledgeBaseB4CDAA8B",
+            "KnowledgeBaseId",
+          ],
+        },
+        "Name": "multi-kb-ds",
+        "VectorIngestionConfiguration": {
+          "ChunkingConfiguration": {
+            "ChunkingStrategy": "NONE",
+          },
+        },
+      },
+      "Type": "AWS::Bedrock::DataSource",
+    },
+    "KnowledgeBaseServiceRole1446004D": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/*",
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "bedrock.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": "s3:GetObject",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:ResourceAccount": "123456789012",
+                    },
+                  },
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        {
+                          "Fn::GetAtt": [
+                            "StorageBucket5CB7C8EA",
+                            "Arn",
+                          ],
+                        },
+                        "/*",
+                      ],
+                    ],
+                  },
+                },
+                {
+                  "Action": "s3:ListBucket",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:ResourceAccount": "123456789012",
+                    },
+                  },
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "StorageBucket5CB7C8EA",
+                      "Arn",
+                    ],
+                  },
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "S3Access",
+          },
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": "aoss:APIAccessAll",
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "SearchCollectionE9B440CC",
+                      "Arn",
+                    ],
+                  },
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "AOSSAccess",
+          },
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": "bedrock:InvokeModel",
+                  "Effect": "Allow",
+                  "Resource": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0",
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "BedrockEmbedding",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "NetworkingAossVpcEndpointCA8BA71D": {
+      "Properties": {
+        "Name": "multi-kb-ep",
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::OpenSearchServerless::VpcEndpoint",
+    },
+    "NetworkingBedrockAgentEndpointFC43D2D7": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.bedrock-agent",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingBedrockRuntimeEndpoint49CC2D2E": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.bedrock-runtime",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingCloudWatchLogsEndpoint87923826": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.logs",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingCodeCommitEndpointE829D4FE": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.git-codecommit",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingEc2MessagesEndpointF6FDDB8F": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.ec2messages",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingEc2SecurityGroup8078F069": {
+      "Properties": {
+        "GroupDescription": "EC2 instance security group — HTTPS to endpoints only",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "255.255.255.255/32",
+            "Description": "Disallow all traffic",
+            "FromPort": 252,
+            "IpProtocol": "icmp",
+            "ToPort": 86,
+          },
+        ],
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "NetworkingEc2ToEndpointEgressB5C97EEC": {
+      "Properties": {
+        "Description": "HTTPS to VPC endpoints",
+        "DestinationSecurityGroupId": {
+          "Fn::GetAtt": [
+            "NetworkingEndpointSecurityGroupDAD4F22F",
+            "GroupId",
+          ],
+        },
+        "FromPort": 443,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "NetworkingEc2SecurityGroup8078F069",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "ToPort": 443,
+      },
+      "Type": "AWS::EC2::SecurityGroupEgress",
+    },
+    "NetworkingEndpointFromEc2Ingress7040BC7F": {
+      "Properties": {
+        "Description": "HTTPS from EC2 instances",
+        "FromPort": 443,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "NetworkingEndpointSecurityGroupDAD4F22F",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "NetworkingEc2SecurityGroup8078F069",
+            "GroupId",
+          ],
+        },
+        "ToPort": 443,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "NetworkingEndpointSecurityGroupDAD4F22F": {
+      "Properties": {
+        "GroupDescription": "VPC endpoint security group — HTTPS from EC2 SG only",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "255.255.255.255/32",
+            "Description": "Disallow all traffic",
+            "FromPort": 252,
+            "IpProtocol": "icmp",
+            "ToPort": 86,
+          },
+        ],
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "NetworkingSqsEndpoint97817BF9": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.sqs",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingSsmEndpoint6FA97E65": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.ssm",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingSsmMessagesEndpointD305E645": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.ssmmessages",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingVpc6B5E6F44": {
+      "Properties": {
+        "CidrBlock": "10.0.0.0/16",
+        "EnableDnsHostnames": true,
+        "EnableDnsSupport": true,
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Networking/Vpc",
+          },
+        ],
+      },
+      "Type": "AWS::EC2::VPC",
+    },
+    "NetworkingVpcS3GatewayEndpoint1B308AD9": {
+      "Properties": {
+        "RouteTableIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1RouteTableBA07DE42",
+          },
+        ],
+        "ServiceName": {
+          "Fn::Join": [
+            "",
+            [
+              "com.amazonaws.",
+              {
+                "Ref": "AWS::Region",
+              },
+              ".s3",
+            ],
+          ],
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Networking/Vpc",
+          },
+        ],
+        "VpcEndpointType": "Gateway",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingVpcprivateSubnet1RouteTableAssociation325591CC": {
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "NetworkingVpcprivateSubnet1RouteTableBA07DE42",
+        },
+        "SubnetId": {
+          "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+        },
+      },
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+    },
+    "NetworkingVpcprivateSubnet1RouteTableBA07DE42": {
+      "Properties": {
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "TestStack/Networking/Vpc/privateSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::RouteTable",
+    },
+    "NetworkingVpcprivateSubnet1Subnet7D313D7C": {
+      "Properties": {
+        "AvailabilityZone": "dummy1a",
+        "CidrBlock": "10.0.0.0/24",
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "aws-cdk:subnet-name",
+            "Value": "private",
+          },
+          {
+            "Key": "aws-cdk:subnet-type",
+            "Value": "Isolated",
+          },
+          {
+            "Key": "Name",
+            "Value": "TestStack/Networking/Vpc/privateSubnet1",
+          },
+        ],
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::Subnet",
+    },
+    "ObservabilityDlqAlarmC01666B1": {
+      "Properties": {
+        "AlarmDescription": "Dead-letter queue has messages — indicates processing failures",
+        "AlarmName": "multi-kb-dlq-messages",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "QueueName",
+            "Value": {
+              "Fn::GetAtt": [
+                "StorageDlq06CDC238",
+                "QueueName",
+              ],
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ApproximateNumberOfMessagesVisible",
+        "Namespace": "AWS/SQS",
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "ObservabilityDreamCycleLockAlarm77376D62": {
+      "Properties": {
+        "AlarmDescription": "Dream cycle lock held for over 60 minutes — possible deadlock",
+        "AlarmName": "multi-kb-dream-cycle-lock",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "EvaluationPeriods": 1,
+        "MetricName": "DreamCycleLockHeldMinutes",
+        "Namespace": "MultiKB",
+        "Period": 3600,
+        "Statistic": "Sum",
+        "Threshold": 60,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "ObservabilityEc2CliLogGroup5914591E": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": "/multi-kb/ec2/server",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "ObservabilityEc2CliLogGroupDreamCycleLockHeld41FDE00C": {
+      "Properties": {
+        "FilterPattern": ""dream cycle lock"",
+        "LogGroupName": {
+          "Ref": "ObservabilityEc2CliLogGroup5914591E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "DreamCycleLockHeldMinutes",
+            "MetricNamespace": "MultiKB",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
+    "ObservabilityRecallLambdaLogGroup8D62E61D": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Join": [
+            "",
+            [
+              "/aws/lambda/",
+              {
+                "Ref": "RecallLambdaFunction397F529F",
+              },
+            ],
+          ],
+        },
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "ObservabilitySubmitLambdaLogGroup6D48B8EC": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Join": [
+            "",
+            [
+              "/aws/lambda/",
+              {
+                "Ref": "SubmitLambdaFunctionC40AB51D",
+              },
+            ],
+          ],
+        },
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "RecallLambdaFunction397F529F": {
+      "DependsOn": [
+        "RecallLambdaFunctionServiceRoleDefaultPolicy45AFEEE6",
+        "RecallLambdaFunctionServiceRole00369BC6",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "f387531dc20d5cce42fc682a4af21c00ad0a6ae9cfa16d97e03d598fe1046e1e.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "BUCKET_NAME": {
+              "Ref": "StorageBucket5CB7C8EA",
+            },
+            "COVERAGE_MODEL_ID": "anthropic.claude-haiku-4-5-20251001",
+            "COVERAGE_SCORE_THRESHOLD": "0.3",
+            "EXCLUDE_PENDING": "true",
+            "KNOWLEDGE_BASE_ID": {
+              "Fn::GetAtt": [
+                "KnowledgeBaseB4CDAA8B",
+                "KnowledgeBaseId",
+              ],
+            },
+          },
+        },
+        "Handler": "index.handler",
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": [
+            "RecallLambdaFunctionServiceRole00369BC6",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 30,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "RecallLambdaFunctionServiceRole00369BC6": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "RecallLambdaFunctionServiceRoleDefaultPolicy45AFEEE6": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "bedrock:Retrieve",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "KnowledgeBaseB4CDAA8B",
+                  "KnowledgeBaseArn",
+                ],
+              },
+            },
+            {
+              "Action": "bedrock:InvokeModel",
+              "Effect": "Allow",
+              "Resource": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001",
+            },
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StorageBucket5CB7C8EA",
+                        "Arn",
+                      ],
+                    },
+                    "/recall-logs/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "RecallLambdaFunctionServiceRoleDefaultPolicy45AFEEE6",
+        "Roles": [
+          {
+            "Ref": "RecallLambdaFunctionServiceRole00369BC6",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "SearchCollectionE9B440CC": {
+      "DependsOn": [
+        "SearchEncryptionPolicy9B173A62",
+        "SearchNetworkPolicy5085EF65",
+      ],
+      "Properties": {
+        "Name": "multi-kb",
+        "StandbyReplicas": "DISABLED",
+        "Type": "VECTORSEARCH",
+      },
+      "Type": "AWS::OpenSearchServerless::Collection",
+    },
+    "SearchEncryptionPolicy9B173A62": {
+      "Properties": {
+        "Name": "multi-kb-enc",
+        "Policy": "{"AWSOwnedKey":true,"Rules":[{"ResourceType":"collection","Resource":["collection/multi-kb"]}]}",
+        "Type": "encryption",
+      },
+      "Type": "AWS::OpenSearchServerless::SecurityPolicy",
+    },
+    "SearchIndexCreationFunctionC4CBD080": {
+      "DependsOn": [
+        "NetworkingVpcprivateSubnet1RouteTableAssociation325591CC",
+        "SearchIndexCreationLambdaRole0CD0270F",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "908f035664749fd80e226b97b8f20d6b8d42bcf4784d651acfe37631efd7c012.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "COLLECTION_ENDPOINT": {
+              "Fn::GetAtt": [
+                "SearchCollectionE9B440CC",
+                "CollectionEndpoint",
+              ],
+            },
+            "COLLECTION_NAME": "multi-kb",
+            "INDEX_NAME": "bedrock-kb-index",
+          },
+        },
+        "Handler": "index.handler",
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "SearchIndexCreationLambdaRole0CD0270F",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 300,
+        "VpcConfig": {
+          "SecurityGroupIds": [
+            {
+              "Fn::GetAtt": [
+                "NetworkingEndpointSecurityGroupDAD4F22F",
+                "GroupId",
+              ],
+            },
+          ],
+          "SubnetIds": [
+            {
+              "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+            },
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "SearchIndexCreationLambdaRole0CD0270F": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+              ],
+            ],
+          },
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": "aoss:APIAccessAll",
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "SearchCollectionE9B440CC",
+                      "Arn",
+                    ],
+                  },
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "AOSSAccess",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SearchIndexCustomResource1DA46AEA": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "DataAccessPolicy",
+        "SearchCollectionE9B440CC",
+      ],
+      "Properties": {
+        "CollectionEndpoint": {
+          "Fn::GetAtt": [
+            "SearchCollectionE9B440CC",
+            "CollectionEndpoint",
+          ],
+        },
+        "IndexName": "bedrock-kb-index",
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "SearchIndexProviderframeworkonEventFC8F4ACC",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::CloudFormation::CustomResource",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "SearchIndexProviderframeworkonEventFC8F4ACC": {
+      "DependsOn": [
+        "SearchIndexProviderframeworkonEventServiceRoleDefaultPolicy346F44D5",
+        "SearchIndexProviderframeworkonEventServiceRole835C9380",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "07a90cc3efdfc34da22208dcd9d211f06f5b0e01b21e778edc7c3966b1f61d57.zip",
+        },
+        "Description": "AWS CDK resource provider framework - onEvent (TestStack/Search/IndexProvider)",
+        "Environment": {
+          "Variables": {
+            "USER_ON_EVENT_FUNCTION_ARN": {
+              "Fn::GetAtt": [
+                "SearchIndexCreationFunctionC4CBD080",
+                "Arn",
+              ],
+            },
+          },
+        },
+        "Handler": "framework.onEvent",
+        "LoggingConfig": {
+          "ApplicationLogLevel": "FATAL",
+          "LogFormat": "JSON",
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "SearchIndexProviderframeworkonEventServiceRole835C9380",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "SearchIndexProviderframeworkonEventServiceRole835C9380": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SearchIndexProviderframeworkonEventServiceRoleDefaultPolicy346F44D5": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "SearchIndexCreationFunctionC4CBD080",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "SearchIndexCreationFunctionC4CBD080",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "lambda:GetFunction",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SearchIndexCreationFunctionC4CBD080",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "SearchIndexProviderframeworkonEventServiceRoleDefaultPolicy346F44D5",
+        "Roles": [
+          {
+            "Ref": "SearchIndexProviderframeworkonEventServiceRole835C9380",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "SearchNetworkPolicy5085EF65": {
+      "Properties": {
+        "Name": "multi-kb-net",
+        "Policy": {
+          "Fn::Join": [
+            "",
+            [
+              "[{"AllowFromPublic":false,"SourceVPCEs":["",
+              {
+                "Fn::GetAtt": [
+                  "NetworkingAossVpcEndpointCA8BA71D",
+                  "Id",
+                ],
+              },
+              ""],"SourceServices":["bedrock.amazonaws.com"],"Rules":[{"ResourceType":"collection","Resource":["collection/multi-kb"]},{"ResourceType":"dashboard","Resource":["collection/multi-kb"]}]}]",
+            ],
+          ],
+        },
+        "Type": "network",
+      },
+      "Type": "AWS::OpenSearchServerless::SecurityPolicy",
+    },
+    "StorageBucket5CB7C8EA": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "BucketName": "multi-kb-123456789012-us-east-1",
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "StorageDlq06CDC238": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "StorageQueueF784EBBA": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "RedrivePolicy": {
+          "deadLetterTargetArn": {
+            "Fn::GetAtt": [
+              "StorageDlq06CDC238",
+              "Arn",
+            ],
+          },
+          "maxReceiveCount": 3,
+        },
+        "VisibilityTimeout": 300,
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "StorageRepository85438334": {
+      "Properties": {
+        "RepositoryName": "multi-kb",
+      },
+      "Type": "AWS::CodeCommit::Repository",
+    },
+    "SubmitLambdaFunctionC40AB51D": {
+      "DependsOn": [
+        "SubmitLambdaFunctionServiceRoleDefaultPolicyE2F9C205",
+        "SubmitLambdaFunctionServiceRole03930739",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "a3fd142cfac644f32f7604dd2972f68267d8e34ad10b7959672f7204c8ca3aa4.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "SQS_QUEUE_URL": {
+              "Ref": "StorageQueueF784EBBA",
+            },
+          },
+        },
+        "Handler": "index.handler",
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "SubmitLambdaFunctionServiceRole03930739",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 10,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "SubmitLambdaFunctionServiceRole03930739": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SubmitLambdaFunctionServiceRoleDefaultPolicyE2F9C205": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:SendMessage",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "StorageQueueF784EBBA",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "SubmitLambdaFunctionServiceRoleDefaultPolicyE2F9C205",
+        "Roles": [
+          {
+            "Ref": "SubmitLambdaFunctionServiceRole03930739",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;

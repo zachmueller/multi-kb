@@ -65,19 +65,24 @@ export class Networking extends Construct {
       },
     );
 
-    // EC2 egress TCP 443 to endpoint SG only
-    this.ec2SecurityGroup.addEgressRule(
-      ec2.Peer.securityGroupId(this.endpointSecurityGroup.securityGroupId),
-      ec2.Port.tcp(443),
-      "HTTPS to VPC endpoints",
-    );
+    // Use separate L1 resources to avoid cyclic inline SG references
+    new ec2.CfnSecurityGroupEgress(this, "Ec2ToEndpointEgress", {
+      groupId: this.ec2SecurityGroup.securityGroupId,
+      ipProtocol: "tcp",
+      fromPort: 443,
+      toPort: 443,
+      destinationSecurityGroupId: this.endpointSecurityGroup.securityGroupId,
+      description: "HTTPS to VPC endpoints",
+    });
 
-    // Endpoint SG ingress TCP 443 from EC2 SG only
-    this.endpointSecurityGroup.addIngressRule(
-      ec2.Peer.securityGroupId(this.ec2SecurityGroup.securityGroupId),
-      ec2.Port.tcp(443),
-      "HTTPS from EC2 instances",
-    );
+    new ec2.CfnSecurityGroupIngress(this, "EndpointFromEc2Ingress", {
+      groupId: this.endpointSecurityGroup.securityGroupId,
+      ipProtocol: "tcp",
+      fromPort: 443,
+      toPort: 443,
+      sourceSecurityGroupId: this.ec2SecurityGroup.securityGroupId,
+      description: "HTTPS from EC2 instances",
+    });
 
     // S3 gateway endpoint (free — no hourly cost)
     this.vpc.addGatewayEndpoint("S3GatewayEndpoint", {

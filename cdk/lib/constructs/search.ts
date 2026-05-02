@@ -185,22 +185,23 @@ export class Search extends Construct {
   }
 
   /**
-   * SRC-004: Creates the data access policy once EC2 role, KB service role, and index Lambda role
-   * are all known. Called from the main stack after Compute and KnowledgeBase constructs are set up.
+   * SRC-004: Creates the data access policy at the given scope. Called from the main stack
+   * after Compute (EC2 role) and KnowledgeBase (service role) are created.
+   * Policy is created OUTSIDE the Search construct to avoid cyclic dependencies.
    */
   createDataAccessPolicy(
+    scope: Construct,
     ec2RoleArn: string,
     bedrockKbRoleArn: string,
   ): opensearchserverless.CfnAccessPolicy {
     const collectionName = this.collection.name;
     const policy = new opensearchserverless.CfnAccessPolicy(
-      this,
+      scope,
       "DataAccessPolicy",
       {
         name: `${collectionName}-dap`,
         type: "data",
-        // Principals: EC2 role + Bedrock KB service role + index creation Lambda role
-        policy: cdk.Stack.of(this).toJsonString([
+        policy: cdk.Stack.of(scope).toJsonString([
           {
             Rules: [
               {

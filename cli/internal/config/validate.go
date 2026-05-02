@@ -94,6 +94,56 @@ func Validate(cfg *Config) []error {
 		}
 	}
 
+	// Server-mode required fields — only validated when mode == "server"
+	if cfg.Mode == "server" {
+		errs = append(errs, validateServerMode(cfg)...)
+	}
+
+	return errs
+}
+
+func validateServerMode(cfg *Config) []error {
+	var errs []error
+
+	if cfg.SQS == nil || strings.TrimSpace(cfg.SQS.QueueURL) == "" {
+		errs = append(errs, fmt.Errorf("sqs.queue_url: required in server mode"))
+	}
+
+	if cfg.CodeCommit == nil || strings.TrimSpace(cfg.CodeCommit.RepoName) == "" {
+		errs = append(errs, fmt.Errorf("codecommit.repo_name: required in server mode"))
+	}
+
+	if cfg.S3 == nil || strings.TrimSpace(cfg.S3.Bucket) == "" {
+		errs = append(errs, fmt.Errorf("s3.bucket: required in server mode"))
+	}
+
+	if cfg.OpenSearch == nil || strings.TrimSpace(cfg.OpenSearch.Endpoint) == "" {
+		errs = append(errs, fmt.Errorf("opensearch.endpoint: required in server mode"))
+	}
+
+	if cfg.BedrockKB == nil {
+		errs = append(errs, fmt.Errorf("bedrock_kb: required in server mode"))
+	} else {
+		if strings.TrimSpace(cfg.BedrockKB.KnowledgeBaseID) == "" {
+			errs = append(errs, fmt.Errorf("bedrock_kb.knowledge_base_id: required in server mode"))
+		}
+		if strings.TrimSpace(cfg.BedrockKB.DataSourceID) == "" {
+			errs = append(errs, fmt.Errorf("bedrock_kb.data_source_id: required in server mode"))
+		}
+	}
+
+	if strings.TrimSpace(cfg.TickInterval) == "" {
+		errs = append(errs, fmt.Errorf("tick_interval: required in server mode"))
+	}
+
+	if strings.TrimSpace(cfg.DreamCycle.Interval) == "" {
+		errs = append(errs, fmt.Errorf("dream_cycle.interval: required in server mode"))
+	}
+
+	if cfg.RecallLog == nil || strings.TrimSpace(cfg.RecallLog.Schedule) == "" {
+		errs = append(errs, fmt.Errorf("recall_log.schedule: required in server mode"))
+	}
+
 	return errs
 }
 

@@ -82,6 +82,30 @@ func readNote(path string) (*Note, error) {
 	}, nil
 }
 
+// ParseNote parses a note from its UID and raw Markdown content.
+// Exported for use by server-mode NoteStore implementations.
+func ParseNote(uid, content string) (*Note, error) {
+	fm, body, err := parseFrontmatter(content)
+	if err != nil {
+		return nil, err
+	}
+	if fm.UID == "" {
+		fm.UID = uid
+	}
+	return &Note{
+		UID:     fm.UID,
+		Title:   fm.Title,
+		Content: strings.TrimSpace(body),
+		Author:  fm.Author,
+		Status:  fm.Status,
+	}, nil
+}
+
+// ToMarkdown renders the note as a Markdown file with YAML frontmatter.
+func (n Note) ToMarkdown() string {
+	return renderNoteFile(n)
+}
+
 // parseFrontmatter extracts YAML frontmatter and body from note content.
 func parseFrontmatter(content string) (*frontmatter, string, error) {
 	if !strings.HasPrefix(content, "---\n") {

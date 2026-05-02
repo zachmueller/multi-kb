@@ -372,6 +372,157 @@ func TestLoad_StructuredErrorsReturnAll(t *testing.T) {
 	}
 }
 
+// --- Server-mode tests (SRV-001) ---
+
+func minimalValidServerConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"mode":   "server",
+		"author": "multi-kb-server",
+		"sqs": map[string]interface{}{
+			"queue_url":  "https://sqs.us-east-1.amazonaws.com/123456789012/multi-kb",
+			"batch_size": 10,
+		},
+		"codecommit": map[string]interface{}{
+			"repo_name": "multi-kb",
+			"region":    "us-east-1",
+		},
+		"s3": map[string]interface{}{
+			"bucket": "multi-kb-123456789012-us-east-1",
+			"region": "us-east-1",
+		},
+		"opensearch": map[string]interface{}{
+			"endpoint": "https://abc123.us-east-1.aoss.amazonaws.com",
+			"region":   "us-east-1",
+		},
+		"bedrock_kb": map[string]interface{}{
+			"knowledge_base_id": "KBXXXXXX",
+			"data_source_id":    "DSXXXXXX",
+		},
+		"tick_interval": "5m",
+		"dream_cycle": map[string]interface{}{
+			"interval": "3h",
+			"model_id": "anthropic.claude-sonnet-4-20250514",
+		},
+		"recall_log": map[string]interface{}{
+			"schedule": "02:00",
+		},
+	}
+}
+
+func TestLoad_ValidServerConfig(t *testing.T) {
+	path := writeTempConfig(t, minimalValidServerConfig())
+
+	cfg, errs := Load(path)
+	if len(errs) > 0 {
+		t.Fatalf("expected no errors, got: %v", errs)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if cfg.Mode != "server" {
+		t.Errorf("mode = %q, want %q", cfg.Mode, "server")
+	}
+	if cfg.SQS.QueueURL != "https://sqs.us-east-1.amazonaws.com/123456789012/multi-kb" {
+		t.Errorf("sqs.queue_url = %q", cfg.SQS.QueueURL)
+	}
+	if cfg.CodeCommit.RepoName != "multi-kb" {
+		t.Errorf("codecommit.repo_name = %q", cfg.CodeCommit.RepoName)
+	}
+	if cfg.S3.Bucket != "multi-kb-123456789012-us-east-1" {
+		t.Errorf("s3.bucket = %q", cfg.S3.Bucket)
+	}
+	if cfg.OpenSearch.Endpoint != "https://abc123.us-east-1.aoss.amazonaws.com" {
+		t.Errorf("opensearch.endpoint = %q", cfg.OpenSearch.Endpoint)
+	}
+	if cfg.BedrockKB.KnowledgeBaseID != "KBXXXXXX" {
+		t.Errorf("bedrock_kb.knowledge_base_id = %q", cfg.BedrockKB.KnowledgeBaseID)
+	}
+	if cfg.TickInterval != "5m" {
+		t.Errorf("tick_interval = %q", cfg.TickInterval)
+	}
+}
+
+func TestLoad_ServerModeMissingRequiredFields(t *testing.T) {
+	raw := map[string]interface{}{
+		"mode":   "server",
+		"author": "multi-kb-server",
+	}
+	path := writeTempConfig(t, raw)
+
+	cfg, errs := Load(path)
+	if cfg != nil {
+		t.Error("expected nil config")
+	}
+
+	expectedFields := []string{
+		"sqs.queue_url",
+		"codecommit.repo_name",
+		"s3.bucket",
+		"opensearch.endpoint",
+		"bedrock_kb",
+		"tick_interval",
+		"dream_cycle.interval",
+		"recall_log.schedule",
+	}
+	errText := ""
+	for _, e := range errs {
+		errText += e.Error() + "\n"
+	}
+	for _, field := range expectedFields {
+		if !strings.Contains(errText, field) {
+			t.Errorf("expected error about %q in:\n%s", field, errText)
+		}
+	}
+}
+
+func TestLoad_ClientModeIgnoresServerFields(t *testing.T) {
+	raw := minimalValidConfig()
+	// Client mode should not require server fields
+	path := writeTempConfig(t, raw)
+
+	cfg, errs := Load(path)
+	if len(errs) > 0 {
+		t.Fatalf("expected no errors, got: %v", errs)
+	}
+	if cfg.SQS != nil {
+		t.Error("expected nil SQS config in client mode")
+	}
+}
+
+func TestLoad_ServerModeInvalidDurations(t *testing.T) {
+	raw := minimalValidServerConfig()
+	raw["tick_interval"] = "nope"
+	path := writeTempConfig(t, raw)
+
+	_, errs := Load(path)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Error(), "tick_interval") && strings.Contains(e.Error(), "invalid duration") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected tick_interval duration error, got: %v", errs)
+	}
+}
+
+func TestLoad_ServerModeInvalidRecallSchedule(t *testing.T) {
+	raw := minimalValidServerConfig()
+	raw["recall_log"] = map[string]interface{}{"schedule": "25:99"}
+	path := writeTempConfig(t, raw)
+
+	_, errs := Load(path)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Error(), "recall_log.schedule") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected recall_log.schedule error, got: %v", errs)
+	}
+}
+
 func TestLoad_FileNotFound(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.yaml")
 
