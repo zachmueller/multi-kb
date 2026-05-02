@@ -1,12 +1,34 @@
+import * as opensearchserverless from "aws-cdk-lib/aws-opensearchserverless";
 import { Construct } from "constructs";
 
 export interface SearchProps {
-  // Properties will be defined in SRC-001.
+  readonly collectionName: string;
 }
 
 export class Search extends Construct {
-  constructor(scope: Construct, id: string, _props: SearchProps) {
+  readonly encryptionPolicy: opensearchserverless.CfnSecurityPolicy;
+
+  constructor(scope: Construct, id: string, props: SearchProps) {
     super(scope, id);
-    // Implementation in SRC-001.
+
+    // SRC-002: Encryption policy — must exist before collection (SRC-001)
+    // Policy is a single object (NOT an array — unlike network and data access policies)
+    this.encryptionPolicy = new opensearchserverless.CfnSecurityPolicy(
+      this,
+      "EncryptionPolicy",
+      {
+        name: `${props.collectionName}-enc`,
+        type: "encryption",
+        policy: JSON.stringify({
+          AWSOwnedKey: true,
+          Rules: [
+            {
+              ResourceType: "collection",
+              Resource: [`collection/${props.collectionName}`],
+            },
+          ],
+        }),
+      },
+    );
   }
 }
