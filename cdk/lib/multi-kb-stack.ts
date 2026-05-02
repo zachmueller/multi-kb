@@ -59,5 +59,12 @@ export function resolveProps(app: cdk.App): MultiKbStackProps {
 export class MultiKbStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: MultiKbStackProps) {
     super(scope, id, props);
+
+    // Construct instantiation is handled in future waves when all
+    // constructs are wired together (WIR-001). Individual constructs
+    // are developed and tested independently.
+    //
+    // Stack outputs are added by each construct or in this file
+    // once constructs are wired.
   }
 }

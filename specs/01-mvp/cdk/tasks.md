@@ -362,9 +362,9 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - `lib/multi-kb-stack.ts` — CfnOutput additions
 **Dependencies:** SRC-001, KBS-001, KBS-003 (data source ID)
 **Acceptance Criteria:**
-- [ ] Output `CollectionEndpoint`: OpenSearch Serverless collection endpoint
-- [ ] Output `KnowledgeBaseId`: Bedrock KB ID
-- [ ] Output `DataSourceId`: Bedrock KB data source ID (from KBS-003) — required by EC2 config.yaml per [server-config.md](contracts/server-config.md)
+- [x] Output `CollectionEndpoint`: OpenSearch Serverless collection endpoint
+- [x] Output `KnowledgeBaseId`: Bedrock KB ID
+- [x] Output `DataSourceId`: Bedrock KB data source ID (from KBS-003) — required by EC2 config.yaml per [server-config.md](contracts/server-config.md)
 - [ ] CDK assertion test: outputs exist (including `DataSourceId`)
 
 ---
@@ -485,11 +485,11 @@ _Corresponds to plan.md Phase E._
 - `test/constructs/api.test.ts`
 **Dependencies:** ENV-002
 **Acceptance Criteria:**
-- [ ] REST API (not HTTP API) — required for `AWS_IAM` auth
-- [ ] `prod` stage deployed
-- [ ] Access logging enabled (CloudWatch Logs)
-- [ ] CORS not enabled (spec: "CLI is not a browser client")
-- [ ] Exports: API object, endpoint URL
+- [x] REST API (not HTTP API) — required for `AWS_IAM` auth
+- [x] `prod` stage deployed
+- [x] Access logging enabled (CloudWatch Logs)
+- [x] CORS not enabled (spec: "CLI is not a browser client")
+- [x] Exports: API object, endpoint URL
 - [ ] CDK assertion test: REST API resource; stage named `prod`; access log destination configured
 
 ### API-002: submitKnowledge Endpoint
@@ -499,10 +499,10 @@ _Corresponds to plan.md Phase E._
 - `test/constructs/api.test.ts`
 **Dependencies:** API-001, LMB-003
 **Acceptance Criteria:**
-- [ ] Resource: `/submitKnowledge`
-- [ ] Method: `POST` with `AWS_IAM` authorization
-- [ ] Lambda proxy integration with submitKnowledge function
-- [ ] Unauthorized requests receive HTTP 401; insufficient permissions receive HTTP 403
+- [x] Resource: `/submitKnowledge`
+- [x] Method: `POST` with `AWS_IAM` authorization
+- [x] Lambda proxy integration with submitKnowledge function
+- [x] Unauthorized requests receive HTTP 401; insufficient permissions receive HTTP 403
 - [ ] CDK assertion test: API resource with `POST` method; IAM auth type; Lambda integration
 
 ### API-003 [P]: recallKnowledge Endpoint
@@ -512,9 +512,9 @@ _Corresponds to plan.md Phase E._
 - `test/constructs/api.test.ts`
 **Dependencies:** API-001, LMB-005
 **Acceptance Criteria:**
-- [ ] Resource: `/recallKnowledge`
-- [ ] Method: `POST` with `AWS_IAM` authorization
-- [ ] Lambda proxy integration with recallKnowledge function
+- [x] Resource: `/recallKnowledge`
+- [x] Method: `POST` with `AWS_IAM` authorization
+- [x] Lambda proxy integration with recallKnowledge function
 - [ ] CDK assertion test: API resource with `POST` method; IAM auth type; Lambda integration
 
 ### API-004: Stack Output — API Endpoint
@@ -523,8 +523,8 @@ _Corresponds to plan.md Phase E._
 - `lib/multi-kb-stack.ts` — CfnOutput additions
 **Dependencies:** API-001
 **Acceptance Criteria:**
-- [ ] Output `ApiEndpoint`: full API Gateway endpoint URL (e.g., `https://{api-id}.execute-api.{region}.amazonaws.com/prod`)
-- [ ] Output `ApiId`: API Gateway REST API ID
+- [x] Output `ApiEndpoint`: full API Gateway endpoint URL (e.g., `https://{api-id}.execute-api.{region}.amazonaws.com/prod`)
+- [x] Output `ApiId`: API Gateway REST API ID
 - [ ] CDK assertion test: outputs exist
 
 ---

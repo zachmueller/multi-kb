@@ -99,6 +99,12 @@ export class Search extends Construct {
     this.collectionEndpoint = this.collection.attrCollectionEndpoint;
     this.collectionId = this.collection.attrId;
 
+    // SRC-005: Stack output for collection endpoint
+    new cdk.CfnOutput(this, "CollectionEndpoint", {
+      value: this.collectionEndpoint,
+      description: "OpenSearch Serverless collection endpoint",
+    });
+
     // SRC-006: Create Lambda role for index creation BEFORE data access policy (SRC-004)
     // so the role ARN can be included in SRC-004 principals.
     this.indexCreationLambdaRole = new iam.Role(
