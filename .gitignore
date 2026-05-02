@@ -19,3 +19,6 @@ mise.toml
 
 # private directory
 private/
+
+# CDK stuff
+cdk/cdk.context.json
