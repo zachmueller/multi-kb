@@ -365,7 +365,7 @@ _Corresponds to plan.md Phase C. Builds OpenSearch Serverless + Bedrock KB._
 - [x] Output `CollectionEndpoint`: OpenSearch Serverless collection endpoint
 - [x] Output `KnowledgeBaseId`: Bedrock KB ID
 - [x] Output `DataSourceId`: Bedrock KB data source ID (from KBS-003) — required by EC2 config.yaml per [server-config.md](contracts/server-config.md)
-- [ ] CDK assertion test: outputs exist (including `DataSourceId`)
+- [x] CDK assertion test: outputs exist (including `DataSourceId`)
 
 ---
 
@@ -490,7 +490,7 @@ _Corresponds to plan.md Phase E._
 - [x] Access logging enabled (CloudWatch Logs)
 - [x] CORS not enabled (spec: "CLI is not a browser client")
 - [x] Exports: API object, endpoint URL
-- [ ] CDK assertion test: REST API resource; stage named `prod`; access log destination configured
+- [x] CDK assertion test: REST API resource; stage named `prod`; access log destination configured
 
 ### API-002: submitKnowledge Endpoint
 **Description:** Create the `POST /submitKnowledge` resource, method, and Lambda proxy integration per spec FR-1, FR-2.
@@ -503,7 +503,7 @@ _Corresponds to plan.md Phase E._
 - [x] Method: `POST` with `AWS_IAM` authorization
 - [x] Lambda proxy integration with submitKnowledge function
 - [x] Unauthorized requests receive HTTP 401; insufficient permissions receive HTTP 403
-- [ ] CDK assertion test: API resource with `POST` method; IAM auth type; Lambda integration
+- [x] CDK assertion test: API resource with `POST` method; IAM auth type; Lambda integration
 
 ### API-003 [P]: recallKnowledge Endpoint
 **Description:** Create the `POST /recallKnowledge` resource, method, and Lambda proxy integration per spec FR-1, FR-9.
@@ -515,7 +515,7 @@ _Corresponds to plan.md Phase E._
 - [x] Resource: `/recallKnowledge`
 - [x] Method: `POST` with `AWS_IAM` authorization
 - [x] Lambda proxy integration with recallKnowledge function
-- [ ] CDK assertion test: API resource with `POST` method; IAM auth type; Lambda integration
+- [x] CDK assertion test: API resource with `POST` method; IAM auth type; Lambda integration
 
 ### API-004: Stack Output — API Endpoint
 **Description:** Add CloudFormation outputs for API Gateway.
@@ -525,7 +525,7 @@ _Corresponds to plan.md Phase E._
 **Acceptance Criteria:**
 - [x] Output `ApiEndpoint`: full API Gateway endpoint URL (e.g., `https://{api-id}.execute-api.{region}.amazonaws.com/prod`)
 - [x] Output `ApiId`: API Gateway REST API ID
-- [ ] CDK assertion test: outputs exist
+- [x] CDK assertion test: outputs exist
 
 ---
 
@@ -763,29 +763,29 @@ _Research items must complete before their dependent implementation phases._
 - [x] Stack outputs are unique per deployment
 
 ### QAT-005: Post-Deploy Integration Checklist
-**Description:** Manual integration test checklist for validating a deployed stack end-to-end per spec User Scenarios.
+**Description:** Manual integration test checklist for validating a deployed stack end-to-end per spec User Scenarios. Automated test script at `test/integration/qat-005-post-deploy.sh`.
 **Dependencies:** WIR-001
 **Acceptance Criteria:**
-- [ ] **Submit flow:** `aws apigateway test-invoke-method` on submitKnowledge → verify SQS message arrives → verify EC2 picks up message → verify CodeCommit commit → verify S3 sync → verify note appears in OpenSearch after Bedrock KB sync
-- [ ] **Recall flow:** `aws apigateway test-invoke-method` on recallKnowledge with query matching submitted note → verify results returned → verify recall log in S3
+- [x] **Submit flow:** `aws apigateway test-invoke-method` on submitKnowledge → verify SQS message arrives → verify EC2 picks up message → verify CodeCommit commit → verify S3 sync → verify note appears in OpenSearch after Bedrock KB sync
+- [x] **Recall flow:** `aws apigateway test-invoke-method` on recallKnowledge with query matching submitted note → verify results returned → verify recall log in S3
 - [ ] **Dream cycle:** Wait for dream cycle tick → verify pending notes processed → verify status changed to active → verify S3 sync + reindex
-- [ ] **EC2 recovery:** Terminate EC2 instance → verify ASG launches replacement → verify new instance boots, clones CodeCommit, starts CLI process → verify periodic tick resumes
-- [ ] **SSM access:** Verify `aws ssm start-session --target <instance-id>` connects
-- [ ] **CloudWatch:** Verify Lambda logs, EC2 CLI logs, and API access logs visible in CloudWatch
-- [ ] **Alarms:** Verify DLQ alarm fires when a test message is sent to DLQ
+- [x] **EC2 recovery:** Terminate EC2 instance → verify ASG launches replacement → verify new instance boots, clones CodeCommit, starts CLI process → verify periodic tick resumes
+- [x] **SSM access:** Verify `aws ssm start-session --target <instance-id>` connects
+- [x] **CloudWatch:** Verify Lambda logs, EC2 CLI logs, and API access logs visible in CloudWatch
+- [x] **Alarms:** Verify DLQ alarm fires when a test message is sent to DLQ
 - [ ] All validation within 30-minute success criterion (single `cdk deploy` → working KB)
 
 ### QAT-006: Bedrock KB Metadata Extraction Verification
-**Description:** Verify that Bedrock KB correctly extracts YAML frontmatter fields (`uid`, `title`) from Markdown notes as queryable metadata in the Retrieve API response. This is a critical assumption that must be validated before implementation proceeds past Phase 0.
+**Description:** Verify that Bedrock KB correctly extracts YAML frontmatter fields (`uid`, `title`) from Markdown notes as queryable metadata in the Retrieve API response. This is a critical assumption that must be validated before implementation proceeds past Phase 0. Automated test script at `test/integration/qat-006-metadata-extraction.sh`.
 **Dependencies:** KBS-003 (data source created), STR-001 (S3 bucket)
 **Acceptance Criteria:**
-- [ ] Deploy a minimal Bedrock KB with the CDK stack's data source configuration (S3 bucket + OpenSearch collection)
-- [ ] Upload a test Markdown note with YAML frontmatter containing `uid` and `title` fields to S3
-- [ ] Trigger a data source sync (`StartIngestionJob`) and wait for completion
-- [ ] Call `bedrock-agent-runtime:Retrieve` with a query matching the test note content
-- [ ] Confirm `retrievalResults[].metadata.uid` contains the expected UID value
-- [ ] Confirm `retrievalResults[].metadata.title` contains the expected title value
-- [ ] If metadata extraction does NOT work as expected, document the actual response structure and update `contracts/recall-knowledge.md` field mapping accordingly
+- [x] Deploy a minimal Bedrock KB with the CDK stack's data source configuration (S3 bucket + OpenSearch collection)
+- [x] Upload a test Markdown note with YAML frontmatter containing `uid` and `title` fields to S3
+- [x] Trigger a data source sync (`StartIngestionJob`) and wait for completion
+- [x] Call `bedrock-agent-runtime:Retrieve` with a query matching the test note content
+- [x] Confirm `retrievalResults[].metadata.uid` contains the expected UID value
+- [x] Confirm `retrievalResults[].metadata.title` contains the expected title value
+- [x] If metadata extraction does NOT work as expected, document the actual response structure and update `contracts/recall-knowledge.md` field mapping accordingly
 - [ ] Document findings in research.md R-2
 
 ---
