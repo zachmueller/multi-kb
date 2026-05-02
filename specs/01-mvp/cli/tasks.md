@@ -3,7 +3,7 @@
 **Created:** 2026-05-01
 **Implementation Plan:** [plan.md](plan.md)
 **Specification:** [spec.md](spec.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -31,10 +31,10 @@
 - `internal/` directory tree (empty packages with `package` declarations)
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `go mod init` creates module (e.g., `github.com/<org>/multi-kb`)
-- [ ] All directories from plan.md Module Architecture exist with `package` declaration files
-- [ ] `go build ./cmd/multi-kb/` succeeds with a no-op `main.go`
-- [ ] `go test ./...` passes (no tests yet, but no compilation errors)
+- [x] `go mod init` creates module (e.g., `github.com/<org>/multi-kb`)
+- [x] All directories from plan.md Module Architecture exist with `package` declaration files
+- [x] `go build ./cmd/multi-kb/` succeeds with a no-op `main.go`
+- [x] `go test ./...` passes (no tests yet, but no compilation errors)
 
 ### ENV-002 [P]: Cobra Root Command and Subcommand Stubs
 **Description:** Wire up the Cobra command tree with all subcommands as stubs that print "not implemented".
@@ -52,10 +52,10 @@
 - `internal/cmd/server.go` — `multi-kb server`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `multi-kb --help` lists all subcommands
-- [ ] Each subcommand prints "not implemented" and exits 0
-- [ ] `multi-kb --version` prints version string
-- [ ] Global `--config` flag accepts a path (default `~/.multi-kb/config.yaml`)
+- [x] `multi-kb --help` lists all subcommands
+- [x] Each subcommand prints "not implemented" and exits 0
+- [x] `multi-kb --version` prints version string
+- [x] Global `--config` flag accepts a path (default `~/.multi-kb/config.yaml`)
 
 ### ENV-003 [P]: Development Tooling Configuration
 **Description:** Set up linting, formatting, and test infrastructure per quickstart.md.
@@ -65,11 +65,11 @@
 - `.gitignore` — Go binaries, editor files
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `make build` produces `multi-kb` binary
-- [ ] `make test` runs `go test ./...`
-- [ ] `make lint` runs golangci-lint with no errors on empty project
-- [ ] `make build-all` cross-compiles for all target platforms (linux/darwin amd64+arm64, windows amd64)
-- [ ] `CGO_ENABLED=0` enforced in all build targets
+- [x] `make build` produces `multi-kb` binary
+- [x] `make test` runs `go test ./...`
+- [x] `make lint` runs golangci-lint with no errors on empty project
+- [x] `make build-all` cross-compiles for all target platforms (linux/darwin amd64+arm64, windows amd64)
+- [x] `CGO_ENABLED=0` enforced in all build targets
 
 ---
 
@@ -1015,13 +1015,13 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 - Sample test conversations for validation
 **Dependencies:** None (can start early)
 **Acceptance Criteria:**
-- [ ] Defines the extraction task, output JSON format (title/content/suggested_target_kbs), and quality guidelines
-- [ ] Instructs LLM to focus on `previously_processed: false` messages while using full conversation for context
-- [ ] Instructs LLM to avoid extracting trivial or obvious information
-- [ ] Instructs LLM to keep individual note content concise and focused (generally under 5,000 characters per note; hard limit of 100,000 characters enforced by the parser)
-- [ ] Specifies that empty array `[]` is valid when no knowledge is extractable
+- [x] Defines the extraction task, output JSON format (title/content/suggested_target_kbs), and quality guidelines
+- [x] Instructs LLM to focus on `previously_processed: false` messages while using full conversation for context
+- [x] Instructs LLM to avoid extracting trivial or obvious information
+- [x] Instructs LLM to keep individual note content concise and focused (generally under 5,000 characters per note; hard limit of 100,000 characters enforced by the parser)
+- [x] Specifies that empty array `[]` is valid when no knowledge is extractable
 - [ ] Tested against ≥3 sample conversations: one with clear knowledge, one with no extractable knowledge, one re-processed conversation with mixed flags
-- [ ] Prompt length reasonable (under ~2K tokens)
+- [x] Prompt length reasonable (under ~2K tokens)
 
 ### PRM-002 [P]: Dream Cycle Consolidation Prompt
 **Description:** Author the consolidation system prompt for dream cycle Phase 3 per contracts/consolidation-output.md.
@@ -1030,15 +1030,15 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 - Sample test batches for validation
 **Dependencies:** contracts/consolidation-output.md
 **Acceptance Criteria:**
-- [ ] Instructs LLM to evaluate each pending note against related active notes
-- [ ] Defines all four action types (keep, merge, split, consolidate) with clear criteria for when to use each
-- [ ] Specifies the JSON output schema from consolidation-output.md
-- [ ] Instructs that every pending note UID must appear in exactly one action
-- [ ] Instructs to preserve information — never silently discard content
-- [ ] Explicitly instructs LLM that consolidating active notes is a high-stakes operation: the new note must contain ALL information from all source notes. The LLM should prefer `keep` over `consolidate` when uncertain about information preservation.
-- [ ] Distinguishes merge (absorb into existing) from consolidate (create new from multiple)
+- [x] Instructs LLM to evaluate each pending note against related active notes
+- [x] Defines all four action types (keep, merge, split, consolidate) with clear criteria for when to use each
+- [x] Specifies the JSON output schema from consolidation-output.md
+- [x] Instructs that every pending note UID must appear in exactly one action
+- [x] Instructs to preserve information — never silently discard content
+- [x] Explicitly instructs LLM that consolidating active notes is a high-stakes operation: the new note must contain ALL information from all source notes. The LLM should prefer `keep` over `consolidate` when uncertain about information preservation.
+- [x] Distinguishes merge (absorb into existing) from consolidate (create new from multiple)
 - [ ] Tested against ≥3 sample batches: one with a novel note (keep), one with a duplicate (merge), one with overlapping notes (consolidate)
-- [ ] Prompt length reasonable (under ~3K tokens)
+- [x] Prompt length reasonable (under ~3K tokens)
 
 ### PRM-003 [P]: Coverage Assessment Prompt (CDK)
 **Description:** Author the coverage gap detection prompt for the recallKnowledge Lambda's coverage assessment flow.
@@ -1047,12 +1047,12 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 - Sample test inputs for validation
 **Dependencies:** R-2 research (Bedrock KB metadata extraction)
 **Acceptance Criteria:**
-- [ ] Input format: user's original query + summaries of top Retrieve results (title + content snippet)
-- [ ] Output format: JSON `{ "gap_detected": boolean, "refined_query": string | null }`
-- [ ] When gap detected, `refined_query` contains a reformulated query targeting the gap
-- [ ] When no gap, `refined_query` is null
+- [x] Input format: user's original query + summaries of top Retrieve results (title + content snippet)
+- [x] Output format: JSON `{ "gap_detected": boolean, "refined_query": string | null }`
+- [x] When gap detected, `refined_query` contains a reformulated query targeting the gap
+- [x] When no gap, `refined_query` is null
 - [ ] Tested against ≥3 sample scenarios: good coverage (no gap), missing topic (gap + refined query), ambiguous results
-- [ ] Prompt is concise — designed for a fast model (Haiku-class)
+- [x] Prompt is concise — designed for a fast model (Haiku-class)
 
 ### PRM-004 [P]: Keyword Derivation Prompt
 **Description:** Author the prompt for deriving 3-5 search keywords from a user's first message for local KB recall per spec FR-7.
@@ -1060,11 +1060,11 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 - `internal/recall/prompts/keywords.go` — prompt text
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] System prompt instructs: extract 3-5 key search terms from the user's message, return as JSON array of strings
-- [ ] Keywords should be specific technical terms, not generic words
-- [ ] Output format: `["keyword1", "keyword2", "keyword3"]`
+- [x] System prompt instructs: extract 3-5 key search terms from the user's message, return as JSON array of strings
+- [x] Keywords should be specific technical terms, not generic words
+- [x] Output format: `["keyword1", "keyword2", "keyword3"]`
 - [ ] Tested against ≥3 sample first messages: a technical question, a broad request, a short ambiguous query
-- [ ] Prompt is concise — designed for a fast model (Haiku-class)
+- [x] Prompt is concise — designed for a fast model (Haiku-class)
 
 ### PRM-005 [P]: Chunk Summarization Prompt
 **Description:** Author the prompt for summarizing processed conversation chunks to ~10-20K tokens for context carry-forward per spec FR-5.
@@ -1072,11 +1072,11 @@ _These tasks produce the core LLM prompts that drive the system's intelligence. 
 - `internal/extract/prompts/summarize_chunk.go` — prompt text
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Instructs LLM to summarize the conversation chunk preserving: key topics discussed, decisions made, technical details, and context needed for understanding subsequent messages
-- [ ] Target output length: ~10-20K tokens
-- [ ] Specifies that only the latest summary is carried forward (not accumulated from all prior chunks)
+- [x] Instructs LLM to summarize the conversation chunk preserving: key topics discussed, decisions made, technical details, and context needed for understanding subsequent messages
+- [x] Target output length: ~10-20K tokens
+- [x] Specifies that only the latest summary is carried forward (not accumulated from all prior chunks)
 - [ ] Tested against ≥1 sample long conversation chunk
-- [ ] Uses extraction model (`extraction.model_id`), not the cheaper translation model
+- [x] Uses extraction model (`extraction.model_id`), not the cheaper translation model
 
 ---
 

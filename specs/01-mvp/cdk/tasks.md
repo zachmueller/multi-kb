@@ -3,7 +3,7 @@
 **Created:** 2026-05-01
 **Implementation Plan:** [plan.md](plan.md)
 **Specification:** [spec.md](spec.md)
-**Status:** Planning
+**Status:** In Progress
 
 ## Task Summary
 
@@ -35,11 +35,11 @@
 - `package.json`, `tsconfig.json`, `cdk.json`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `cdk init app --language typescript` or equivalent manual setup complete
-- [ ] All directories from plan.md CDK Stack Architecture exist
-- [ ] `npx tsc --noEmit` succeeds
-- [ ] `cdk synth` produces a valid (empty) CloudFormation template
-- [ ] `npm test` runs Jest with no failures
+- [x] `cdk init app --language typescript` or equivalent manual setup complete
+- [x] All directories from plan.md CDK Stack Architecture exist
+- [x] `npx tsc --noEmit` succeeds
+- [x] `cdk synth` produces a valid (empty) CloudFormation template
+- [x] `npm test` runs Jest with no failures
 
 **Commands:**
 ```bash
@@ -54,11 +54,11 @@ npm install -D jest ts-jest @types/jest esbuild
 - `bin/multi-kb.ts` — context extraction and props passing
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `MultiKbStackProps` interface defines all 12 parameters from spec: `repoName`, `bucketPrefix`, `ec2InstanceType`, `embeddingModelId`, `consolidationModelId`, `coverageModelId`, `tickInterval`, `dreamCycleInterval`, `excludePendingFromRecall`, `coverageScoreThreshold`, `cliBinaryS3Uri`, `vpcId`
-- [ ] Defaults applied for all optional parameters per spec table
-- [ ] `cliBinaryS3Uri` is required — synthesis fails with clear error if missing
-- [ ] Context values resolved from `cdk.json` and CLI `--context` flags
-- [ ] Test: synth succeeds with only `cliBinaryS3Uri` provided; synth fails without it
+- [x] `MultiKbStackProps` interface defines all 12 parameters from spec: `repoName`, `bucketPrefix`, `ec2InstanceType`, `embeddingModelId`, `consolidationModelId`, `coverageModelId`, `tickInterval`, `dreamCycleInterval`, `excludePendingFromRecall`, `coverageScoreThreshold`, `cliBinaryS3Uri`, `vpcId`
+- [x] Defaults applied for all optional parameters per spec table
+- [x] `cliBinaryS3Uri` is required — synthesis fails with clear error if missing
+- [x] Context values resolved from `cdk.json` and CLI `--context` flags
+- [x] Test: synth succeeds with only `cliBinaryS3Uri` provided; synth fails without it
 
 ### ENV-003 [P]: Development Tooling Configuration
 **Description:** Set up ESLint, Prettier, Jest config, and development scripts.
@@ -70,11 +70,11 @@ npm install -D jest ts-jest @types/jest esbuild
 - `.gitignore`
 **Dependencies:** ENV-001
 **Acceptance Criteria:**
-- [ ] `npm run build` compiles TypeScript
-- [ ] `npm test` runs Jest with CDK assertions module available
-- [ ] `npm run lint` runs ESLint with no errors on scaffold
-- [ ] Snapshot test infrastructure ready (`jest --updateSnapshot` works)
-- [ ] `cdk.json` configures app entry point and default context
+- [x] `npm run build` compiles TypeScript
+- [x] `npm test` runs Jest with CDK assertions module available
+- [x] `npm run lint` runs ESLint with no errors on scaffold
+- [x] Snapshot test infrastructure ready (`jest --updateSnapshot` works)
+- [x] `cdk.json` configures app entry point and default context
 
 ---
 
