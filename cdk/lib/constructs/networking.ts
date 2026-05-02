@@ -50,7 +50,7 @@ export class Networking extends Construct {
       "EndpointSecurityGroup",
       {
         vpc: this.vpc,
-        description: "VPC endpoint security group — HTTPS from EC2 SG only",
+        description: "VPC endpoint security group - HTTPS from EC2 SG only",
         allowAllOutbound: false,
       },
     );
@@ -60,7 +60,7 @@ export class Networking extends Construct {
       "Ec2SecurityGroup",
       {
         vpc: this.vpc,
-        description: "EC2 instance security group — HTTPS to endpoints only",
+        description: "EC2 instance security group - HTTPS to endpoints only",
         allowAllOutbound: false,
       },
     );

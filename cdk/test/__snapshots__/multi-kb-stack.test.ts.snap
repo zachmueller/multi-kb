@@ -465,7 +465,7 @@ exports[`MultiKbStack - synthesis snapshot 1`] = `
     },
     "AsgUnhealthyAlarmE78EC951": {
       "Properties": {
-        "AlarmDescription": "No EC2 instances in service — server mode is down",
+        "AlarmDescription": "No EC2 instances in service - server mode is down",
         "AlarmName": "multi-kb-ec2-unhealthy",
         "ComparisonOperator": "LessThanThreshold",
         "Dimensions": [
@@ -1262,7 +1262,7 @@ systemctl enable --now multi-kb",
     },
     "NetworkingEc2SecurityGroup8078F069": {
       "Properties": {
-        "GroupDescription": "EC2 instance security group — HTTPS to endpoints only",
+        "GroupDescription": "EC2 instance security group - HTTPS to endpoints only",
         "SecurityGroupEgress": [
           {
             "CidrIp": "255.255.255.255/32",
@@ -1322,7 +1322,7 @@ systemctl enable --now multi-kb",
     },
     "NetworkingEndpointSecurityGroupDAD4F22F": {
       "Properties": {
-        "GroupDescription": "VPC endpoint security group — HTTPS from EC2 SG only",
+        "GroupDescription": "VPC endpoint security group - HTTPS from EC2 SG only",
         "SecurityGroupEgress": [
           {
             "CidrIp": "255.255.255.255/32",
@@ -1509,7 +1509,7 @@ systemctl enable --now multi-kb",
     },
     "ObservabilityDlqAlarmC01666B1": {
       "Properties": {
-        "AlarmDescription": "Dead-letter queue has messages — indicates processing failures",
+        "AlarmDescription": "Dead-letter queue has messages - indicates processing failures",
         "AlarmName": "multi-kb-dlq-messages",
         "ComparisonOperator": "GreaterThanThreshold",
         "Dimensions": [
@@ -1535,7 +1535,7 @@ systemctl enable --now multi-kb",
     },
     "ObservabilityDreamCycleLockAlarm77376D62": {
       "Properties": {
-        "AlarmDescription": "Dream cycle lock held for over 60 minutes — possible deadlock",
+        "AlarmDescription": "Dream cycle lock held for over 60 minutes - possible deadlock",
         "AlarmName": "multi-kb-dream-cycle-lock",
         "ComparisonOperator": "GreaterThanThreshold",
         "EvaluationPeriods": 1,

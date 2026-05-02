@@ -160,7 +160,7 @@ export class MultiKbStack extends cdk.Stack {
     new cdk.aws_cloudwatch.Alarm(this, "AsgUnhealthyAlarm", {
       alarmName: "multi-kb-ec2-unhealthy",
       alarmDescription:
-        "No EC2 instances in service — server mode is down",
+        "No EC2 instances in service - server mode is down",
       metric: new cdk.aws_cloudwatch.Metric({
         namespace: "AWS/AutoScaling",
         metricName: "GroupInServiceInstances",

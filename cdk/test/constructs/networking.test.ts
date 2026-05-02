@@ -39,7 +39,7 @@ describe("Networking Construct", () => {
     const template = createTemplate();
     template.hasResourceProperties("AWS::EC2::SecurityGroup", {
       GroupDescription:
-        "EC2 instance security group — HTTPS to endpoints only",
+        "EC2 instance security group - HTTPS to endpoints only",
     });
   });
 
@@ -47,7 +47,7 @@ describe("Networking Construct", () => {
     const template = createTemplate();
     template.hasResourceProperties("AWS::EC2::SecurityGroup", {
       GroupDescription:
-        "VPC endpoint security group — HTTPS from EC2 SG only",
+        "VPC endpoint security group - HTTPS from EC2 SG only",
     });
   });
 

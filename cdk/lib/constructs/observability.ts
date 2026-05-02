@@ -57,7 +57,7 @@ export class Observability extends Construct {
     new cloudwatch.Alarm(this, "DlqAlarm", {
       alarmName: "multi-kb-dlq-messages",
       alarmDescription:
-        "Dead-letter queue has messages — indicates processing failures",
+        "Dead-letter queue has messages - indicates processing failures",
       metric: props.dlq.metricApproximateNumberOfMessagesVisible({
         period: cdk.Duration.minutes(5),
         statistic: "Maximum",
@@ -75,7 +75,7 @@ export class Observability extends Construct {
       new cloudwatch.Alarm(this, "AsgUnhealthyAlarm", {
         alarmName: "multi-kb-ec2-unhealthy",
         alarmDescription:
-          "No EC2 instances in service — server mode is down",
+          "No EC2 instances in service - server mode is down",
         metric: new cloudwatch.Metric({
           namespace: "AWS/AutoScaling",
           metricName: "GroupInServiceInstances",
@@ -106,7 +106,7 @@ export class Observability extends Construct {
     new cloudwatch.Alarm(this, "DreamCycleLockAlarm", {
       alarmName: "multi-kb-dream-cycle-lock",
       alarmDescription:
-        "Dream cycle lock held for over 60 minutes — possible deadlock",
+        "Dream cycle lock held for over 60 minutes - possible deadlock",
       metric: lockHeldMetricFilter.metric({
         period: cdk.Duration.minutes(60),
         statistic: "Sum",
