@@ -534,9 +534,224 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 
 **Description:** Execute all 9 end-to-end scenarios from `cli/test/e2e/scenarios.md` against a deployed stack. Each scenario should be run manually and results documented.
 **Dependencies:** Deployed CDK stack with CLI binary on EC2
-**Files:** `cli/test/e2e/scenarios.md` — checklist file to mark complete
+**Files:** `cli/test/e2e/scenarios.md` — checklist file to mark complete (reviewed and corrected against implementation)
 
-**Note:** `cli/test/e2e/scenarios.md` has been reviewed against the current implementation and corrected: Scenario 6 timeout updated from 10s → 8s default (configurable via `hook.timeout`); Scenario 9 Phase 2 description clarified to specify keyword-based git grep derived from note title; Scenario 9 git commit author clarified (`multi-kb <multi-kb@local>`); Scenario 1 status output phrasing corrected to match actual `multi-kb status` output. Execution requires a deployed stack.
+---
+
+#### Step 0: Prerequisites
+
+Before any scenario can be run, all of the following must be true.
+
+**0a. AWS account and region**
+- [ ] AWS CLI configured: `aws sts get-caller-identity` returns your account ID
+- [ ] Target region chosen (e.g. `us-east-1`) and set: `export AWS_DEFAULT_REGION=us-east-1`
+- [ ] Bedrock model access enabled in that region: Claude Sonnet 4.x, Claude Haiku 4.x, Titan Embeddings V2
+- [ ] CDK bootstrapped (one-time per account/region): `cdk bootstrap aws://<account>/<region>`
+
+**0b. Build the Linux binary** (must be cross-compiled; EC2 runs Linux)
+```bash
+cd cli
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+  -ldflags "-s -w -X 'github.com/zmueller/multi-kb/internal/cmd.version=$(git describe --tags --always --dirty)'" \
+  -o dist/multi-kb-linux-amd64 ./cmd/multi-kb/
+```
+- [ ] `dist/multi-kb-linux-amd64` exists and is ~10–20 MB
+
+**0c. Upload the binary to S3** (CDK downloads it onto EC2 via user data)
+```bash
+# Create a bucket if you don't already have one for artifacts
+export ARTIFACT_BUCKET=my-multikb-artifacts   # choose a name
+aws s3 mb s3://$ARTIFACT_BUCKET
+aws s3 cp cli/dist/multi-kb-linux-amd64 s3://$ARTIFACT_BUCKET/multi-kb/latest/multi-kb-linux-amd64
+export CLI_BINARY_S3_URI=s3://$ARTIFACT_BUCKET/multi-kb/latest/multi-kb-linux-amd64
+```
+- [ ] `aws s3 ls $CLI_BINARY_S3_URI` shows the uploaded file
+
+**0d. CDK install and synth**
+```bash
+cd cdk
+npm install
+npx tsc --noEmit          # must pass
+cdk synth --context cliBinaryS3Uri=$CLI_BINARY_S3_URI
+```
+- [ ] `cdk synth` exits 0 with no errors
+
+**0e. Deploy the stack**
+```bash
+cdk deploy \
+  --context cliBinaryS3Uri=$CLI_BINARY_S3_URI \
+  --context repoName=my-kb \
+  --require-approval never
+```
+- This creates: VPC, OpenSearch Serverless, Bedrock KB + data source, S3, CodeCommit, SQS, API Gateway, EC2 ASG, Lambda functions, CloudWatch alarms
+- Takes ~15–20 minutes (OpenSearch Serverless collection provisioning dominates)
+- [ ] `cdk deploy` exits 0
+- [ ] Stack outputs printed — note `ApiEndpoint`, `BucketName`, `KnowledgeBaseId`, `DataSourceId`, `AsgName`
+
+**0f. Build a local (macOS/Linux) binary for your machine**
+```bash
+cd cli
+go build -o bin/multi-kb ./cmd/multi-kb/
+./bin/multi-kb --version
+```
+- [ ] `multi-kb --version` prints a version string (not `dev` if git tags exist)
+
+**0g. Run the post-deploy integration script**
+```bash
+cd cdk
+./test/integration/qat-005-post-deploy.sh MultiKbStack
+```
+- This validates: submit flow, recall flow, server config on EC2, EC2 health, SSM access, CloudWatch log groups, DLQ alarm
+- [ ] Script exits 0 (all checks PASS or SKIP; zero FAIL)
+- If any FAIL: resolve before continuing to the scenario tests
+
+---
+
+#### Step 1: Scenario 1 — First-Time Setup
+
+Run on your local machine with the macOS/Linux binary from Step 0f.
+
+- [ ] `./bin/multi-kb setup` — wizard launches with harness selection prompt
+- [ ] Select Claude Code harness → enter at least one source directory (must exist on disk)
+- [ ] Configure at least one local KB (name: e.g. `default`) and one routing rule (routing: `always`, approval: `auto-approve`)
+- [ ] Wizard completes — verify: `cat ~/.multi-kb/config.yaml` shows `mode: client`, your source directory, and `targets: [{kb: local/default}]`
+- [ ] Hook registered: `cat ~/.claude/settings.json` contains a `hooks` entry invoking `multi-kb hook --harness claude-code`
+- [ ] Cron registered: `crontab -l` shows a `multi-kb run` entry
+- [ ] `./bin/multi-kb status` prints config summary, "No runs recorded yet", and next scheduled run time
+- [ ] Total elapsed time from starting `setup` to passing `status` check: under 10 minutes
+- [ ] Check off Scenario 1 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 2: Scenario 2 — Scheduled Capture
+
+Requires at least one real Claude Code conversation file in the configured source directory.
+
+- [ ] Confirm conversation files exist: `ls ~/.claude/projects/` (or wherever Claude Code stores transcripts) — at least one `.jsonl` file
+- [ ] Run manually (don't wait for cron): `./bin/multi-kb run`
+- [ ] Verify run log: `cat ~/.multi-kb/logs/runs.jsonl | tail -1 | jq .` — `directories_scanned > 0`, `notes_extracted > 0`
+- [ ] Verify pending queue: `ls ~/.multi-kb/pending/` — at least one `.json` file
+- [ ] If `notes_extracted == 0`: the source directory has no conversations or they've all been processed before — use `--force` to reprocess or point the config at a directory with fresh conversations
+- [ ] Check off Scenario 2 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 3: Scenario 3 — Hook Injection
+
+Requires Claude Code to be installed and the hook registered (from Scenario 1).
+
+- [ ] Start a new Claude Code conversation in a directory that matches your configured source
+- [ ] On the first user message, Claude Code fires the pre-tool-use hook → `multi-kb hook --harness claude-code` is invoked
+- [ ] Verify injection: the system prompt or injected context in the conversation contains a `## Knowledge Base` markdown section (visible in the Claude Code UI or transcript)
+- [ ] If no local KB content yet (notes_extracted == 0 from Scenario 2): injection block appears but is empty — this is correct, not an error
+- [ ] Conversation proceeds normally after the hook fires
+- [ ] Check off Scenario 3 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 4: Scenario 4 — Oversized Conversation
+
+Requires a conversation file large enough to exceed the chunking threshold (~700K tokens ≈ ~2 MB of text).
+
+- [ ] Create or locate a large conversation file. A synthetic one can be generated:
+  ```bash
+  # Generate a ~3MB synthetic JSONL conversation (rough approximation)
+  python3 -c "
+  import json, sys
+  for i in range(500):
+      print(json.dumps({'type': 'user', 'content': 'Message ' + str(i) + ': ' + ('x ' * 1000)}))
+      print(json.dumps({'type': 'assistant', 'content': 'Response ' + str(i) + ': ' + ('y ' * 1000)}))
+  " > /tmp/large-conversation.jsonl
+  ```
+- [ ] Place the file in the configured source directory (rename to match expected file format)
+- [ ] Run: `./bin/multi-kb run`
+- [ ] Verify chunked extraction: `cat ~/.multi-kb/logs/runs.jsonl | tail -1 | jq .` — `notes_extracted > 0`; CloudWatch or stderr logs show multiple LLM invocations for the same conversation
+- [ ] No hard crash or OOM — process completes with exit 0
+- [ ] Check off Scenario 4 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 5: Scenario 5 — Extraction Failure + Retry
+
+- [ ] Temporarily set an invalid model ID in `~/.multi-kb/config.yaml` under `extraction.model_id` (e.g. `anthropic.claude-invalid-model`) — or throttle by making many rapid requests
+- [ ] Run: `./bin/multi-kb run`
+- [ ] Observe: process retries up to 3 times per extraction attempt (visible via stderr or verbose mode)
+- [ ] On persistent failure: verify `cat ~/.multi-kb/logs/extraction-errors.jsonl` has an entry with a non-empty `error` field
+- [ ] Restore the correct `model_id` in config
+- [ ] Check off Scenario 5 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 6: Scenario 6 — Hook Timeout
+
+- [ ] Add a remote KB to config with an unreachable endpoint:
+  ```yaml
+  knowledge_bases:
+    - name: slow-kb
+      endpoint: https://192.0.2.1/  # TEST-NET — unreachable
+      auth: iam
+      aws_region: us-east-1
+  ```
+  And add it as a target in the source's routing rules: `kb: slow-kb`
+- [ ] Set a short timeout in config (optional, to speed up test): `hook: {timeout: "2s"}`
+- [ ] Start a new Claude Code conversation in the configured directory
+- [ ] Hook fires — after the configured timeout (default 8s), hook returns with partial results (local KB only)
+- [ ] Conversation proceeds — no hang or crash
+- [ ] Verify: `cat ~/.multi-kb/logs/hook-errors.jsonl` has a timeout or connection-refused entry
+- [ ] Restore config (remove slow-kb and timeout override)
+- [ ] Check off Scenario 6 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 7: Scenario 7 — Re-Processing Modified Conversation
+
+- [ ] Identify a conversation already processed in Scenario 2 (check `~/.multi-kb/state.yaml` for processed path hashes)
+- [ ] Add several new user+assistant message pairs to the end of that conversation file
+- [ ] Run: `./bin/multi-kb run`
+- [ ] Verify: run log shows `notes_extracted > 0` from this re-run (the new messages are processed, old messages are skipped via `previously_extracted` markers)
+- [ ] Verify: the newly extracted notes appear in `~/.multi-kb/pending/`
+- [ ] Check off Scenario 7 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 8: Scenario 8 — Approval Flow
+
+Requires pending notes from Scenario 2 or 7.
+
+- [ ] Confirm pending notes exist: `ls ~/.multi-kb/pending/` — at least one `.json` file
+- [ ] Run: `./bin/multi-kb approve`
+- [ ] Browser opens automatically to `http://localhost:<port>` with the approval UI
+- [ ] Review a note: inspect title and content
+- [ ] Edit the title or content of one note via the UI
+- [ ] Approve that note to local KB: click Approve — verify `~/.multi-kb/local/default/<uid>.md` is created with `status: active`
+- [ ] Reject a note: click Reject for another note — verify the pending file for that note is either deleted or the rejected target is removed from it
+- [ ] When all targets on a pending entry are resolved: verify the `.json` file in `~/.multi-kb/pending/` is deleted
+- [ ] Server shuts down after all notes are resolved (or wait for idle timeout — default from config)
+- [ ] Check off Scenario 8 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 9: Scenario 9 — Dream Cycle
+
+Requires at least one approved `status: pending` note in a local KB from Scenario 8 (approval to local KB creates notes with `status: pending`; the dream cycle transitions them to `active`).
+
+- [ ] Confirm a pending note exists in the local KB: `grep -r "status: pending" ~/.multi-kb/local/`
+- [ ] Run: `./bin/multi-kb dream-cycle`
+- [ ] Phase 1: stdout shows `dream cycle: phase 1 — find pending notes` with `pending=N, batches=N`
+- [ ] Phase 2: related notes found for each batch (may be 0 for a fresh KB — that's valid)
+- [ ] Phase 3: LLM consolidation runs — stdout shows `dream cycle: batch consolidated` with action counts
+- [ ] Verify: the pending note is now `status: active` — `grep -r "status: active" ~/.multi-kb/local/`
+- [ ] Verify: git commit created in the local KB repo — `git -C ~/.multi-kb/local/default log --oneline -1` shows a commit by `multi-kb <multi-kb@local>`
+- [ ] Verify: run log has a `dream_cycle` entry — `cat ~/.multi-kb/logs/runs.jsonl | tail -1 | jq '.type'` returns `"dream_cycle"`
+- [ ] Check off Scenario 9 in `cli/test/e2e/scenarios.md`
+
+---
+
+#### Step 10: Mark Complete
+
+- [ ] All 9 scenarios passed (or documented skips with explanation)
+- [ ] Fill in tester name and date at the bottom of `cli/test/e2e/scenarios.md`
+- [ ] Check off all acceptance criteria below
 
 **Acceptance Criteria:**
 - [ ] **First-Time Setup:** Binary download -> setup wizard -> config written -> hooks registered -> cron registered (under 10 minutes)
