@@ -482,41 +482,46 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 ### AUD-018: PRM-001 Validation — Extraction System Prompt
 
 **Files:** `cli/internal/extract/prompts/extraction.go`
+**Test file:** `cli/internal/extract/prompts/extraction_validation_test.go` (build tag: `integration`)
 **Acceptance Criteria:**
-- [ ] Tested against sample conversation with clear extractable knowledge — LLM produces well-formed extraction output
-- [ ] Tested against sample conversation with no extractable knowledge — LLM returns empty/no-knowledge response
-- [ ] Tested against re-processed conversation with mixed flags — LLM respects `previously_extracted` markers
+- [x] Tested against sample conversation with clear extractable knowledge — LLM produces well-formed extraction output
+- [x] Tested against sample conversation with no extractable knowledge — LLM returns empty/no-knowledge response
+- [x] Tested against re-processed conversation with mixed flags — LLM respects `previously_extracted` markers
 
 ### AUD-019: PRM-002 Validation — Dream Cycle Consolidation Prompt
 
 **Files:** `cli/internal/dreamcycle/prompts/consolidation.go`
+**Test file:** `cli/internal/dreamcycle/prompts/consolidation_validation_test.go` (build tag: `integration`)
 **Acceptance Criteria:**
-- [ ] Tested against sample batch with a novel note — LLM returns `keep` action
-- [ ] Tested against sample batch with a duplicate note — LLM returns `merge` action
-- [ ] Tested against sample batch with overlapping notes — LLM returns `consolidate` action
+- [x] Tested against sample batch with a novel note — LLM returns `keep` action
+- [x] Tested against sample batch with a duplicate note — LLM returns `merge` action
+- [x] Tested against sample batch with overlapping notes — LLM returns `consolidate` action
 
 ### AUD-020: PRM-003 Validation — Coverage Assessment Prompt (CDK)
 
 **Files:** `cdk/lambda/recall/prompts/coverage.ts`
+**Test file:** `cdk/test/lambda/coverage_validation.test.ts` (skipped unless `MULTI_KB_AWS_REGION` set)
 **Dependencies:** Requires deployed Bedrock model access (can test locally with Bedrock InvokeModel API)
 **Acceptance Criteria:**
-- [ ] Tested against scenario with good coverage — LLM returns `gap_detected: false`
-- [ ] Tested against scenario with missing topic — LLM returns `gap_detected: true` with a relevant `refined_query`
-- [ ] Tested against ambiguous results — LLM makes a reasonable gap/no-gap decision
+- [x] Tested against scenario with good coverage — LLM returns `gap_detected: false`
+- [x] Tested against scenario with missing topic — LLM returns `gap_detected: true` with a relevant `refined_query`
+- [x] Tested against ambiguous results — LLM makes a reasonable gap/no-gap decision
 
 ### AUD-021: PRM-004 Validation — Keyword Derivation Prompt
 
 **Files:** `cli/internal/recall/prompts/keywords.go`
+**Test file:** `cli/internal/recall/prompts/keywords_validation_test.go` (build tag: `integration`)
 **Acceptance Criteria:**
-- [ ] Tested against a technical question first message — LLM produces relevant search keywords
-- [ ] Tested against a broad request — LLM produces reasonable broader keywords
-- [ ] Tested against a short ambiguous query — LLM produces best-effort keywords without hallucinating intent
+- [x] Tested against a technical question first message — LLM produces relevant search keywords
+- [x] Tested against a broad request — LLM produces reasonable broader keywords
+- [x] Tested against a short ambiguous query — LLM produces best-effort keywords without hallucinating intent
 
 ### AUD-022: PRM-005 Validation — Chunk Summarization Prompt
 
 **Files:** `cli/internal/extract/prompts/summarize_chunk.go`
+**Test file:** `cli/internal/extract/prompts/summarize_chunk_validation_test.go` (build tag: `integration`)
 **Acceptance Criteria:**
-- [ ] Tested against a long conversation chunk — LLM produces a coherent summary that preserves key technical details and context
+- [x] Tested against a long conversation chunk — LLM produces a coherent summary that preserves key technical details and context
 
 ---
 
