@@ -3,6 +3,7 @@ package approve
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -22,10 +23,18 @@ const defaultIdleTimeout = 5 * time.Minute
 // It binds to an available port on localhost, opens the browser, and blocks
 // until shut down by idle timeout, all notes resolved, or Ctrl+C.
 func StartServer(pendingDir string, cfg *config.Config) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	return runServer(ctx, pendingDir, cfg, defaultIdleTimeout, os.Stdout, true)
+}
+
+// runServer is the testable core of StartServer.
+// openBrowserFlag controls whether the browser is opened (false in tests).
+func runServer(ctx context.Context, pendingDir string, cfg *config.Config, idleTimeout time.Duration, out io.Writer, openBrowserFlag bool) error {
 	mux := http.NewServeMux()
 
-	// Idle tracking middleware wraps all routes
-	idleTimer := time.NewTimer(defaultIdleTimeout)
+	// Idle tracking
+	idleTimer := time.NewTimer(idleTimeout)
 	var idleMu sync.Mutex
 
 	resetIdle := func() {
@@ -37,7 +46,7 @@ func StartServer(pendingDir string, cfg *config.Config) error {
 			default:
 			}
 		}
-		idleTimer.Reset(defaultIdleTimeout)
+		idleTimer.Reset(idleTimeout)
 	}
 
 	// Register API and asset routes
@@ -74,7 +83,7 @@ func StartServer(pendingDir string, cfg *config.Config) error {
 	addr := listener.Addr().(*net.TCPAddr)
 	url := fmt.Sprintf("http://127.0.0.1:%d", addr.Port)
 
-	fmt.Fprintf(os.Stdout, "Approval UI: %s\n", url)
+	fmt.Fprintf(out, "Approval UI: %s\n", url)
 
 	server := &http.Server{
 		Handler:      mux,
@@ -82,19 +91,16 @@ func StartServer(pendingDir string, cfg *config.Config) error {
 		WriteTimeout: 30 * time.Second,
 	}
 
-	// Open browser
-	go openBrowser(url)
-
-	// Ctrl+C handling
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
+	if openBrowserFlag {
+		go openBrowser(url)
+	}
 
 	// Shutdown coordination
 	shutdownCh := make(chan string, 1)
 
 	go func() {
 		select {
-		case <-sigCh:
+		case <-ctx.Done():
 			shutdownCh <- "interrupt"
 		case <-idleTimer.C:
 			shutdownCh <- "idle timeout"
@@ -115,7 +121,7 @@ func StartServer(pendingDir string, cfg *config.Config) error {
 	// Wait for shutdown signal or server error
 	select {
 	case reason := <-shutdownCh:
-		fmt.Fprintf(os.Stdout, "\nShutting down (%s)...\n", reason)
+		fmt.Fprintf(out, "\nShutting down (%s)...\n", reason)
 	case err := <-errCh:
 		if err != nil {
 			return fmt.Errorf("approve: server error: %w", err)
@@ -123,11 +129,10 @@ func StartServer(pendingDir string, cfg *config.Config) error {
 	}
 
 	// Graceful shutdown with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	signal.Stop(sigCh)
 
-	if err := server.Shutdown(ctx); err != nil {
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("approve: shutdown error: %w", err)
 	}
 

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/zmueller/multi-kb/internal/approve"
@@ -14,36 +16,43 @@ func newApproveCmd() *cobra.Command {
 		Use:   "approve",
 		Short: "Launch the approval web UI to review pending notes",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pendingDir := route.DefaultPendingDir()
-
-			// Check for pending notes first
-			count, err := route.PendingCount(pendingDir)
-			if err != nil {
-				return fmt.Errorf("cannot check pending notes: %w", err)
-			}
-			if count == 0 {
-				fmt.Println("No notes awaiting approval.")
-				return nil
-			}
-
-			// Load config (needed for remote KB info)
 			cfgPath := cfgFile
 			if cfgPath == "" {
 				cfgPath = config.DefaultConfigPath()
 			}
-			cfg, errs := config.Load(cfgPath)
-			if len(errs) > 0 {
-				// Config load failed — still allow approval of local KBs
-				// by using an empty config
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: config load errors (remote KBs may not work):\n")
-				for _, e := range errs {
-					fmt.Fprintf(cmd.ErrOrStderr(), "  - %v\n", e)
-				}
-				cfg = &config.Config{}
-			}
-
-			fmt.Printf("Found %d pending note(s). Starting approval UI...\n", count)
-			return approve.StartServer(pendingDir, cfg)
+			return execApprove(cfgPath, route.DefaultPendingDir(),
+				approve.StartServer, cmd.ErrOrStderr(), os.Stdout)
 		},
 	}
+}
+
+// startServerFn is the function signature for starting the approval server.
+// Injectable for testing.
+type startServerFn func(pendingDir string, cfg *config.Config) error
+
+// execApprove is the testable core of the approve command.
+func execApprove(cfgPath, pendingDir string, startServer startServerFn, stderr, stdout io.Writer) error {
+	// Check for pending notes first
+	count, err := route.PendingCount(pendingDir)
+	if err != nil {
+		return fmt.Errorf("cannot check pending notes: %w", err)
+	}
+	if count == 0 {
+		fmt.Fprintln(stdout, "No notes awaiting approval.")
+		return nil
+	}
+
+	// Load config (needed for remote KB info)
+	cfg, errs := config.Load(cfgPath)
+	if len(errs) > 0 {
+		// Config load failed — still allow approval of local KBs
+		fmt.Fprintf(stderr, "Warning: config load errors (remote KBs may not work):\n")
+		for _, e := range errs {
+			fmt.Fprintf(stderr, "  - %v\n", e)
+		}
+		cfg = &config.Config{}
+	}
+
+	fmt.Fprintf(stdout, "Found %d pending note(s). Starting approval UI...\n", count)
+	return startServer(pendingDir, cfg)
 }

@@ -454,19 +454,23 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 
 ### AUD-016: APR-002 Tests — HTTP Server Lifecycle
 
-**Files:** `cli/internal/approve/server.go`, `cli/internal/approve/handlers_test.go`
+**Files:** `cli/internal/approve/server.go`, `cli/internal/approve/server_test.go`
 **Acceptance Criteria:**
-- [ ] Test: server starts on a random available port and reports the URL
-- [ ] Test: idle timeout fires — server shuts down after configured idle period with no activity
-- [ ] Test: all-resolved shutdown — server shuts down when all pending notes have been approved or rejected
-- [ ] Test: manual shutdown — server responds to interrupt/context cancellation
+- [x] Test: server starts on a random available port and reports the URL (`TestRunServer_BindsAndReportsURL`)
+- [x] Test: idle timeout fires — server shuts down after configured idle period with no activity (`TestRunServer_IdleTimeout`)
+- [x] Test: all-resolved shutdown — server shuts down when all pending notes have been approved or rejected (`TestRunServer_AllResolved`)
+- [x] Test: manual shutdown — server responds to interrupt/context cancellation (`TestRunServer_ContextCancel`)
+
+**Implementation notes:** `server.go` refactored to extract `runServer(ctx, pendingDir, cfg, idleTimeout, out, openBrowserFlag)` as a testable core. `StartServer` is a thin wrapper that wires `os.Interrupt` via `signal.NotifyContext`. Tests use `safeBuffer` (a `sync.Mutex`-protected writer) to avoid data races when the server goroutine writes concurrently.
 
 ### AUD-017: APR-004 Tests — Approve Command Wiring
 
-**Files:** `cli/internal/cmd/approve.go`
+**Files:** `cli/internal/cmd/approve.go`, `cli/internal/cmd/cmd_test.go`
 **Acceptance Criteria:**
-- [ ] Test: launch with pending notes — server starts, browser open attempted
-- [ ] Test: launch with no pending notes — prints message and exits without starting server
+- [x] Test: launch with pending notes — server starts (`TestExecApprove_WithPendingNotes`)
+- [x] Test: launch with no pending notes — prints message and exits without starting server (`TestExecApprove_NoPendingNotes`)
+
+**Implementation notes:** `approve.go` refactored to extract `execApprove(cfgPath, pendingDir, startServer, stderr, stdout)` with an injectable `startServerFn` type alias. Tests use a fake `startServerFn` to verify call/no-call behavior and check output messages.
 
 ---
 

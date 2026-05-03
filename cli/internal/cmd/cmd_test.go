@@ -6,9 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/zmueller/multi-kb/internal/config"
 	"github.com/zmueller/multi-kb/internal/lock"
 )
 
@@ -152,6 +154,58 @@ func TestExecRun_DreamCycleLockHeld(t *testing.T) {
 			t.Skip("real system lock is held; skipping dream-cycle lock test")
 		}
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- execApprove tests ---
+
+func TestExecApprove_NoPendingNotes(t *testing.T) {
+	pendingDir := t.TempDir() // empty dir — no pending notes
+	cfgPath := writeTempCmdConfig(t)
+
+	var out strings.Builder
+	err := execApprove(cfgPath, pendingDir,
+		func(d string, c *config.Config) error {
+			t.Error("startServer should not be called when no pending notes")
+			return nil
+		},
+		&out, &out)
+
+	if err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+	if !contains(out.String(), "No notes awaiting approval") {
+		t.Errorf("expected no-pending message, got: %q", out.String())
+	}
+}
+
+func TestExecApprove_WithPendingNotes(t *testing.T) {
+	pendingDir := t.TempDir()
+	cfgPath := writeTempCmdConfig(t)
+
+	// Write a pending note JSON directly.
+	noteData := `{"title":"T","content":"C","author":"a","target_kbs":["local/dev"],"source_conversation":"","extracted_at":""}`
+	if err := os.WriteFile(pendingDir+"/20260101T000000-aabbccdd.json", []byte(noteData), 0o600); err != nil {
+		t.Fatalf("write pending note: %v", err)
+	}
+
+	var out strings.Builder
+	serverCalled := false
+	err := execApprove(cfgPath, pendingDir,
+		func(d string, c *config.Config) error {
+			serverCalled = true
+			return nil
+		},
+		&out, &out)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !serverCalled {
+		t.Error("expected startServer to be called when pending notes exist")
+	}
+	if !contains(out.String(), "pending note") {
+		t.Errorf("expected pending-note message, got: %q", out.String())
 	}
 }
 
