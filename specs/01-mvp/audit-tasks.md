@@ -6,13 +6,13 @@
 
 ## Overview
 
-A comprehensive audit of the multi-kb system found 1 critical functional defect, 3 low-severity contract-vs-implementation gaps, 1 CDK warning worth addressing, and 16 incomplete CLI tasks from the original task file. This document organizes all findings into actionable task groups. The critical defect (Section 1) is resolved by adopting Bedrock KB's native metadata sidecar files rather than working around missing metadata with regex parsing or filesystem scans.
+A comprehensive audit of the multi-kb system found 1 critical functional defect, 3 low-severity contract-vs-implementation gaps, 1 CDK warning worth addressing, and 16 incomplete CLI tasks from the original task file. This document organizes all findings into actionable task groups. The critical defect (Section 1) is resolved by adopting Bedrock KB's native metadata sidecar files and migrating all metadata-based queries to the Bedrock Retrieve API's `filter` parameter — eliminating direct OpenSearch queries, regex frontmatter parsing, and client-side filtering.
 
 ### Summary
 
 | Section | Tasks | Severity | Blocked By |
 |---------|-------|----------|------------|
-| 1. Bedrock Metadata Sidecar + Dream Cycle Fix | 4 | **Critical** | None |
+| 1. Bedrock KB Metadata Sidecar + Retrieve API Migration | 3 (+1 no-op) | **Critical** | None (AUD-002 depends on AUD-001; AUD-003 independent) |
 | 2. Server-Config Validation Gaps | 2 | Low | None |
 | 3. CDK ASG desiredCapacity Warning | 1 | Low | None |
 | 4. CLI Incomplete Tasks: Dream Cycle Tests | 2 | Medium | None |
@@ -23,93 +23,272 @@ A comprehensive audit of the multi-kb system found 1 critical functional defect,
 
 ---
 
-## Section 1: Bedrock Metadata Sidecar + Dream Cycle Fix
+## Section 1: Bedrock KB Metadata Sidecar + Retrieve API Migration
 
 **Priority: Critical**
-**Root Cause:** QAT-006 confirmed that Bedrock KB does NOT store YAML frontmatter fields (`uid`, `title`, `status`, `author`) in the `AMAZON_BEDROCK_METADATA` OpenSearch field. That field contains only Bedrock system metadata (`x-amz-bedrock-kb-source-uri`, `x-amz-bedrock-kb-data-source-id`, etc.). Additionally, the OpenSearch index maps `AMAZON_BEDROCK_METADATA` with `index: false` (`cdk/lambda/custom-resource/create-index.ts:33`), making the field completely unsearchable even if it contained custom fields.
 
-**Impact:** `queryOpenSearchPending()` at `cli/internal/server/dreamcycle.go:147` queries `AMAZON_BEDROCK_METADATA.status == "pending"` which never matches any document. The server dream cycle silently no-ops every run — no pending notes are ever found, so phases 2-4 never execute. `queryOpenSearchRelated()` at line 165 has the same problem filtering on `AMAZON_BEDROCK_METADATA.status == "active"`.
+### Background
 
-**Solution Direction: Bedrock KB Metadata Sidecar Files**
-Rather than working around the missing metadata with regex parsing of `AMAZON_BEDROCK_TEXT_CHUNK` or local filesystem scans, the proper fix is to use Bedrock KB's native metadata sidecar feature. For each note `{uid}.md` uploaded to S3, a companion `{uid}.md.metadata.json` file provides structured attributes that Bedrock indexes into `AMAZON_BEDROCK_METADATA` during data source ingestion. This enables native metadata filtering in both direct OpenSearch queries and the Bedrock Retrieve API `filter` parameter.
+QAT-006 confirmed that Bedrock KB does NOT store YAML frontmatter fields (`uid`, `title`, `status`, `author`) in the `AMAZON_BEDROCK_METADATA` OpenSearch field. That field contains only Bedrock system metadata (`x-amz-bedrock-kb-source-uri`, `x-amz-bedrock-kb-data-source-id`, etc.).
 
-The recall Lambda (`cdk/lambda/recall/index.ts:33-76`) currently works around the missing metadata by extracting `uid` from the S3 URI and `title`/`status` via regex from `content.text`. Once sidecars are in place, this workaround can be removed in favor of reading metadata fields directly and using the Retrieve API's native `filter` parameter to exclude pending notes server-side.
+**Impact — two broken subsystems:**
+1. **Server dream cycle** (`cli/internal/server/dreamcycle.go`): `queryOpenSearchPending()` at line 147 sends a direct OpenSearch term query on `AMAZON_BEDROCK_METADATA.status == "pending"` — always returns 0 results. The dream cycle silently no-ops every run. `queryOpenSearchRelated()` at line 165 has the same problem filtering on `status == "active"`.
+2. **Recall Lambda** (`cdk/lambda/recall/index.ts`): `extractFrontmatterField()` regex-parses `title`/`status` from `content.text` and filters client-side — fragile and wasteful (uses up `numberOfResults` slots on documents that get discarded).
 
-### AUD-001: Research — Bedrock KB Metadata Sidecar Approach
+### Solution: Bedrock KB Metadata Sidecar Files + Retrieve API Native Filtering
 
-**Description:** Validate the Bedrock KB metadata sidecar file approach and determine the exact implementation requirements for this codebase.
-**Files to read:**
-- `cli/internal/server/s3sync.go` — current S3 upload logic (`s3Upload` at line 92, `s3Delete` at line 114)
-- `cdk/lambda/custom-resource/create-index.ts` — current OpenSearch index schema (`AMAZON_BEDROCK_METADATA` mapped as `text`, `index: false` at line 33)
-- `cdk/lib/constructs/knowledge-base.ts` — data source and field mapping configuration (lines 86-129)
-- `cdk/lambda/recall/index.ts:33-76` — current regex workaround to be replaced
-- `cli/internal/server/dreamcycle.go` — broken metadata queries (lines 147-196)
-- `specs/01-mvp/cdk/research.md` (R-2, QAT-006 section) — documented metadata findings
-**Questions to resolve:**
-- [ ] Confirm the `.metadata.json` sidecar file format: is it `{"metadataAttributes": {"key": {"value": "...", "type": "STRING"}}}` or a flat `{"key": "value"}` structure? (AWS documentation has shown both in different contexts — confirm which Bedrock KB S3 data sources expect)
-- [ ] Which frontmatter fields to include as metadata attributes? Minimum: `status` (for filtering) and `uid` (for identity). Candidates for inclusion: `title`, `author`, `last-updated`, `last-recalled`. Evaluate: does including all fields add value for future queries, or does it add unnecessary ingestion overhead?
-- [ ] Does the OpenSearch index schema need to change? When Bedrock ingests sidecar metadata, does it populate `AMAZON_BEDROCK_METADATA` as a structured object (requiring the field type to change from `text` to something else), or does Bedrock handle the mapping internally? Does `index: false` need to change to `index: true`?
-- [ ] Can the existing `bedrock-kb-index` be updated in-place via the OpenSearch Update Mapping API, or must it be deleted and recreated? (OpenSearch Serverless VECTORSEARCH collections may have restrictions on mapping changes)
-- [ ] Does the Bedrock Retrieve API `filter` parameter work with sidecar-provided attributes? e.g., `filter: { equals: { key: "status", value: "active" } }` — confirm this works for the recall Lambda's use case
-- [ ] Is there a size or count limit on metadata attributes per document?
-- [ ] Are there any IAM permission changes needed? The Bedrock KB service role currently has `s3:GetObject` and `s3:ListBucket` — confirm these are sufficient to read `.metadata.json` files alongside the source documents
+Bedrock KB's S3 data source connector supports **metadata sidecar files**. For each source document `{name}.md` in S3, a companion `{name}.md.metadata.json` provides structured attributes. During data source ingestion, Bedrock indexes these attributes and makes them filterable via the **Retrieve API `filter` parameter**.
 
-**Decision criteria:** Confirm viability before proceeding with AUD-002 through AUD-004. If the sidecar approach has a blocking limitation (e.g., VECTORSEARCH collections cannot index metadata), fall back to local repo scan for pending queries and regex parsing for related-note queries.
+**Sidecar file format** (AWS documented structured format):
+```json
+{
+  "metadataAttributes": {
+    "status": {
+      "value": { "type": "STRING", "stringValue": "pending" }
+    },
+    "uid": {
+      "value": { "type": "STRING", "stringValue": "ABC123" }
+    },
+    "title": {
+      "value": { "type": "STRING", "stringValue": "My Note Title" }
+    },
+    "author": {
+      "value": { "type": "STRING", "stringValue": "user@example.com" }
+    }
+  }
+}
+```
 
-### AUD-002: Generate `.metadata.json` Sidecars in S3 Sync
+**Retrieve API filter syntax:**
+```json
+{
+  "retrievalConfiguration": {
+    "vectorSearchConfiguration": {
+      "numberOfResults": 10,
+      "filter": {
+        "equals": { "key": "status", "value": "active" }
+      }
+    }
+  }
+}
+```
 
-**Description:** Modify the S3 sync path to write a `.metadata.json` sidecar file alongside each `.md` note uploaded to S3. When a note is deleted, also delete its sidecar. After the next Bedrock data source ingestion job, the metadata attributes will be indexed and queryable.
+**Key design facts:**
+- The Retrieve API handles metadata filtering at the application layer — it works regardless of the OpenSearch `AMAZON_BEDROCK_METADATA` index setting (`index: false` is fine).
+- No OpenSearch schema changes are required.
+- No additional IAM permissions needed — existing `s3:GetObject` on `bucket/*` covers sidecar files.
+- Max sidecar file size: 10 KB (our sidecars are well under 1 KB).
+- All metadata-based queries go through the Retrieve API. No direct OpenSearch queries needed.
+- The Retrieve API uses embedding-based vector search — strictly better semantic matching than the current OpenSearch `more_like_this` term-frequency approach.
+
+**What this replaces:**
+- Direct OpenSearch queries with SigV4-signed HTTP calls → Bedrock Retrieve API via AWS SDK
+- Regex parsing of frontmatter from content text → metadata fields in Retrieve API response
+- Client-side status filtering → server-side pre-filtering via `filter` parameter
+- `more_like_this` term-frequency matching → embedding-based semantic similarity
+
+### AUD-001: Generate `.metadata.json` Sidecars in S3 Sync
+
+**Description:** Modify the S3 sync path to generate and upload a `.metadata.json` sidecar file alongside each `.md` note uploaded to S3. When a note is deleted, also delete its sidecar. After the next Bedrock data source ingestion job, the metadata attributes will be indexed and filterable via the Retrieve API.
+
 **Files:**
-- `cli/internal/server/s3sync.go` — extend `s3Upload()` (line 92) to also upload `{filename}.metadata.json`; extend `s3Delete()` (line 114) to also delete the sidecar
-- `cli/internal/server/s3sync_test.go` — add/update tests
-**Dependencies:** AUD-001 (confirm sidecar format)
+- `cli/internal/server/s3sync.go` — extend `s3Upload()` (line 92) and `s3Delete()` (line 114); add `generateSidecar()` function and sidecar JSON structs
+- `cli/internal/server/s3sync_test.go` — new test file
+
+**Implementation details:**
+
+1. **Add sidecar structs** to `s3sync.go`:
+   ```go
+   type sidecarFile struct {
+       MetadataAttributes map[string]sidecarAttribute `json:"metadataAttributes"`
+   }
+   type sidecarAttribute struct {
+       Value sidecarValue `json:"value"`
+   }
+   type sidecarValue struct {
+       Type        string `json:"type"`
+       StringValue string `json:"stringValue"`
+   }
+   ```
+
+2. **Add `generateSidecar(filename string, content []byte) ([]byte, error)` function:**
+   - Extract UID from filename (strip `.md` extension, take base name).
+   - Call `dreamcycle.ParseNote(uid, string(content))` (reuse existing exported function from `cli/internal/dreamcycle/phase1.go:87`) to extract frontmatter fields.
+   - Build `sidecarFile` with attributes: `status`, `uid`, `title`, `author` — all as `STRING` type.
+   - Marshal to JSON and return.
+   - New import: `"github.com/zmueller/multi-kb/internal/dreamcycle"`
+
+3. **Modify `s3Upload()`:**
+   - After successfully uploading the `.md` file, check `strings.HasSuffix(filename, ".md")`.
+   - If `.md`: call `generateSidecar(filename, data)` with the file content already read. Upload sidecar to S3 key `filename + ".metadata.json"` using same 3-attempt retry pattern.
+   - If sidecar generation or upload fails: log warning via `slog.Warn`, do NOT fail the primary upload.
+   - Non-`.md` files: skip sidecar entirely.
+
+4. **Modify `s3Delete()`:**
+   - After deleting the file, if `strings.HasSuffix(filename, ".md")`: also delete `filename + ".metadata.json"` using same 3-attempt retry.
+   - Sidecar delete failure: log warning, do not fail.
+
+5. **Modify `syncDiff()` rename handling (line 65-69):**
+   - For `R` (rename) status: the current code uploads the new file but does NOT delete the old file. Add explicit `s3Delete(ctx, client, bucket, parts[1])` for the old path — this will clean up both the old `.md` and its sidecar.
+
 **Acceptance Criteria:**
-- [ ] For each `.md` file upload, `s3Upload()` parses YAML frontmatter (reusing `dreamcycle.ParseNote()` from `cli/internal/dreamcycle/phase1.go`) and uploads `{filename}.metadata.json` with the Bedrock sidecar schema alongside the note
-- [ ] Sidecar contains at minimum: `status` (STRING), `uid` (STRING), `title` (STRING), `author` (STRING) — exact schema per AUD-001 research findings
-- [ ] `s3Delete()` deletes both `{filename}` and `{filename}.metadata.json`
-- [ ] Non-`.md` files are uploaded without sidecars (no frontmatter parse attempt)
-- [ ] Malformed or missing frontmatter: sidecar is still uploaded with whatever fields could be extracted; missing fields omitted rather than erroring the upload
+- [ ] For each `.md` upload, `s3Upload()` also uploads `{filename}.metadata.json` with correct Bedrock sidecar schema
+- [ ] Sidecar contains: `status`, `uid`, `title`, `author` — all as STRING type
+- [ ] `s3Delete()` deletes both `{filename}` and `{filename}.metadata.json` for `.md` files
+- [ ] Non-`.md` files uploaded without sidecars
+- [ ] Malformed/missing frontmatter: sidecar still uploaded with whatever fields could be extracted; missing fields get empty string values
 - [ ] Existing retry logic (3 attempts, exponential backoff) applies to sidecar uploads and deletes
-- [ ] Test: upload a well-formed note — both `.md` and `.md.metadata.json` PutObject calls made with correct S3 keys and content
+- [ ] `syncDiff()` rename handling deletes old file + old sidecar
+- [ ] Test: upload well-formed note — both `.md` and `.md.metadata.json` PutObject calls made with correct keys and content
 - [ ] Test: delete a note — both `.md` and `.md.metadata.json` DeleteObject calls made
-- [ ] Test: upload a non-`.md` file — no sidecar generated
-- [ ] Test: note with missing frontmatter fields — sidecar contains only the fields that were present
+- [ ] Test: upload non-`.md` file — no sidecar generated
+- [ ] Test: note with missing frontmatter fields — sidecar contains fields with empty string values
+- [ ] Test: sidecar JSON key is `{filename}.metadata.json` (e.g., `notes/ABC123.md.metadata.json`)
 
-### AUD-003: Update CDK OpenSearch Index Schema for Metadata Indexing
+### AUD-002: Replace Server Dream Cycle OpenSearch Queries with Bedrock Retrieve API
 
-**Description:** Update the OpenSearch index schema so that `AMAZON_BEDROCK_METADATA` is indexed and queryable. With sidecar files providing structured metadata during ingestion, this field must be searchable to support term queries on `status`, `uid`, etc.
+**Description:** Replace all direct OpenSearch queries in the server dream cycle with Bedrock Retrieve API calls using native metadata filtering. This eliminates the broken `AMAZON_BEDROCK_METADATA.status` term queries and replaces `more_like_this` with embedding-based semantic search. Delete all dead OpenSearch query code and the manual SigV4 signer.
+
 **Files:**
-- `cdk/lambda/custom-resource/create-index.ts` — change `AMAZON_BEDROCK_METADATA` mapping (line 33, currently `type: "text"`, `index: false`)
-- `cdk/test/__snapshots__/multi-kb-stack.test.ts.snap` — snapshot update
-**Dependencies:** AUD-001 (confirm required schema changes — field type and index settings)
+- `cli/go.mod` — add `bedrockagentruntime` SDK dependency
+- `cli/internal/server/dreamcycle.go` — replace query functions, update `RunDreamCycle()`
+- `cli/internal/server/sign.go` — delete entire file (no remaining callers)
+- `cli/internal/server/dreamcycle_test.go` — replace OpenSearch tests with Retrieve API tests
+
+**Implementation details:**
+
+1. **Add Go SDK dependency:**
+   ```
+   cd cli && GOPROXY=direct GONOSUMDB='*' go get github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime
+   ```
+
+2. **Add new imports to `dreamcycle.go`:**
+   ```go
+   "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
+   bratypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
+   ```
+
+3. **Add `retrieveNotes()` function** (shared by pending and related queries):
+   ```go
+   func retrieveNotes(ctx context.Context, client *bedrockagentruntime.Client, kbID, queryText string, filter bratypes.RetrievalFilter, limit int32) ([]dreamcycle.Note, error)
+   ```
+   - Calls `client.Retrieve()` with `KnowledgeBaseId`, `RetrievalQuery.Text`, `NumberOfResults`, and `Filter`.
+   - Parses `RetrievalResults`: reads `uid`, `title`, `status`, `author` from `r.Metadata` map, content from `r.Content.Text`.
+   - Skips results with empty `uid`.
+   - Handles pagination via `NextToken` if results exceed single page.
+
+4. **Replace `queryOpenSearchPending()` → `queryRetrievePending()`:**
+   - Filter: `{ equals: { key: "status", value: "pending" } }` — using `bratypes.RetrievalFilterMemberEquals`.
+   - Query text: `"*"` (broad query — we want all pending notes, ranking doesn't matter).
+   - Limit: 100 (matches current OpenSearch `"size": 100`).
+
+5. **Replace `queryOpenSearchRelated()` → `queryRetrieveRelated()`:**
+   - Filter: `{ equals: { key: "status", value: "active" } }`.
+   - Query text: `batch.PendingNote.Content` — the pending note's content as the semantic query. This naturally gives embedding-based similarity ranking, replacing the OpenSearch `more_like_this` term-frequency approach.
+   - Limit: 10 (matches current OpenSearch `"size": 10`).
+
+6. **Update `RunDreamCycle()`:**
+   - Create `bedrockagentruntime.Client` from existing `awsCfg` (already created at line 29).
+   - Phase 1: call `queryRetrievePending()` instead of `queryOpenSearchPending()`.
+   - Phase 2: call `queryRetrieveRelated()` instead of `queryOpenSearchRelated()`.
+
+7. **Delete dead code:**
+   - `queryOpenSearchPending()` (lines 147-163)
+   - `queryOpenSearchRelated()` (lines 165-196)
+   - `opensearchQuery()` (lines 208-268) — only callers were the two functions above
+   - `parseOpenSearchNotes()` (lines 270-314) — replaced by parsing logic in `retrieveNotes()`
+   - `cli/internal/server/sign.go` (entire file, ~105 lines) — `signRequest()` only called from `opensearchQuery()`
+
+8. **Remove now-unused imports from `dreamcycle.go`:** `bytes`, `crypto/tls`, `encoding/json` (check), `io`, `net/http`.
+
 **Acceptance Criteria:**
-- [ ] `AMAZON_BEDROCK_METADATA` field mapping updated to support structured metadata queries (type and index settings per AUD-001 research findings)
-- [ ] Custom resource handler logic accounts for index migration: if an existing index with the old schema exists, handle recreation (delete + create) or document that manual intervention is needed
-- [ ] `cdk synth` succeeds without new warnings
-- [ ] CDK tests pass (update snapshot with `npx jest -u`)
-- [ ] Document any manual migration steps required for existing deployments (e.g., "must delete and recreate index, which triggers full re-ingestion")
+- [ ] `bedrockagentruntime` added to `go.mod` as a dependency
+- [ ] `queryRetrievePending()` calls Retrieve API with `filter: equals status "pending"`, returns up to 100 notes
+- [ ] `queryRetrieveRelated()` calls Retrieve API with `filter: equals status "active"` and pending note content as query text, returns up to 10 notes
+- [ ] `retrieveNotes()` parses `uid`, `title`, `status`, `author` from Retrieve API `Metadata` map and `content` from `Content.Text`
+- [ ] `RunDreamCycle()` Phase 1 and Phase 2 use the new Retrieve API functions
+- [ ] `queryOpenSearchPending()`, `queryOpenSearchRelated()`, `opensearchQuery()`, `parseOpenSearchNotes()` deleted
+- [ ] `cli/internal/server/sign.go` deleted entirely
+- [ ] All unused imports removed
+- [ ] Test: `parseRetrieveResults` with mock `KnowledgeBaseRetrievalResult` — correct Note output
+- [ ] Test: empty results → empty slice
+- [ ] Test: result with missing uid in metadata → skipped
+- [ ] Test: result with nil/missing metadata → handled gracefully
+- [ ] Existing tests preserved: `TestGroupIntoBatches`, `TestServerNoteStore_ReadWriteDelete`, `TestNoteFileFilename`, `TestRegionOrDefault`
+- [ ] `GOPROXY=direct GONOSUMDB='*' go test -race ./internal/server/...` passes
 
-### AUD-004: Fix Server Dream Cycle and Recall Lambda — Use Native Metadata Filtering
+### AUD-003: Recall Lambda — Native Retrieve API Metadata Filtering
 
-**Description:** With sidecar metadata now indexed, update the server dream cycle queries to use proper structured metadata fields, and simplify the recall Lambda by removing the regex workaround in favor of native Bedrock metadata filtering.
+**Description:** Update the recall Lambda to use the Bedrock Retrieve API's native `filter` parameter for status filtering and read metadata fields directly from the API response instead of regex-parsing frontmatter from content text.
+
 **Files:**
-- `cli/internal/server/dreamcycle.go` — fix `queryOpenSearchPending()` (line 147) and `queryOpenSearchRelated()` (line 165) to query the now-populated `AMAZON_BEDROCK_METADATA.status` field
-- `cli/internal/server/dreamcycle.go` — simplify `parseOpenSearchNotes()` (line 270) to read `uid`, `title`, `status` directly from the `AMAZON_BEDROCK_METADATA` map instead of regex-parsing `AMAZON_BEDROCK_TEXT_CHUNK`
-- `cdk/lambda/recall/index.ts` — replace regex workaround (lines 33-76): use Bedrock Retrieve API `filter` parameter for status filtering, read `uid`/`title` from `metadata` response fields instead of regex-parsing content text
-- `cli/internal/server/dreamcycle_test.go` — rewrite tests with realistic sidecar-populated metadata fixtures
-- `cdk/lambda/recall/index.test.ts` — update recall Lambda tests if they exist
-**Dependencies:** AUD-002 (sidecars generated), AUD-003 (metadata indexed)
+- `cdk/lambda/recall/index.ts` — add filter, use metadata fields, remove workarounds
+- `cdk/test/lambda/recall.test.ts` — update mocks and assertions
+
+**Implementation details:**
+
+1. **Add `filter` to `RetrieveCommand`** in `retrieveFromKb()` (line 50-60):
+   ```typescript
+   new RetrieveCommand({
+     knowledgeBaseId,
+     retrievalQuery: { text: query },
+     retrievalConfiguration: {
+       vectorSearchConfiguration: {
+         numberOfResults: limit,
+         ...(_excludePending && {
+           filter: {
+             equals: { key: "status", value: "active" },
+           },
+         }),
+       },
+     },
+   })
+   ```
+   The `@aws-sdk/client-bedrock-agent-runtime` (version `^3.700.0`, already in `package.json`) supports the `filter` parameter on `KnowledgeBaseVectorSearchConfiguration`.
+
+2. **Read metadata from response** instead of regex/S3 URI parsing (lines 63-79):
+   - Replace `extractUidFromS3Uri(s3Uri)` with `(r.metadata?.["uid"] as string)`, falling back to `extractUidFromS3Uri()` for backward compatibility during migration.
+   - Replace `extractFrontmatterField(content, "title")` with `(r.metadata?.["title"] as string) ?? ""`.
+
+3. **Remove client-side status filtering** (lines 73-76):
+   ```typescript
+   // DELETE THIS BLOCK — filter parameter handles this server-side
+   if (_excludePending) {
+     const status = extractFrontmatterField(content, "status");
+     if (status && status !== "active") continue;
+   }
+   ```
+
+4. **Delete `extractFrontmatterField()`** (lines 38-41) — no remaining callers.
+
+5. **Keep `extractUidFromS3Uri()`** (lines 33-36) as fallback — can be removed later once all documents have sidecars.
+
+**No CDK infrastructure changes needed:** `cdk/lib/constructs/recall-lambda.ts` already grants `bedrock:Retrieve` scoped to the KB ARN. The `filter` parameter is part of the Retrieve API call, no additional IAM permissions required. The `EXCLUDE_PENDING` env var remains — its meaning changes from "filter client-side" to "include filter in Retrieve API call."
+
 **Acceptance Criteria:**
-- [ ] `queryOpenSearchPending()` queries `AMAZON_BEDROCK_METADATA.status == "pending"` — now succeeds because Bedrock populates this field from sidecars during ingestion
-- [ ] `queryOpenSearchRelated()` uses `AMAZON_BEDROCK_METADATA.status` term filter for `"active"` notes — no more client-side post-filtering needed
-- [ ] `parseOpenSearchNotes()` reads `uid`, `title`, `status` directly from `AMAZON_BEDROCK_METADATA` map — no regex parsing of `AMAZON_BEDROCK_TEXT_CHUNK` content
-- [ ] Recall Lambda uses Bedrock Retrieve API `filter` parameter (e.g., `{ equals: { key: "status", value: "active" } }`) to exclude pending notes server-side
-- [ ] Recall Lambda reads `uid`, `title` from `metadata` response fields instead of regex-parsing content text
-- [ ] `extractFrontmatterField()` and `extractUidFromS3Uri()` helper functions removed from recall Lambda (no longer needed)
-- [ ] Test: `parseOpenSearchNotes` with realistic OpenSearch response containing sidecar-populated metadata fields
-- [ ] Test: `queryOpenSearchPending` returns only notes with `status: "pending"` in metadata
-- [ ] Test: `queryOpenSearchRelated` excludes pending notes via metadata term filter
-- [ ] All `go test -race ./internal/server/...` pass
+- [ ] `RetrieveCommand` includes `filter: { equals: { key: "status", value: "active" } }` when `EXCLUDE_PENDING=true`
+- [ ] `RetrieveCommand` has NO filter when `EXCLUDE_PENDING=false`
+- [ ] `uid` read from `r.metadata?.["uid"]` with fallback to `extractUidFromS3Uri()`
+- [ ] `title` read from `r.metadata?.["title"]`
+- [ ] Client-side status filtering loop (lines 73-76) removed
+- [ ] `extractFrontmatterField()` function deleted
+- [ ] `extractUidFromS3Uri()` kept as fallback
+- [ ] `npx jest` passes in `cdk/`
+- [ ] Test: `makeRetrieveResponse()` updated to include sidecar metadata fields (`uid`, `title`, `status`, `author`) in `metadata` map
+- [ ] Test: exclude-pending test verifies `filter` parameter on `RetrieveCommand` rather than checking client-side filtering
+- [ ] Test: `EXCLUDE_PENDING=false` verifies NO filter in `RetrieveCommand`
+- [ ] Test: uid/title extracted from metadata fields, not regex
+
+### AUD-004: No OpenSearch Index Schema Change Required
+
+**Status: No action needed**
+
+The original AUD-003 proposed changing `AMAZON_BEDROCK_METADATA` from `index: false` to `index: true` in `cdk/lambda/custom-resource/create-index.ts`. This is unnecessary because:
+- All metadata-based queries now go through the **Bedrock Retrieve API**, which handles filtering at the application layer regardless of the OpenSearch index setting.
+- All direct OpenSearch queries are removed by AUD-002.
+- Changing the schema would require index deletion and recreation with full re-ingestion — disruptive with no functional benefit.
+
+The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field stays required in `cli/internal/config/validate.go` (the CDK custom resource Lambda still needs it for index creation, and OpenSearch Serverless is still the backing vector store).
 
 ---
 
@@ -362,17 +541,19 @@ The recall Lambda (`cdk/lambda/recall/index.ts:33-76`) currently works around th
 The recommended execution order respects dependencies and prioritizes by severity:
 
 ```
-Phase 1 (Critical fix):    AUD-001 -> AUD-002 + AUD-003 (parallel) -> AUD-004
-  AUD-001: Research sidecar format, schema requirements
-  AUD-002: S3 sync generates .metadata.json sidecars (CLI change)
-  AUD-003: OpenSearch index schema updated for metadata indexing (CDK change)
-  AUD-004: Server dream cycle + recall Lambda use native metadata (depends on AUD-002 + AUD-003)
+Phase 1 (Critical fix):    AUD-001 -> AUD-002 + AUD-003 (parallel)
+  AUD-001: S3 sync generates .metadata.json sidecars (CLI, foundational)
+  AUD-002: Server dream cycle uses Retrieve API (CLI, depends on AUD-001 for sidecars to exist)
+  AUD-003: Recall Lambda uses Retrieve API filter (CDK, independent of AUD-002)
+  AUD-004: No-op (OpenSearch schema unchanged)
 Phase 2 (Low, parallel):   AUD-005 + AUD-006 + AUD-007 (all independent)
 Phase 3 (Medium, parallel): AUD-008 + AUD-009 + AUD-010..015 + AUD-016 + AUD-017 (all independent)
 Phase 4 (Medium, parallel): AUD-018..022 (prompt validation, needs Bedrock access)
 Phase 5 (Deployed stack):  AUD-023 (E2E scenarios)
 ```
 
-Phase 1 note: After AUD-001 research, AUD-002 (CLI/S3 sync) and AUD-003 (CDK/OpenSearch schema) are independent and can proceed in parallel. AUD-004 (query fixes) depends on both being complete and a data source re-ingestion having run with sidecars present. Existing deployments will need an index recreation and full re-ingestion to populate metadata for existing notes.
+Phase 1 note: AUD-001 (sidecar generation) must land first — without sidecars in S3, the Retrieve API filters will match nothing. After AUD-001, AUD-002 (Go dream cycle) and AUD-003 (TypeScript recall Lambda) are independent and can proceed in parallel. No existing data migration needed — the deployment has no real data, so a fresh `syncAllFiles` + ingestion job will populate all sidecars.
+
+After deployment: trigger a full S3 sync to generate sidecars for all existing files, then trigger a Bedrock ingestion job. Verify sidecars are in S3 (`aws s3 ls s3://bucket/ | grep metadata.json`), then verify Retrieve API returns metadata fields.
 
 Phases 2 and 3 can run in parallel with each other and with Phase 1. Phase 4 requires Bedrock model access but not a deployed stack. Phase 5 requires a fully deployed stack with the Phase 1 sidecar changes deployed.
