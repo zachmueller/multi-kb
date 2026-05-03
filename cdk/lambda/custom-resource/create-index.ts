@@ -158,7 +158,9 @@ export const handler = async (
       const check = await signedRequest("GET", url, "");
       console.log(`Index readiness check ${i}/${maxAttempts}: HTTP ${check.statusCode}`);
       if (check.statusCode === 200) {
-        console.log("Index confirmed ready");
+        console.log("Index confirmed ready via VPC path, waiting 60s for AOSS service networking propagation");
+        await new Promise((r) => setTimeout(r, 60000));
+        console.log("Stabilization wait complete");
         return { ...base, Status: "SUCCESS" };
       }
       if (i < maxAttempts) {
