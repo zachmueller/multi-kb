@@ -3,7 +3,7 @@
 **Created:** 2026-05-01
 **CDK Tasks:** [cdk/tasks.md](cdk/tasks.md) (56 tasks)
 **CLI Tasks:** [cli/tasks.md](cli/tasks.md) (87 tasks)
-**Status:** In Progress — Wave 7 implementation complete (scripts ready; deploy + run required)
+**Status:** In Progress — Wave 8 CLI quality tasks complete (QAT-001 through QAT-004); QAT-003 e2e scenarios require deployed stack for manual validation
 
 ## Overview
 

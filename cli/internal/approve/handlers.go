@@ -130,6 +130,11 @@ func handleNoteAction(w http.ResponseWriter, r *http.Request, pendingDir string,
 	filename := parts[0]
 	action := parts[1]
 
+	if strings.Contains(filename, "/") || strings.Contains(filename, "\\") || strings.Contains(filename, "..") {
+		writeError(w, http.StatusBadRequest, "invalid filename")
+		return
+	}
+
 	switch action {
 	case "approve":
 		handleApprove(w, r, pendingDir, cfg, filename)

@@ -101,7 +101,7 @@ func RunRecallLogProcessing(ctx context.Context, cfg *config.Config) error {
 			continue
 		}
 
-		if err := os.WriteFile(notePath, []byte(updatedContent), 0o644); err != nil {
+		if err := os.WriteFile(notePath, []byte(updatedContent), 0o600); err != nil {
 			slog.Warn("recall-log: write note failed", "uid", uid, "error", err)
 			continue
 		}

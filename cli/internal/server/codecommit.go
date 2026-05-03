@@ -20,7 +20,7 @@ func CommitBatch(ctx context.Context, cfg *config.Config, notes []NoteFile) erro
 
 	for _, note := range notes {
 		path := filepath.Join(dir, note.Filename())
-		if err := os.WriteFile(path, []byte(note.ToMarkdown()), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(note.ToMarkdown()), 0o600); err != nil {
 			return fmt.Errorf("codecommit: write %s: %w", note.Filename(), err)
 		}
 	}

@@ -329,7 +329,7 @@ func (s *serverNoteStore) ReadNote(uid string) (*dreamcycle.Note, error) {
 
 func (s *serverNoteStore) WriteNote(note dreamcycle.Note) error {
 	path := filepath.Join(s.repoDir, note.UID+".md")
-	return os.WriteFile(path, []byte(note.ToMarkdown()), 0o644)
+	return os.WriteFile(path, []byte(note.ToMarkdown()), 0o600)
 }
 
 func (s *serverNoteStore) DeleteNote(uid string) error {

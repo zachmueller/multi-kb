@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -78,7 +79,7 @@ func GrepNotes(repoDir string, keywords []string) ([]GrepResult, error) {
 		// Re-run with -F for exact match on title lines (title: <value>)
 		// Actually we need to grep the title: line specifically
 		// Use a fixed pattern against the title: frontmatter line
-		titlePattern := fmt.Sprintf("^title:.*%s", kw)
+		titlePattern := fmt.Sprintf("^title:.*%s", regexp.QuoteMeta(kw))
 		cmd3 := exec.Command("git", "grep", "-c", "-i", "-E", titlePattern, "--", "*.md")
 		cmd3.Dir = repoDir
 		out3, err3 := cmd3.Output()

@@ -621,7 +621,7 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - [x] Each pending note becomes its own batch (singleton — no similarity grouping for local)
 - [x] Returns list of batches, each containing one note
 - [x] Empty list if no pending notes (dream cycle exits early)
-- [ ] Test cases: multiple pending notes, no pending notes, mixed pending/active notes
+- [x] Test cases: multiple pending notes, no pending notes, mixed pending/active notes
 
 ### DRM-003: Phase 2 — Git Grep Related Note Retrieval
 **Description:** Implement Phase 2: for each batch, find related `status: active` notes via keyword-based `git grep` per spec FR-8.
@@ -635,7 +635,7 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - [x] Filters to `status: active` notes only
 - [x] Returns up to 10 related active notes per batch
 - [x] Ranks by match count (same as recall ranking)
-- [ ] Test cases: note with matching active notes, no related notes, keyword derivation from title
+- [x] Test cases: note with matching active notes, no related notes, keyword derivation from title
 
 ### DRM-004: Phase 3 — LLM Consolidation and Action Application
 **Description:** Implement Phase 3: send each batch (pending note + related notes) to LLM for consolidation, parse actions, apply them per spec FR-8 and contracts/consolidation-output.md.
@@ -659,7 +659,7 @@ _Corresponds to plan.md Phase E. Builds client-mode dream cycle._
 - [x] **Content length heuristic for consolidate:** If a `consolidate` action references active notes, warn-log if the new `content` length is less than 80% of the combined source content length. The action still proceeds (it's a warning, not a block), but the warning is recorded in the run log for auditability.
 - [x] Per-batch git commit after applying all actions
 - [x] Git commit message for consolidate actions explicitly lists deleted active note UIDs (e.g., `dream-cycle: consolidate — deleted active notes ABC123, DEF456`)
-- [ ] Test cases: keep action, merge action, split action, consolidate action, consolidate with active notes (verify warning heuristic), LLM failure (skip batch)
+- [x] Test cases: keep action, merge action, split action, consolidate action, consolidate with active notes (verify warning heuristic), LLM failure (skip batch)
 
 ### DRM-005: Dream Cycle Commands
 **Description:** Wire up `multi-kb dream-cycle` (standalone) and integrate into `multi-kb run` (combined capture + dream cycle).
@@ -847,7 +847,7 @@ _Corresponds to plan.md Phase G. Builds on-demand approval web server._
   - Returns {remaining_targets}
 - [x] Error responses: 404 (file not found), 400 (target not in array), 502 (submission failed — pending file left unchanged, target NOT removed, user can retry)
 - [x] **Approval error handling:** On remote KB submission failure (400/401/5xx), return HTTP 502 with error details to the UI. Leave the pending file unchanged (target not removed). No retry logic, no LLM correction — keep the approval flow simple. User can retry from the UI.
-- [ ] Test cases: list notes, approve for one target (local KB — verify UID generated), approve for remote KB, approve last target (file deleted), reject, edit before approve, 404, 400, remote submission failure (502 returned, pending unchanged)
+- [x] Test cases: list notes, approve for one target (local KB — verify UID generated), approve for remote KB, approve last target (file deleted), reject, edit before approve, 404, 400, remote submission failure (502 returned, pending unchanged)
 
 ### APR-004: Approve Command Wiring
 **Description:** Wire up `multi-kb approve` to launch the web server per spec FR-9.
@@ -912,7 +912,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - [x] Hands batch to CodeCommit operations for commit
 - [x] Deletes successfully processed messages from queue
 - [x] Failed messages left in queue for SQS retry (up to 3 attempts before DLQ)
-- [ ] Test cases: successful batch, partial failure, empty queue, malformed message
+- [x] Test cases: successful batch, partial failure, empty queue, malformed message
 
 ### SRV-004 [P]: CodeCommit Git Operations
 **Description:** Implement CodeCommit git operations for server mode: clone, commit batches of note files per spec FR-12.
@@ -925,7 +925,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - [x] Creates `<UID>.md` Markdown files with full frontmatter per data-model.md Entity 1: uid, title, status: pending, author, last-updated (from submitted_at), empty last-linked-to/last-recalled/consolidated-from-notes
 - [x] Commits entire batch as a single git commit
 - [x] Handles git push to CodeCommit
-- [ ] Test cases: clone, commit single note, commit batch, push
+- [x] Test cases: clone, commit single note, commit batch, push
 
 ### SRV-005 [P]: Incremental S3 Sync
 **Description:** Implement incremental S3 sync after each git commit per spec FR-12 S3 Incremental Sync.
@@ -940,7 +940,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - [x] Not a full repo comparison — incremental only
 - [x] Retry up to 3 times with exponential backoff on sync failure
 - [x] On persistent failure: log error and continue (next sync or Phase 0 catches missed files)
-- [ ] Test cases: upload new files, delete files, retry on failure, empty diff (no-op)
+- [x] Test cases: upload new files, delete files, retry on failure, empty diff (no-op)
 
 ### SRV-006: Server Dream Cycle (OpenSearch-Backed Phases)
 **Description:** Implement server-mode dream cycle with OpenSearch for Phase 1/2 and Bedrock KB sync for Phase 0/4 per spec FR-12.
@@ -955,7 +955,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - [x] Phase 2: for each batch, queries OpenSearch for related `status: active` notes (max 10 per batch)
 - [x] Phase 3: identical to local mode (DRM-004 — shared logic)
 - [x] Phase 4: final S3 sync, triggers StartIngestionJob, polls for completion, updates dream cycle timestamp, releases lock
-- [ ] Test cases: full cycle with mocked OpenSearch/Bedrock, Phase 0 timeout, similarity grouping
+- [x] Test cases: full cycle with mocked OpenSearch/Bedrock, Phase 0 timeout, similarity grouping
 
 ### SRV-007: Daily Recall Log Processing
 **Description:** Implement daily recall log processing per spec FR-12 Recall Log Processing.
@@ -970,7 +970,7 @@ _Corresponds to plan.md Phase H. Builds server-mode operation (FR-12)._
 - [x] For each unique UID: updates `last-recalled` frontmatter in the CodeCommit note
 - [x] Silently skips UIDs for notes that no longer exist
 - [x] Commits all `last-recalled` updates as a single git commit
-- [ ] Test cases: process logs with multiple UIDs, missing notes, empty log day, already processed
+- [x] Test cases: process logs with multiple UIDs, missing notes, empty log day, already processed
 
 ---
 
@@ -1116,10 +1116,10 @@ _Cross-cutting validation phase. Tasks can start as soon as their dependencies a
 **Files:** All `*_test.go` files across `internal/`
 **Dependencies:** All FND-*, TRN-*, EXT-*, HKI-*, DRM-*, WIZ-*, APR-*, SRV-* tasks
 **Acceptance Criteria:**
-- [ ] `go test ./...` passes with no failures
-- [ ] `go test -race ./...` passes (no race conditions)
-- [ ] Every public function has at least one test
-- [ ] Edge cases from spec scenarios tested: oversized conversations, hook timeout, partial extraction, lock contention, re-processing modified conversations
+- [x] `go test ./...` passes with no failures
+- [x] `go test -race ./...` passes (no race conditions)
+- [x] Every public function has at least one test
+- [x] Edge cases from spec scenarios tested: oversized conversations, hook timeout, partial extraction, lock contention, re-processing modified conversations
 
 ### QAT-002 [P]: Integration Test Suite
 **Description:** Create integration tests tagged with `//go:build integration` for real-service interactions.
@@ -1131,18 +1131,18 @@ _Cross-cutting validation phase. Tasks can start as soon as their dependencies a
 - `internal/schedule/cron_integration_test.go`
 **Dependencies:** EXT-001, EXT-007, HKI-003, FND-005, WIZ-004
 **Acceptance Criteria:**
-- [ ] Bedrock InvokeModel: real call with extraction prompt → valid JSON array response
-- [ ] Remote submitKnowledge: real call → HTTP 202 with UID
-- [ ] Remote recallKnowledge: real call → JSON array of notes
-- [ ] Git operations: init, commit, grep against real git repo
-- [ ] Cron registration: register and verify on real crontab
-- [ ] All integration tests skip gracefully when credentials/services unavailable
-- [ ] Tagged with `//go:build integration` to exclude from `go test ./...`
+- [x] Bedrock InvokeModel: real call with extraction prompt → valid JSON array response
+- [x] Remote submitKnowledge: real call → HTTP 202 with UID
+- [x] Remote recallKnowledge: real call → JSON array of notes
+- [x] Git operations: init, commit, grep against real git repo
+- [x] Cron registration: register and verify on real crontab
+- [x] All integration tests skip gracefully when credentials/services unavailable
+- [x] Tagged with `//go:build integration` to exclude from `go test ./...`
 
 ### QAT-003 [P]: End-to-End Scenario Validation
 **Description:** Validate the full user scenarios from spec.md against the running binary.
 **Files:**
-- Manual test checklist (not automated)
+- `test/e2e/scenarios.md` — manual test checklist
 **Dependencies:** All previous phases
 **Acceptance Criteria:**
 - [ ] **First-Time Setup:** Binary download → setup wizard → config written → hooks registered → cron registered (under 10 minutes)
@@ -1156,15 +1156,15 @@ _Cross-cutting validation phase. Tasks can start as soon as their dependencies a
 - [ ] **Dream Cycle:** Pending notes → singleton batches → related lookup → consolidation → active notes
 
 ### QAT-004 [P]: Security Review
-**Description:** Verify security requirements per spec NFR-3.
+**Description:** Verify security requirements per spec NFR-3. Findings documented in `test/security/review.md`.
 **Dependencies:** All previous phases
 **Acceptance Criteria:**
-- [ ] No credentials stored in config or state files (only profile names)
-- [ ] Exclusion rules properly appended to extraction prompt
-- [ ] Local KB content only leaves machine when explicitly routed to remote KB
-- [ ] Approval server binds to localhost only
-- [ ] No command injection vulnerabilities in git shell-outs or cron registration
-- [ ] Pending queue files not world-readable (appropriate file permissions)
+- [x] No credentials stored in config or state files (only profile names)
+- [x] Exclusion rules properly appended to extraction prompt
+- [x] Local KB content only leaves machine when explicitly routed to remote KB
+- [x] Approval server binds to localhost only
+- [x] No command injection vulnerabilities in git shell-outs or cron registration
+- [x] Pending queue files not world-readable (appropriate file permissions)
 
 ---
 
