@@ -1,28 +1,26 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagent"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/document"
+	bratypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	"github.com/zmueller/multi-kb/internal/bedrock"
 	"github.com/zmueller/multi-kb/internal/config"
 	"github.com/zmueller/multi-kb/internal/dreamcycle"
 )
 
-// RunDreamCycle executes the server-mode dream cycle with OpenSearch-backed phases.
+// RunDreamCycle executes the server-mode dream cycle with Bedrock Retrieve API-backed phases.
 func RunDreamCycle(ctx context.Context, cfg *config.Config) error {
 	slog.Info("dream cycle: starting")
 
@@ -42,9 +40,12 @@ func RunDreamCycle(ctx context.Context, cfg *config.Config) error {
 		slog.Warn("dream cycle: phase 0 ingestion timeout or error, continuing best-effort", "error", err)
 	}
 
-	// Phase 1: Query OpenSearch for pending notes, group into batches
+	braClient := bedrockagentruntime.NewFromConfig(awsCfg)
+	kbID := cfg.BedrockKB.KnowledgeBaseID
+
+	// Phase 1: Query for pending notes via Retrieve API, group into batches
 	slog.Info("dream cycle: phase 1 — find pending notes")
-	pendingNotes, err := queryOpenSearchPending(ctx, cfg)
+	pendingNotes, err := queryRetrievePending(ctx, braClient, kbID)
 	if err != nil {
 		return fmt.Errorf("dream cycle: phase 1: %w", err)
 	}
@@ -56,10 +57,10 @@ func RunDreamCycle(ctx context.Context, cfg *config.Config) error {
 	batches := groupIntoBatches(ctx, cfg, pendingNotes)
 	slog.Info("dream cycle: phase 1 complete", "pending", len(pendingNotes), "batches", len(batches))
 
-	// Phase 2: For each batch, query OpenSearch for related active notes
+	// Phase 2: For each batch, query for related active notes via Retrieve API
 	slog.Info("dream cycle: phase 2 — find related notes")
 	for i := range batches {
-		related, err := queryOpenSearchRelated(ctx, cfg, batches[i])
+		related, err := queryRetrieveRelated(ctx, braClient, kbID, batches[i])
 		if err != nil {
 			slog.Warn("dream cycle: phase 2 error", "batch", i, "error", err)
 			continue
@@ -144,173 +145,105 @@ func triggerAndWaitIngestion(ctx context.Context, awsCfg aws.Config, cfg *config
 	return fmt.Errorf("ingestion job timed out after 10 minutes")
 }
 
-func queryOpenSearchPending(ctx context.Context, cfg *config.Config) ([]dreamcycle.Note, error) {
-	query := map[string]interface{}{
-		"query": map[string]interface{}{
-			"term": map[string]interface{}{
-				"AMAZON_BEDROCK_METADATA.status": "pending",
-			},
+func queryRetrievePending(ctx context.Context, client *bedrockagentruntime.Client, kbID string) ([]dreamcycle.Note, error) {
+	filter := &bratypes.RetrievalFilterMemberEquals{
+		Value: bratypes.FilterAttribute{
+			Key:   aws.String("status"),
+			Value: document.NewLazyDocument("pending"),
 		},
-		"size": 100,
 	}
-
-	results, err := opensearchQuery(ctx, cfg, query)
-	if err != nil {
-		return nil, err
-	}
-
-	return parseOpenSearchNotes(results), nil
+	return retrieveNotes(ctx, client, kbID, "*", filter, 100)
 }
 
-func queryOpenSearchRelated(ctx context.Context, cfg *config.Config, batch dreamcycle.Batch) ([]dreamcycle.Note, error) {
-	query := map[string]interface{}{
-		"query": map[string]interface{}{
-			"bool": map[string]interface{}{
-				"must": []interface{}{
-					map[string]interface{}{
-						"term": map[string]interface{}{
-							"AMAZON_BEDROCK_METADATA.status": "active",
-						},
-					},
-					map[string]interface{}{
-						"more_like_this": map[string]interface{}{
-							"fields":            []string{"AMAZON_BEDROCK_TEXT_CHUNK"},
-							"like":              batch.PendingNote.Content,
-							"min_term_freq":     1,
-							"max_query_terms":   25,
-							"min_doc_freq":      1,
-						},
-					},
+func queryRetrieveRelated(ctx context.Context, client *bedrockagentruntime.Client, kbID string, batch dreamcycle.Batch) ([]dreamcycle.Note, error) {
+	filter := &bratypes.RetrievalFilterMemberEquals{
+		Value: bratypes.FilterAttribute{
+			Key:   aws.String("status"),
+			Value: document.NewLazyDocument("active"),
+		},
+	}
+	return retrieveNotes(ctx, client, kbID, batch.PendingNote.Content, filter, 10)
+}
+
+func retrieveNotes(ctx context.Context, client *bedrockagentruntime.Client, kbID, queryText string, filter bratypes.RetrievalFilter, limit int32) ([]dreamcycle.Note, error) {
+	var allNotes []dreamcycle.Note
+	var nextToken *string
+
+	for {
+		out, err := client.Retrieve(ctx, &bedrockagentruntime.RetrieveInput{
+			KnowledgeBaseId: aws.String(kbID),
+			RetrievalQuery:  &bratypes.KnowledgeBaseQuery{Text: aws.String(queryText)},
+			RetrievalConfiguration: &bratypes.KnowledgeBaseRetrievalConfiguration{
+				VectorSearchConfiguration: &bratypes.KnowledgeBaseVectorSearchConfiguration{
+					NumberOfResults: aws.Int32(limit),
+					Filter:          filter,
 				},
 			},
-		},
-		"size": 10,
+			NextToken: nextToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("retrieve: %w", err)
+		}
+
+		notes := parseRetrieveResults(out.RetrievalResults)
+		allNotes = append(allNotes, notes...)
+
+		if out.NextToken == nil || int32(len(allNotes)) >= limit {
+			break
+		}
+		nextToken = out.NextToken
 	}
 
-	results, err := opensearchQuery(ctx, cfg, query)
+	if int32(len(allNotes)) > limit {
+		allNotes = allNotes[:limit]
+	}
+	return allNotes, nil
+}
+
+func parseRetrieveResults(results []bratypes.KnowledgeBaseRetrievalResult) []dreamcycle.Note {
+	var notes []dreamcycle.Note
+	for _, r := range results {
+		uid := docString(r.Metadata, "uid")
+		if uid == "" {
+			continue
+		}
+		content := ""
+		if r.Content != nil && r.Content.Text != nil {
+			content = *r.Content.Text
+		}
+		notes = append(notes, dreamcycle.Note{
+			UID:     uid,
+			Title:   docString(r.Metadata, "title"),
+			Content: content,
+			Status:  docString(r.Metadata, "status"),
+			Author:  docString(r.Metadata, "author"),
+		})
+	}
+	return notes
+}
+
+func docString(metadata map[string]document.Interface, key string) string {
+	v, ok := metadata[key]
+	if !ok || v == nil {
+		return ""
+	}
+	b, err := v.MarshalSmithyDocument()
 	if err != nil {
-		return nil, err
+		return ""
 	}
-
-	return parseOpenSearchNotes(results), nil
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return ""
+	}
+	return s
 }
 
 func groupIntoBatches(ctx context.Context, cfg *config.Config, pendingNotes []dreamcycle.Note) []dreamcycle.Batch {
-	// Create singleton batches (one pending note per batch)
-	// Similarity grouping can be added later
 	batches := make([]dreamcycle.Batch, len(pendingNotes))
 	for i, note := range pendingNotes {
 		batches[i] = dreamcycle.Batch{PendingNote: note}
 	}
 	return batches
-}
-
-func opensearchQuery(ctx context.Context, cfg *config.Config, query interface{}) (map[string]interface{}, error) {
-	body, err := json.Marshal(query)
-	if err != nil {
-		return nil, fmt.Errorf("opensearch: marshal query: %w", err)
-	}
-
-	endpoint := strings.TrimRight(cfg.OpenSearch.Endpoint, "/")
-	url := endpoint + "/bedrock-kb-index/_search"
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("opensearch: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Use default AWS credentials for SigV4 signing via the AOSS VPC endpoint
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithRegion(cfg.OpenSearch.Region),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("opensearch: load AWS config: %w", err)
-	}
-
-	creds, err := awsCfg.Credentials.Retrieve(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("opensearch: get credentials: %w", err)
-	}
-
-	if err := signRequest(ctx, req, body, creds, cfg.OpenSearch.Region); err != nil {
-		return nil, fmt.Errorf("opensearch: sign request: %w", err)
-	}
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-		},
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("opensearch: request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("opensearch: read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("opensearch: HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("opensearch: parse response: %w", err)
-	}
-
-	return result, nil
-}
-
-func parseOpenSearchNotes(result map[string]interface{}) []dreamcycle.Note {
-	var notes []dreamcycle.Note
-
-	hits, ok := result["hits"].(map[string]interface{})
-	if !ok {
-		return notes
-	}
-	hitList, ok := hits["hits"].([]interface{})
-	if !ok {
-		return notes
-	}
-
-	for _, hit := range hitList {
-		h, ok := hit.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		source, ok := h["_source"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		metadata, _ := source["AMAZON_BEDROCK_METADATA"].(map[string]interface{})
-		text, _ := source["AMAZON_BEDROCK_TEXT_CHUNK"].(string)
-
-		uid, _ := metadata["uid"].(string)
-		title, _ := metadata["title"].(string)
-		status, _ := metadata["status"].(string)
-		author, _ := metadata["author"].(string)
-
-		if uid == "" {
-			continue
-		}
-
-		notes = append(notes, dreamcycle.Note{
-			UID:     uid,
-			Title:   title,
-			Content: text,
-			Status:  status,
-			Author:  author,
-		})
-	}
-
-	return notes
 }
 
 // serverNoteStore implements dreamcycle.NoteStore for server mode.

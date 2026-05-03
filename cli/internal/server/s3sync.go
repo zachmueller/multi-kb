@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,7 +14,40 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/zmueller/multi-kb/internal/config"
+	"github.com/zmueller/multi-kb/internal/dreamcycle"
 )
+
+type sidecarFile struct {
+	MetadataAttributes map[string]sidecarAttribute `json:"metadataAttributes"`
+}
+
+type sidecarAttribute struct {
+	Value sidecarValue `json:"value"`
+}
+
+type sidecarValue struct {
+	Type        string `json:"type"`
+	StringValue string `json:"stringValue"`
+}
+
+func generateSidecar(filename string, content []byte) ([]byte, error) {
+	uid := strings.TrimSuffix(filepath.Base(filename), ".md")
+	note, err := dreamcycle.ParseNote(uid, string(content))
+	if err != nil {
+		note = &dreamcycle.Note{UID: uid}
+	}
+
+	sc := sidecarFile{
+		MetadataAttributes: map[string]sidecarAttribute{
+			"status": {Value: sidecarValue{Type: "STRING", StringValue: note.Status}},
+			"uid":    {Value: sidecarValue{Type: "STRING", StringValue: note.UID}},
+			"title":  {Value: sidecarValue{Type: "STRING", StringValue: note.Title}},
+			"author": {Value: sidecarValue{Type: "STRING", StringValue: note.Author}},
+		},
+	}
+
+	return json.Marshal(sc)
+}
 
 // SyncToS3 performs an incremental sync from the CodeCommit repo to S3.
 // Uses `git diff` between HEAD~1 and HEAD to determine the changeset.
@@ -63,9 +97,12 @@ func syncDiff(ctx context.Context, client *s3.Client, bucket, diffOutput string)
 				slog.Warn("s3sync: delete failed", "file", filename, "error", err)
 			}
 		case status == "A" || status == "M" || strings.HasPrefix(status, "R"):
-			// For renames, use the destination file (parts[2] if present)
 			if strings.HasPrefix(status, "R") && len(parts) >= 3 {
+				oldFile := parts[1]
 				filename = parts[2]
+				if err := s3Delete(ctx, client, bucket, oldFile); err != nil {
+					slog.Warn("s3sync: rename delete old failed", "file", oldFile, "error", err)
+				}
 			}
 			if err := s3Upload(ctx, client, bucket, filename); err != nil {
 				slog.Warn("s3sync: upload failed", "file", filename, "error", err)
@@ -104,11 +141,38 @@ func s3Upload(ctx context.Context, client *s3.Client, bucket, filename string) e
 			Body:   strings.NewReader(string(data)),
 		})
 		if lastErr == nil {
-			return nil
+			break
 		}
 		time.Sleep(time.Duration(1<<attempt) * time.Second)
 	}
-	return fmt.Errorf("s3 put %s after 3 attempts: %w", filename, lastErr)
+	if lastErr != nil {
+		return fmt.Errorf("s3 put %s after 3 attempts: %w", filename, lastErr)
+	}
+
+	if strings.HasSuffix(filename, ".md") {
+		sidecarData, err := generateSidecar(filename, data)
+		if err != nil {
+			slog.Warn("s3sync: sidecar generation failed", "file", filename, "error", err)
+			return nil
+		}
+		sidecarKey := filename + ".metadata.json"
+		for attempt := 0; attempt < 3; attempt++ {
+			_, err = client.PutObject(ctx, &s3.PutObjectInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(sidecarKey),
+				Body:   strings.NewReader(string(sidecarData)),
+			})
+			if err == nil {
+				break
+			}
+			time.Sleep(time.Duration(1<<attempt) * time.Second)
+		}
+		if err != nil {
+			slog.Warn("s3sync: sidecar upload failed", "file", sidecarKey, "error", err)
+		}
+	}
+
+	return nil
 }
 
 func s3Delete(ctx context.Context, client *s3.Client, bucket, filename string) error {
@@ -119,9 +183,30 @@ func s3Delete(ctx context.Context, client *s3.Client, bucket, filename string) e
 			Key:    aws.String(filename),
 		})
 		if lastErr == nil {
-			return nil
+			break
 		}
 		time.Sleep(time.Duration(1<<attempt) * time.Second)
 	}
-	return fmt.Errorf("s3 delete %s after 3 attempts: %w", filename, lastErr)
+	if lastErr != nil {
+		return fmt.Errorf("s3 delete %s after 3 attempts: %w", filename, lastErr)
+	}
+
+	if strings.HasSuffix(filename, ".md") {
+		sidecarKey := filename + ".metadata.json"
+		for attempt := 0; attempt < 3; attempt++ {
+			_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(sidecarKey),
+			})
+			if err == nil {
+				break
+			}
+			if attempt == 2 {
+				slog.Warn("s3sync: sidecar delete failed", "file", sidecarKey, "error", err)
+			}
+			time.Sleep(time.Duration(1<<attempt) * time.Second)
+		}
+	}
+
+	return nil
 }

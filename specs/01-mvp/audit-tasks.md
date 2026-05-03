@@ -132,18 +132,18 @@ Bedrock KB's S3 data source connector supports **metadata sidecar files**. For e
    - For `R` (rename) status: the current code uploads the new file but does NOT delete the old file. Add explicit `s3Delete(ctx, client, bucket, parts[1])` for the old path — this will clean up both the old `.md` and its sidecar.
 
 **Acceptance Criteria:**
-- [ ] For each `.md` upload, `s3Upload()` also uploads `{filename}.metadata.json` with correct Bedrock sidecar schema
-- [ ] Sidecar contains: `status`, `uid`, `title`, `author` — all as STRING type
-- [ ] `s3Delete()` deletes both `{filename}` and `{filename}.metadata.json` for `.md` files
-- [ ] Non-`.md` files uploaded without sidecars
-- [ ] Malformed/missing frontmatter: sidecar still uploaded with whatever fields could be extracted; missing fields get empty string values
-- [ ] Existing retry logic (3 attempts, exponential backoff) applies to sidecar uploads and deletes
-- [ ] `syncDiff()` rename handling deletes old file + old sidecar
-- [ ] Test: upload well-formed note — both `.md` and `.md.metadata.json` PutObject calls made with correct keys and content
-- [ ] Test: delete a note — both `.md` and `.md.metadata.json` DeleteObject calls made
-- [ ] Test: upload non-`.md` file — no sidecar generated
-- [ ] Test: note with missing frontmatter fields — sidecar contains fields with empty string values
-- [ ] Test: sidecar JSON key is `{filename}.metadata.json` (e.g., `notes/ABC123.md.metadata.json`)
+- [x] For each `.md` upload, `s3Upload()` also uploads `{filename}.metadata.json` with correct Bedrock sidecar schema
+- [x] Sidecar contains: `status`, `uid`, `title`, `author` — all as STRING type
+- [x] `s3Delete()` deletes both `{filename}` and `{filename}.metadata.json` for `.md` files
+- [x] Non-`.md` files uploaded without sidecars
+- [x] Malformed/missing frontmatter: sidecar still uploaded with whatever fields could be extracted; missing fields get empty string values
+- [x] Existing retry logic (3 attempts, exponential backoff) applies to sidecar uploads and deletes
+- [x] `syncDiff()` rename handling deletes old file + old sidecar
+- [x] Test: upload well-formed note — both `.md` and `.md.metadata.json` PutObject calls made with correct keys and content
+- [x] Test: delete a note — both `.md` and `.md.metadata.json` DeleteObject calls made
+- [x] Test: upload non-`.md` file — no sidecar generated
+- [x] Test: note with missing frontmatter fields — sidecar contains fields with empty string values
+- [x] Test: sidecar JSON key is `{filename}.metadata.json` (e.g., `notes/ABC123.md.metadata.json`)
 
 ### AUD-002: Replace Server Dream Cycle OpenSearch Queries with Bedrock Retrieve API
 
@@ -202,20 +202,20 @@ Bedrock KB's S3 data source connector supports **metadata sidecar files**. For e
 8. **Remove now-unused imports from `dreamcycle.go`:** `bytes`, `crypto/tls`, `encoding/json` (check), `io`, `net/http`.
 
 **Acceptance Criteria:**
-- [ ] `bedrockagentruntime` added to `go.mod` as a dependency
-- [ ] `queryRetrievePending()` calls Retrieve API with `filter: equals status "pending"`, returns up to 100 notes
-- [ ] `queryRetrieveRelated()` calls Retrieve API with `filter: equals status "active"` and pending note content as query text, returns up to 10 notes
-- [ ] `retrieveNotes()` parses `uid`, `title`, `status`, `author` from Retrieve API `Metadata` map and `content` from `Content.Text`
-- [ ] `RunDreamCycle()` Phase 1 and Phase 2 use the new Retrieve API functions
-- [ ] `queryOpenSearchPending()`, `queryOpenSearchRelated()`, `opensearchQuery()`, `parseOpenSearchNotes()` deleted
-- [ ] `cli/internal/server/sign.go` deleted entirely
-- [ ] All unused imports removed
-- [ ] Test: `parseRetrieveResults` with mock `KnowledgeBaseRetrievalResult` — correct Note output
-- [ ] Test: empty results → empty slice
-- [ ] Test: result with missing uid in metadata → skipped
-- [ ] Test: result with nil/missing metadata → handled gracefully
-- [ ] Existing tests preserved: `TestGroupIntoBatches`, `TestServerNoteStore_ReadWriteDelete`, `TestNoteFileFilename`, `TestRegionOrDefault`
-- [ ] `GOPROXY=direct GONOSUMDB='*' go test -race ./internal/server/...` passes
+- [x] `bedrockagentruntime` added to `go.mod` as a dependency
+- [x] `queryRetrievePending()` calls Retrieve API with `filter: equals status "pending"`, returns up to 100 notes
+- [x] `queryRetrieveRelated()` calls Retrieve API with `filter: equals status "active"` and pending note content as query text, returns up to 10 notes
+- [x] `retrieveNotes()` parses `uid`, `title`, `status`, `author` from Retrieve API `Metadata` map and `content` from `Content.Text`
+- [x] `RunDreamCycle()` Phase 1 and Phase 2 use the new Retrieve API functions
+- [x] `queryOpenSearchPending()`, `queryOpenSearchRelated()`, `opensearchQuery()`, `parseOpenSearchNotes()` deleted
+- [x] `cli/internal/server/sign.go` deleted entirely
+- [x] All unused imports removed
+- [x] Test: `parseRetrieveResults` with mock `KnowledgeBaseRetrievalResult` — correct Note output
+- [x] Test: empty results → empty slice
+- [x] Test: result with missing uid in metadata → skipped
+- [x] Test: result with nil/missing metadata → handled gracefully
+- [x] Existing tests preserved: `TestGroupIntoBatches`, `TestServerNoteStore_ReadWriteDelete`, `TestNoteFileFilename`, `TestRegionOrDefault`
+- [x] `GOPROXY=direct GONOSUMDB='*' go test -race ./internal/server/...` passes
 
 ### AUD-003: Recall Lambda — Native Retrieve API Metadata Filtering
 
@@ -266,18 +266,18 @@ Bedrock KB's S3 data source connector supports **metadata sidecar files**. For e
 **No CDK infrastructure changes needed:** `cdk/lib/constructs/recall-lambda.ts` already grants `bedrock:Retrieve` scoped to the KB ARN. The `filter` parameter is part of the Retrieve API call, no additional IAM permissions required. The `EXCLUDE_PENDING` env var remains — its meaning changes from "filter client-side" to "include filter in Retrieve API call."
 
 **Acceptance Criteria:**
-- [ ] `RetrieveCommand` includes `filter: { equals: { key: "status", value: "active" } }` when `EXCLUDE_PENDING=true`
-- [ ] `RetrieveCommand` has NO filter when `EXCLUDE_PENDING=false`
-- [ ] `uid` read from `r.metadata?.["uid"]` with fallback to `extractUidFromS3Uri()`
-- [ ] `title` read from `r.metadata?.["title"]`
-- [ ] Client-side status filtering loop (lines 73-76) removed
-- [ ] `extractFrontmatterField()` function deleted
-- [ ] `extractUidFromS3Uri()` kept as fallback
-- [ ] `npx jest` passes in `cdk/`
-- [ ] Test: `makeRetrieveResponse()` updated to include sidecar metadata fields (`uid`, `title`, `status`, `author`) in `metadata` map
-- [ ] Test: exclude-pending test verifies `filter` parameter on `RetrieveCommand` rather than checking client-side filtering
-- [ ] Test: `EXCLUDE_PENDING=false` verifies NO filter in `RetrieveCommand`
-- [ ] Test: uid/title extracted from metadata fields, not regex
+- [x] `RetrieveCommand` includes `filter: { equals: { key: "status", value: "active" } }` when `EXCLUDE_PENDING=true`
+- [x] `RetrieveCommand` has NO filter when `EXCLUDE_PENDING=false`
+- [x] `uid` read from `r.metadata?.["uid"]` with fallback to `extractUidFromS3Uri()`
+- [x] `title` read from `r.metadata?.["title"]`
+- [x] Client-side status filtering loop (lines 73-76) removed
+- [x] `extractFrontmatterField()` function deleted
+- [x] `extractUidFromS3Uri()` kept as fallback
+- [x] `npx jest` passes in `cdk/`
+- [x] Test: `makeRetrieveResponse()` updated to include sidecar metadata fields (`uid`, `title`, `status`, `author`) in `metadata` map
+- [x] Test: exclude-pending test verifies `filter` parameter on `RetrieveCommand` rather than checking client-side filtering
+- [x] Test: `EXCLUDE_PENDING=false` verifies NO filter in `RetrieveCommand`
+- [x] Test: uid/title extracted from metadata fields, not regex
 
 ### AUD-004: No OpenSearch Index Schema Change Required
 

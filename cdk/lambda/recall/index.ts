@@ -35,11 +35,6 @@ function extractUidFromS3Uri(uri: string): string {
   return filename.replace(/\.md$/, "");
 }
 
-function extractFrontmatterField(text: string, field: string): string {
-  const match = text.match(new RegExp(`^${field}:\\s*"?([^"\\n]*)"?`, "m"));
-  return match?.[1]?.trim() ?? "";
-}
-
 async function retrieveFromKb(
   query: string,
   limit: number,
@@ -54,6 +49,11 @@ async function retrieveFromKb(
       retrievalConfiguration: {
         vectorSearchConfiguration: {
           numberOfResults: limit,
+          ...(_excludePending && {
+            filter: {
+              equals: { key: "status", value: "active" },
+            },
+          }),
         },
       },
     }),
@@ -62,18 +62,15 @@ async function retrieveFromKb(
   const results: RecallResult[] = [];
   for (const r of response.retrievalResults ?? []) {
     const content = r.content?.text ?? "";
-    const s3Uri =
-      (r.metadata?.["x-amz-bedrock-kb-source-uri"] as string) ??
-      r.location?.s3Location?.uri ??
-      "";
-    const uid = extractUidFromS3Uri(s3Uri);
-    const title = extractFrontmatterField(content, "title");
+    const uid =
+      (r.metadata?.["uid"] as string) ??
+      extractUidFromS3Uri(
+        (r.metadata?.["x-amz-bedrock-kb-source-uri"] as string) ??
+          r.location?.s3Location?.uri ??
+          "",
+      );
+    const title = (r.metadata?.["title"] as string) ?? "";
     const score = r.score ?? 0;
-
-    if (_excludePending) {
-      const status = extractFrontmatterField(content, "status");
-      if (status && status !== "active") continue;
-    }
 
     results.push({ uid, title, content, score });
   }

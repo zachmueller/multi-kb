@@ -3,30 +3,29 @@ package server
 import (
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/document"
+	bratypes "github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	"github.com/zmueller/multi-kb/internal/config"
 	"github.com/zmueller/multi-kb/internal/dreamcycle"
 )
 
-func TestParseOpenSearchNotes_ValidResults(t *testing.T) {
-	result := map[string]interface{}{
-		"hits": map[string]interface{}{
-			"hits": []interface{}{
-				map[string]interface{}{
-					"_source": map[string]interface{}{
-						"AMAZON_BEDROCK_METADATA": map[string]interface{}{
-							"uid":    "ABC123",
-							"title":  "Test Note",
-							"status": "pending",
-							"author": "tester",
-						},
-						"AMAZON_BEDROCK_TEXT_CHUNK": "note body content",
-					},
-				},
+func TestParseRetrieveResults_ValidResults(t *testing.T) {
+	results := []bratypes.KnowledgeBaseRetrievalResult{
+		{
+			Content: &bratypes.RetrievalResultContent{
+				Text: strPtr("note body content"),
 			},
+			Metadata: map[string]document.Interface{
+				"uid":    document.NewLazyDocument("ABC123"),
+				"title":  document.NewLazyDocument("Test Note"),
+				"status": document.NewLazyDocument("pending"),
+				"author": document.NewLazyDocument("tester"),
+			},
+			Score: float64Ptr(0.85),
 		},
 	}
 
-	notes := parseOpenSearchNotes(result)
+	notes := parseRetrieveResults(results)
 	if len(notes) != 1 {
 		t.Fatalf("expected 1 note, got %d", len(notes))
 	}
@@ -39,57 +38,71 @@ func TestParseOpenSearchNotes_ValidResults(t *testing.T) {
 	if notes[0].Status != "pending" {
 		t.Errorf("expected status %q, got %q", "pending", notes[0].Status)
 	}
+	if notes[0].Author != "tester" {
+		t.Errorf("expected author %q, got %q", "tester", notes[0].Author)
+	}
 	if notes[0].Content != "note body content" {
 		t.Errorf("expected content %q, got %q", "note body content", notes[0].Content)
 	}
 }
 
-func TestParseOpenSearchNotes_EmptyResults(t *testing.T) {
-	result := map[string]interface{}{
-		"hits": map[string]interface{}{
-			"hits": []interface{}{},
-		},
-	}
-	notes := parseOpenSearchNotes(result)
+func TestParseRetrieveResults_EmptyResults(t *testing.T) {
+	notes := parseRetrieveResults(nil)
 	if len(notes) != 0 {
 		t.Fatalf("expected 0 notes, got %d", len(notes))
 	}
 }
 
-func TestParseOpenSearchNotes_MissingUID(t *testing.T) {
-	result := map[string]interface{}{
-		"hits": map[string]interface{}{
-			"hits": []interface{}{
-				map[string]interface{}{
-					"_source": map[string]interface{}{
-						"AMAZON_BEDROCK_METADATA": map[string]interface{}{
-							"title":  "No UID",
-							"status": "pending",
-						},
-					},
-				},
+func TestParseRetrieveResults_MissingUID(t *testing.T) {
+	results := []bratypes.KnowledgeBaseRetrievalResult{
+		{
+			Content: &bratypes.RetrievalResultContent{
+				Text: strPtr("some content"),
+			},
+			Metadata: map[string]document.Interface{
+				"title":  document.NewLazyDocument("No UID"),
+				"status": document.NewLazyDocument("pending"),
 			},
 		},
 	}
-	notes := parseOpenSearchNotes(result)
+	notes := parseRetrieveResults(results)
 	if len(notes) != 0 {
 		t.Fatalf("expected 0 notes (uid required), got %d", len(notes))
 	}
 }
 
-func TestParseOpenSearchNotes_MalformedStructure(t *testing.T) {
-	// Missing hits entirely
-	result := map[string]interface{}{}
-	notes := parseOpenSearchNotes(result)
-	if len(notes) != 0 {
-		t.Fatalf("expected 0 notes, got %d", len(notes))
+func TestParseRetrieveResults_NilMetadata(t *testing.T) {
+	results := []bratypes.KnowledgeBaseRetrievalResult{
+		{
+			Content: &bratypes.RetrievalResultContent{
+				Text: strPtr("content"),
+			},
+			Metadata: nil,
+		},
 	}
+	notes := parseRetrieveResults(results)
+	if len(notes) != 0 {
+		t.Fatalf("expected 0 notes (nil metadata → no uid), got %d", len(notes))
+	}
+}
 
-	// hits is wrong type
-	result2 := map[string]interface{}{"hits": "wrong type"}
-	notes2 := parseOpenSearchNotes(result2)
-	if len(notes2) != 0 {
-		t.Fatalf("expected 0 notes, got %d", len(notes2))
+func TestParseRetrieveResults_NilContent(t *testing.T) {
+	results := []bratypes.KnowledgeBaseRetrievalResult{
+		{
+			Content: nil,
+			Metadata: map[string]document.Interface{
+				"uid":    document.NewLazyDocument("UID1"),
+				"title":  document.NewLazyDocument("Title"),
+				"status": document.NewLazyDocument("active"),
+			},
+		},
+	}
+	notes := parseRetrieveResults(results)
+	if len(notes) != 1 {
+		t.Fatalf("expected 1 note, got %d", len(notes))
+	}
+	if notes[0].Content != "" {
+		t.Errorf("expected empty content, got %q", notes[0].Content)
 	}
 }
 
@@ -163,21 +176,21 @@ func TestNoteFileFilename(t *testing.T) {
 }
 
 func TestRegionOrDefault(t *testing.T) {
-	// With S3 region
 	cfg := &config.Config{S3: &config.S3Config{Region: "us-west-2"}}
 	if got := regionOrDefault(cfg); got != "us-west-2" {
 		t.Errorf("expected us-west-2, got %q", got)
 	}
 
-	// With CodeCommit region, no S3
 	cfg2 := &config.Config{CodeCommit: &config.CodeCommitConfig{Region: "eu-west-1"}}
 	if got := regionOrDefault(cfg2); got != "eu-west-1" {
 		t.Errorf("expected eu-west-1, got %q", got)
 	}
 
-	// Default
 	cfg3 := &config.Config{}
 	if got := regionOrDefault(cfg3); got != "us-east-1" {
 		t.Errorf("expected us-east-1, got %q", got)
 	}
 }
+
+func strPtr(s string) *string  { return &s }
+func float64Ptr(f float64) *float64 { return &f }

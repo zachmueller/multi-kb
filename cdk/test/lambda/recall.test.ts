@@ -79,18 +79,23 @@ function makeRetrieveResponse(
     content: string;
     score: number;
     status?: string;
+    author?: string;
   }>,
 ) {
   return {
     retrievalResults: results.map((r) => ({
       content: {
-        text: `---\nuid: "${r.uid}"\ntitle: "${r.title}"\nstatus: ${r.status ?? "active"}\n---\n\n${r.content}`,
+        text: r.content,
       },
       location: {
         type: "S3",
         s3Location: { uri: `s3://test-bucket/${r.uid}.md` },
       },
       metadata: {
+        uid: r.uid,
+        title: r.title,
+        status: r.status ?? "active",
+        author: r.author ?? "",
         "x-amz-bedrock-kb-source-uri": `s3://test-bucket/${r.uid}.md`,
         "x-amz-bedrock-kb-data-source-id": "DS-123",
       },
@@ -236,32 +241,39 @@ describe("recallKnowledge handler", () => {
     ).toBe(10);
   });
 
-  test("excludes pending notes when EXCLUDE_PENDING=true", async () => {
+  test("sends filter parameter when EXCLUDE_PENDING=true", async () => {
+    const event = makeEvent({ query: "test" });
+    await handler(event);
+    const retrieveCall = mockBedrockAgentSend.mock.calls[0][0];
+    expect(
+      retrieveCall.retrievalConfiguration.vectorSearchConfiguration.filter,
+    ).toEqual({
+      equals: { key: "status", value: "active" },
+    });
+  });
+
+  test("sends no filter when EXCLUDE_PENDING=false", async () => {
+    process.env.EXCLUDE_PENDING = "false";
+    const event = makeEvent({ query: "test" });
+    await handler(event);
+    const retrieveCall = mockBedrockAgentSend.mock.calls[0][0];
+    expect(
+      retrieveCall.retrievalConfiguration.vectorSearchConfiguration.filter,
+    ).toBeUndefined();
+  });
+
+  test("reads uid and title from metadata fields", async () => {
     mockBedrockAgentSend.mockResolvedValue(
       makeRetrieveResponse([
-        { uid: "ACTIVE1", title: "Active", content: "Content", score: 0.8, status: "active" },
-        { uid: "PENDING1", title: "Pending", content: "Content", score: 0.7, status: "pending" },
+        { uid: "META1", title: "From Metadata", content: "Content", score: 0.9 },
       ]),
     );
     const event = makeEvent({ query: "test" });
     const result = await handler(event);
     const body = JSON.parse(result.body);
     expect(body).toHaveLength(1);
-    expect(body[0].uid).toBe("ACTIVE1");
-  });
-
-  test("includes all notes when EXCLUDE_PENDING=false", async () => {
-    process.env.EXCLUDE_PENDING = "false";
-    mockBedrockAgentSend.mockResolvedValue(
-      makeRetrieveResponse([
-        { uid: "ACTIVE1", title: "Active", content: "Content", score: 0.8, status: "active" },
-        { uid: "PENDING1", title: "Pending", content: "Content", score: 0.7, status: "pending" },
-      ]),
-    );
-    const event = makeEvent({ query: "test" });
-    const result = await handler(event);
-    const body = JSON.parse(result.body);
-    expect(body).toHaveLength(2);
+    expect(body[0].uid).toBe("META1");
+    expect(body[0].title).toBe("From Metadata");
   });
 
   test("coverage assessment triggered when top score below threshold", async () => {
