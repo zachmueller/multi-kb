@@ -1142,7 +1142,7 @@ _Cross-cutting validation phase. Tasks can start as soon as their dependencies a
 ### QAT-003 [P]: End-to-End Scenario Validation
 **Description:** Validate the full user scenarios from spec.md against the running binary.
 **Files:**
-- `test/e2e/scenarios.md` — manual test checklist
+- `test/e2e/scenarios.md` — manual test checklist (reviewed and corrected against implementation; execution requires deployed stack)
 **Dependencies:** All previous phases
 **Acceptance Criteria:**
 - [ ] **First-Time Setup:** Binary download → setup wizard → config written → hooks registered → cron registered (under 10 minutes)
@@ -1150,10 +1150,10 @@ _Cross-cutting validation phase. Tasks can start as soon as their dependencies a
 - [ ] **Hook Injection:** New conversation → hook fires → recall queries → Markdown injected → conversation proceeds
 - [ ] **Oversized Conversation:** >700K token conversation (the implementation threshold per FND-011) → chunked → all knowledge extracted
 - [ ] **Extraction Failure:** Bedrock throttle → retry → partial acceptance → error logged
-- [ ] **Hook Timeout:** Slow KB → timeout → partial results used
+- [ ] **Hook Timeout:** Slow KB → timeout (8s default, configurable via `hook.timeout`) → partial results used
 - [ ] **Re-Processing:** Modified old conversation → re-translated → new knowledge extracted
 - [ ] **Approval Flow:** Pending notes → `multi-kb approve` → review → approve/reject → submitted/deleted
-- [ ] **Dream Cycle:** Pending notes → singleton batches → related lookup → consolidation → active notes
+- [ ] **Dream Cycle:** Pending notes → singleton batches → related lookup (keyword-based git grep) → consolidation → active notes
 
 ### QAT-004 [P]: Security Review
 **Description:** Verify security requirements per spec NFR-3. Findings documented in `test/security/review.md`.
