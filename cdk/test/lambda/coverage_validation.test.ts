@@ -56,9 +56,18 @@ async function invokeCoveragePrompt(
 
   const bodyText = Buffer.from(response.body).toString("utf-8");
   const parsed = JSON.parse(bodyText);
-  const text =
+  let text =
     (parsed.content as Array<{ type: string; text: string }> | undefined)
       ?.find((b) => b.type === "text")?.text ?? "";
+
+  // Extract the JSON object from the response, tolerating prose preambles/suffixes
+  // that some models add around the JSON output.
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    text = text.slice(start, end + 1);
+  }
+
   return JSON.parse(text) as { gap_detected: boolean; refined_query: string | null };
 }
 

@@ -94,8 +94,8 @@ func TestConsolidationPrompt_NovelNote(t *testing.T) {
 		[]struct{ uid, title, content string }{
 			{
 				uid:   "ACTV0010",
-				title: "Go Context Cancellation in HTTP Middleware",
-				content: "## Context Cancellation\n\nAlways check ctx.Done() in long-running middleware. Use context.WithTimeout for external calls.",
+				title: "PostgreSQL JSONB Index Performance",
+				content: "## JSONB Indexes\n\nUse GIN indexes for JSONB columns queried with @> or ? operators. B-tree indexes do not work for arbitrary JSONB key lookups. Create with: CREATE INDEX idx ON table USING GIN (column).",
 			},
 		},
 	)

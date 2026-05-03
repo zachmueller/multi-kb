@@ -42,9 +42,15 @@ func makeClient(t *testing.T) *bedrock.Client {
 
 // assertExtractionJSON verifies the LLM returned a parseable JSON array with each element
 // having "title", "content", and "suggested_target_kbs" fields.
+// Tolerates:
+//   - prose preambles before the JSON array
+//   - no JSON array at all (model indicates nothing to extract in prose) → returns nil (0 notes)
+//   - literal newlines inside JSON string values (Haiku sometimes produces these)
 func assertExtractionJSON(t *testing.T, text string) []map[string]interface{} {
 	t.Helper()
 	text = strings.TrimSpace(text)
+
+	// Strip markdown code fences
 	if strings.HasPrefix(text, "```") {
 		lines := strings.SplitN(text, "\n", 2)
 		if len(lines) == 2 {
@@ -53,6 +59,21 @@ func assertExtractionJSON(t *testing.T, text string) []map[string]interface{} {
 		text = strings.TrimSuffix(strings.TrimSpace(text), "```")
 		text = strings.TrimSpace(text)
 	}
+
+	// Find the start of the JSON array, skipping any prose preamble.
+	// If no '[' is present the model indicated nothing to extract in prose — treat as 0 notes.
+	idx := strings.Index(text, "[")
+	if idx < 0 {
+		return nil
+	}
+	text = text[idx:]
+	if end := strings.LastIndex(text, "]"); end >= 0 {
+		text = text[:end+1]
+	}
+
+	// Repair literal newlines inside JSON string values (LLMs sometimes emit these).
+	text = repairJSONLiteralNewlines(text)
+
 	var notes []map[string]interface{}
 	if err := json.Unmarshal([]byte(text), &notes); err != nil {
 		t.Fatalf("response is not valid JSON array: %v\nresponse: %s", err, text)
@@ -173,6 +194,40 @@ func TestExtractionPrompt_ReprocessedConversation(t *testing.T) {
 	if !strings.Contains(combined, "endpoint") && !strings.Contains(combined, "nat") && !strings.Contains(combined, "s3") {
 		t.Errorf("note content should reference S3 VPC endpoint knowledge; got: %s", text[:min(400, len(text))])
 	}
+}
+
+// repairJSONLiteralNewlines replaces bare newlines inside JSON string values with \n.
+// Some LLMs (notably Claude Haiku) emit literal newlines in string values, producing
+// invalid JSON. This scanner walks the byte stream and escapes newlines that appear
+// inside a string literal (between unescaped double-quotes).
+func repairJSONLiteralNewlines(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s))
+	inString := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\\' && inString:
+			// Copy escape sequence as-is
+			buf.WriteByte(c)
+			i++
+			if i < len(s) {
+				buf.WriteByte(s[i])
+			}
+		case c == '"':
+			inString = !inString
+			buf.WriteByte(c)
+		case c == '\n' && inString:
+			buf.WriteString(`\n`)
+		case c == '\r' && inString:
+			buf.WriteString(`\r`)
+		case c == '\t' && inString:
+			buf.WriteString(`\t`)
+		default:
+			buf.WriteByte(c)
+		}
+	}
+	return buf.String()
 }
 
 func min(a, b int) int {
