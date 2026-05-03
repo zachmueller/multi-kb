@@ -180,8 +180,8 @@ export class Compute extends Construct {
     const userData = ec2.UserData.forLinux();
     userData.addCommands("set -euxo pipefail");
 
-    // Step 1: Install packages (git pre-installed on AL2023)
-    userData.addCommands("dnf install -y amazon-cloudwatch-agent");
+    // Step 1: Install packages
+    userData.addCommands("dnf install -y amazon-cloudwatch-agent git");
 
     // Step 2: Download CLI binary with retry (3 attempts, exponential backoff)
     userData.addCommands(

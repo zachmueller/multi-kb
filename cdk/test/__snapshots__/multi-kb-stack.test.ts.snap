@@ -768,7 +768,7 @@ exitCode=$?
 }
 trap exitTrap EXIT
 set -euxo pipefail
-dnf install -y amazon-cloudwatch-agent
+dnf install -y amazon-cloudwatch-agent git
 for i in 1 2 3; do
   aws s3 cp s3://test-bucket/multi-kb/cli-linux-arm64 /usr/local/bin/multi-kb && chmod +x /usr/local/bin/multi-kb && break
   echo "CLI binary download attempt $i failed, retrying..."
@@ -1176,6 +1176,30 @@ systemctl enable --now multi-kb",
           },
         ],
         "ServiceName": "com.amazonaws.us-east-1.bedrock-runtime",
+        "SubnetIds": [
+          {
+            "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",
+          },
+        ],
+        "VpcEndpointType": "Interface",
+        "VpcId": {
+          "Ref": "NetworkingVpc6B5E6F44",
+        },
+      },
+      "Type": "AWS::EC2::VPCEndpoint",
+    },
+    "NetworkingCloudFormationEndpoint1D908253": {
+      "Properties": {
+        "PrivateDnsEnabled": true,
+        "SecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "NetworkingEndpointSecurityGroupDAD4F22F",
+              "GroupId",
+            ],
+          },
+        ],
+        "ServiceName": "com.amazonaws.us-east-1.cloudformation",
         "SubnetIds": [
           {
             "Ref": "NetworkingVpcprivateSubnet1Subnet7D313D7C",

@@ -157,6 +157,12 @@ export class Networking extends Construct {
           `com.amazonaws.${cdk.Stack.of(this).region}.logs`,
         ),
       },
+      {
+        id: "CloudFormationEndpoint",
+        service: new ec2.InterfaceVpcEndpointService(
+          `com.amazonaws.${cdk.Stack.of(this).region}.cloudformation`,
+        ),
+      },
     ];
 
     for (const { id, service } of interfaceEndpointServices) {

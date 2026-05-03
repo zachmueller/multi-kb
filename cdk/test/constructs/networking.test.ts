@@ -104,14 +104,14 @@ describe("Networking Construct", () => {
     });
   });
 
-  test("creates 8 interface VPC endpoints", () => {
+  test("creates 9 interface VPC endpoints", () => {
     const template = createTemplate();
     const allEndpoints = template.findResources("AWS::EC2::VPCEndpoint");
     const interfaceEndpoints = Object.entries(allEndpoints).filter(
       ([, r]: [string, any]) =>
         r.Properties?.VpcEndpointType !== "Gateway",
     );
-    expect(interfaceEndpoints.length).toBe(8);
+    expect(interfaceEndpoints.length).toBe(9);
   });
 
   test("interface endpoints have open=false (no permissive ingress)", () => {
@@ -173,5 +173,6 @@ describe("Networking Construct", () => {
     expect(allServices).toContain("ssmmessages");
     expect(allServices).toContain("ec2messages");
     expect(allServices).toContain(".logs");
+    expect(allServices).toContain("cloudformation");
   });
 });
