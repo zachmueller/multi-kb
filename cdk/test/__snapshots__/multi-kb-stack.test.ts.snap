@@ -1299,6 +1299,22 @@ systemctl enable --now multi-kb",
       },
       "Type": "AWS::EC2::SecurityGroupEgress",
     },
+    "NetworkingEc2ToS3Egress64BF9E5D": {
+      "Properties": {
+        "CidrIp": "0.0.0.0/0",
+        "Description": "HTTPS to S3 via gateway endpoint (no internet path in isolated subnet)",
+        "FromPort": 443,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "NetworkingEc2SecurityGroup8078F069",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "ToPort": 443,
+      },
+      "Type": "AWS::EC2::SecurityGroupEgress",
+    },
     "NetworkingEndpointFromEc2Ingress7040BC7F": {
       "Properties": {
         "Description": "HTTPS from EC2 instances",

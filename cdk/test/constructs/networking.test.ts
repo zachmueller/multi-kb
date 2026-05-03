@@ -66,6 +66,17 @@ describe("Networking Construct", () => {
     });
   });
 
+  test("creates EC2 SG egress to S3 via gateway endpoint on port 443", () => {
+    const template = createTemplate();
+    template.hasResourceProperties("AWS::EC2::SecurityGroupEgress", {
+      IpProtocol: "tcp",
+      FromPort: 443,
+      ToPort: 443,
+      CidrIp: "0.0.0.0/0",
+      Description: "HTTPS to S3 via gateway endpoint (no internet path in isolated subnet)",
+    });
+  });
+
   test("creates CfnSecurityGroupIngress from EC2 SG to Endpoint SG on port 443", () => {
     const template = createTemplate();
     template.hasResourceProperties("AWS::EC2::SecurityGroupIngress", {

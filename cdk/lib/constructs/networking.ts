@@ -90,6 +90,20 @@ export class Networking extends Construct {
       subnets: [{ subnets: [this.subnet] }],
     });
 
+    // EC2 must reach S3 via the gateway endpoint for: CLI binary download, dnf packages,
+    // and S3 data operations. Gateway endpoints route via the route table to S3 public IPs,
+    // so the EC2 SG needs an HTTPS egress rule beyond just the endpoint SG. In a
+    // PRIVATE_ISOLATED subnet with no NAT/IGW, anyIpv4 on 443 can only reach VPC endpoints
+    // and the S3 gateway — there is no internet path.
+    new ec2.CfnSecurityGroupEgress(this, "Ec2ToS3Egress", {
+      groupId: this.ec2SecurityGroup.securityGroupId,
+      ipProtocol: "tcp",
+      fromPort: 443,
+      toPort: 443,
+      cidrIp: "0.0.0.0/0",
+      description: "HTTPS to S3 via gateway endpoint (no internet path in isolated subnet)",
+    });
+
     // 8 standard interface endpoints — `open: false` prevents CDK auto-adding 0.0.0.0/0
     const interfaceEndpointServices: Array<{
       id: string;
