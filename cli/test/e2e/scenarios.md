@@ -22,7 +22,7 @@ Run these scenarios against a built binary (`make build`) with a deployed CDK st
 - [ ] Config written to `~/.multi-kb/config.yaml` — validate with `cat`
 - [ ] Hook registered: verify `~/.claude/settings.json` contains `multi-kb hook` entry
 - [ ] Cron registered: `crontab -l` shows `multi-kb run` entry
-- [ ] `multi-kb status` shows config loaded, 0 conversations processed, next run time
+- [ ] `multi-kb status` shows config loaded, "No runs recorded yet", and next scheduled run time
 
 ## Scenario 2: Scheduled Capture
 
@@ -61,7 +61,7 @@ Run these scenarios against a built binary (`make build`) with a deployed CDK st
 
 - [ ] Configure a remote KB endpoint that is slow (or temporarily unreachable)
 - [ ] Start a conversation — hook fires
-- [ ] After 10s timeout: partial results returned (local KB results only)
+- [ ] After 8s timeout (default; configurable via `hook.timeout` in config): partial results returned (local KB results only)
 - [ ] No crash or hang — conversation proceeds
 
 ## Scenario 7: Re-Processing Modified Conversation
@@ -87,11 +87,11 @@ Run these scenarios against a built binary (`make build`) with a deployed CDK st
 - [ ] Ensure local KB has pending notes (from Scenario 2 + 8 approve to local)
 - [ ] Run `multi-kb dream-cycle`
 - [ ] Phase 1: Pending notes found, singleton batches created
-- [ ] Phase 2: Related active notes found via git grep
+- [ ] Phase 2: Related active notes found via git grep (keyword-based, derived from pending note title)
 - [ ] Phase 3: LLM consolidation — actions applied (keep/merge/split/consolidate)
 - [ ] Pending notes transition to active status
-- [ ] Git commit created in local KB repo
-- [ ] Run log shows dream_cycle entry with action counts
+- [ ] Git commit created in local KB repo (author: `multi-kb <multi-kb@local>`)
+- [ ] Run log shows `dream_cycle` entry with action counts and duration
 
 ---
 

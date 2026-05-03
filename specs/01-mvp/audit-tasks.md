@@ -535,6 +535,9 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 **Description:** Execute all 9 end-to-end scenarios from `cli/test/e2e/scenarios.md` against a deployed stack. Each scenario should be run manually and results documented.
 **Dependencies:** Deployed CDK stack with CLI binary on EC2
 **Files:** `cli/test/e2e/scenarios.md` — checklist file to mark complete
+
+**Note:** `cli/test/e2e/scenarios.md` has been reviewed against the current implementation and corrected: Scenario 6 timeout updated from 10s → 8s default (configurable via `hook.timeout`); Scenario 9 Phase 2 description clarified to specify keyword-based git grep derived from note title; Scenario 9 git commit author clarified (`multi-kb <multi-kb@local>`); Scenario 1 status output phrasing corrected to match actual `multi-kb status` output. Execution requires a deployed stack.
+
 **Acceptance Criteria:**
 - [ ] **First-Time Setup:** Binary download -> setup wizard -> config written -> hooks registered -> cron registered (under 10 minutes)
 - [ ] **Scheduled Capture:** Cron fires -> conversations scanned -> knowledge extracted -> notes routed -> run log written
