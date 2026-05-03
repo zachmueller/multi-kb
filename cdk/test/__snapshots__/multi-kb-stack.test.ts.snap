@@ -1765,7 +1765,7 @@ systemctl enable --now multi-kb",
         ],
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "908f035664749fd80e226b97b8f20d6b8d42bcf4784d651acfe37631efd7c012.zip",
+          "S3Key": "3bcede948e059ef40d98e802ffd1b3e89d0a32a72c93e48c0bfcfef48be35a39.zip",
         },
         "Environment": {
           "Variables": {

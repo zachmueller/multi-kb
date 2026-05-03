@@ -139,23 +139,35 @@ export const handler = async (
     const response = await signedRequest("PUT", url, body);
     console.log("Create index response:", response.statusCode, response.body);
 
-    // 200 = already exists, 201 = created
-    if (
+    const created =
       response.statusCode === 200 ||
       response.statusCode === 201 ||
-      response.body.includes("already_exists")
-    ) {
-      return { ...base, Status: "SUCCESS" };
+      response.body.includes("already_exists") ||
+      response.body.includes("resource_already_exists_exception");
+
+    if (!created) {
+      throw new Error(
+        `Unexpected status ${response.statusCode}: ${response.body}`,
+      );
     }
 
-    // Check if index already exists (error response)
-    if (response.body.includes("resource_already_exists_exception")) {
-      console.log("Index already exists — idempotent success");
-      return { ...base, Status: "SUCCESS" };
+    // AOSS has eventual consistency: poll until the index is visible via GET
+    const maxAttempts = 30;
+    const intervalMs = 5000;
+    for (let i = 1; i <= maxAttempts; i++) {
+      const check = await signedRequest("GET", url, "");
+      console.log(`Index readiness check ${i}/${maxAttempts}: HTTP ${check.statusCode}`);
+      if (check.statusCode === 200) {
+        console.log("Index confirmed ready");
+        return { ...base, Status: "SUCCESS" };
+      }
+      if (i < maxAttempts) {
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
     }
 
     throw new Error(
-      `Unexpected status ${response.statusCode}: ${response.body}`,
+      `Index created but not queryable after ${maxAttempts * intervalMs / 1000}s`,
     );
   } catch (err) {
     console.error("Failed to create index:", err);
