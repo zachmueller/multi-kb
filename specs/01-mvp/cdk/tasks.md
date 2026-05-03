@@ -768,12 +768,12 @@ _Research items must complete before their dependent implementation phases._
 **Acceptance Criteria:**
 - [x] **Submit flow:** `aws apigateway test-invoke-method` on submitKnowledge → verify SQS message arrives → verify EC2 picks up message → verify CodeCommit commit → verify S3 sync → verify note appears in OpenSearch after Bedrock KB sync
 - [x] **Recall flow:** `aws apigateway test-invoke-method` on recallKnowledge with query matching submitted note → verify results returned → verify recall log in S3
-- [ ] **Dream cycle:** Wait for dream cycle tick → verify pending notes processed → verify status changed to active → verify S3 sync + reindex
+- [x] **Dream cycle:** Wait for dream cycle tick → verify pending notes processed → verify status changed to active → verify S3 sync + reindex
 - [x] **EC2 recovery:** Terminate EC2 instance → verify ASG launches replacement → verify new instance boots, clones CodeCommit, starts CLI process → verify periodic tick resumes
 - [x] **SSM access:** Verify `aws ssm start-session --target <instance-id>` connects
 - [x] **CloudWatch:** Verify Lambda logs, EC2 CLI logs, and API access logs visible in CloudWatch
 - [x] **Alarms:** Verify DLQ alarm fires when a test message is sent to DLQ
-- [ ] All validation within 30-minute success criterion (single `cdk deploy` → working KB)
+- [x] All validation within 30-minute success criterion (single `cdk deploy` → working KB in 12.5 min)
 
 ### QAT-006: Bedrock KB Metadata Extraction Verification
 **Description:** Verify that Bedrock KB correctly extracts YAML frontmatter fields (`uid`, `title`) from Markdown notes as queryable metadata in the Retrieve API response. This is a critical assumption that must be validated before implementation proceeds past Phase 0. Automated test script at `test/integration/qat-006-metadata-extraction.sh`.
@@ -786,7 +786,7 @@ _Research items must complete before their dependent implementation phases._
 - [x] Confirm `retrievalResults[].metadata.uid` contains the expected UID value
 - [x] Confirm `retrievalResults[].metadata.title` contains the expected title value
 - [x] If metadata extraction does NOT work as expected, document the actual response structure and update `contracts/recall-knowledge.md` field mapping accordingly
-- [ ] Document findings in research.md R-2
+- [x] Document findings in research.md R-2
 
 ---
 

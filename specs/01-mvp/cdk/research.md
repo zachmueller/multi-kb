@@ -226,6 +226,33 @@ Same as R-1: CDK tokens resolve all forward references. The creation order is:
 
 **Decision:** Use L1 constructs `CfnKnowledgeBase` and `CfnDataSource`. Add `bedrock:InvokeModel` to the service role (was missing). Add a new custom resource task (SRC-006) to pre-create the OpenSearch vector index before KB creation. Use 1024-dimension vectors with `faiss`/`hnsw` engine. All three field mappings are required and must match between index schema and KB config.
 
+### QAT-006 Findings: Metadata Extraction (Validated 2026-05-03)
+
+**Bedrock KB does NOT extract YAML frontmatter fields as queryable metadata.** The `metadata` field in Retrieve API responses only contains Bedrock system fields:
+
+```json
+{
+  "metadata": {
+    "x-amz-bedrock-kb-source-uri": "s3://bucket/UID.md",
+    "x-amz-bedrock-kb-source-file-modality": "TEXT",
+    "x-amz-bedrock-kb-chunk-id": "1%3A0%3AcGsr7J0Bd5XQMU3FgTx2",
+    "x-amz-bedrock-kb-data-source-id": "KGW4ZLEBZV"
+  }
+}
+```
+
+**However, the YAML frontmatter IS preserved in `content.text`** as raw text (the entire Markdown file including frontmatter block). The actual field mapping for `recallKnowledge`:
+
+| Desired Field | Source | Extraction Method |
+|---------------|--------|-------------------|
+| `uid` | `metadata["x-amz-bedrock-kb-source-uri"]` or `location.s3Location.uri` | Parse S3 key filename, strip `.md` suffix |
+| `title` | `content.text` | Regex parse `^title:\s*"?([^"\n]*)"?` from YAML frontmatter |
+| `content` | `content.text` | Direct use (includes frontmatter) |
+| `score` | `score` | Direct use |
+| `status` (for exclude_pending) | `content.text` | Regex parse `^status:\s*(.*)` — filter client-side, not via Bedrock metadata filter |
+
+**Impact:** The Bedrock metadata filter (`filter: { equals: { key: "status", value: "active" } }`) does NOT work for YAML frontmatter fields. The `excludePending` filtering must be done client-side after retrieval by parsing the `status` field from frontmatter in `content.text`. This means Bedrock returns all results regardless of status, and the Lambda filters post-retrieval.
+
 ---
 
 ## R-3: EC2 User Data Script Best Practices
