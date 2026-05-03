@@ -535,6 +535,9 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 **Description:** Execute all 9 end-to-end scenarios from `cli/test/e2e/scenarios.md` against a deployed stack. Each scenario should be run manually and results documented.
 **Dependencies:** Deployed CDK stack with CLI binary on EC2
 **Files:** `cli/test/e2e/scenarios.md` — checklist file to mark complete (reviewed and corrected against implementation)
+**Sub-task status:**
+- [x] **Review and correct `scenarios.md`** — verified all 9 scenarios against actual implementation; corrected field names, hook event type, status values, re-processing markers, dream cycle phase details, and approval flow behavior
+- [ ] **Deploy stack and execute scenarios** — requires deployed CDK stack (blocked on deployment)
 
 ---
 
@@ -641,7 +644,7 @@ Requires at least one real Claude Code conversation file in the configured sourc
 Requires Claude Code to be installed and the hook registered (from Scenario 1).
 
 - [ ] Start a new Claude Code conversation in a directory that matches your configured source
-- [ ] On the first user message, Claude Code fires the pre-tool-use hook → `multi-kb hook --harness claude-code` is invoked
+- [ ] On user prompt submission, Claude Code fires the `UserPromptSubmit` hook → `multi-kb hook --harness claude-code` is invoked
 - [ ] Verify injection: the system prompt or injected context in the conversation contains a `## Knowledge Base` markdown section (visible in the Claude Code UI or transcript)
 - [ ] If no local KB content yet (notes_extracted == 0 from Scenario 2): injection block appears but is empty — this is correct, not an error
 - [ ] Conversation proceeds normally after the hook fires
@@ -705,10 +708,10 @@ Requires a conversation file large enough to exceed the chunking threshold (~700
 
 #### Step 7: Scenario 7 — Re-Processing Modified Conversation
 
-- [ ] Identify a conversation already processed in Scenario 2 (check `~/.multi-kb/state.yaml` for processed path hashes)
+- [ ] Identify a conversation already processed in Scenario 2 (check `~/.multi-kb/state.yaml` for `last_processed` timestamp on your source directory)
 - [ ] Add several new user+assistant message pairs to the end of that conversation file
 - [ ] Run: `./bin/multi-kb run`
-- [ ] Verify: run log shows `notes_extracted > 0` from this re-run (the new messages are processed, old messages are skipped via `previously_extracted` markers)
+- [ ] Verify: run log shows `notes_extracted > 0` from this re-run (the new messages are processed, old messages are skipped via `previously_processed` markers)
 - [ ] Verify: the newly extracted notes appear in `~/.multi-kb/pending/`
 - [ ] Check off Scenario 7 in `cli/test/e2e/scenarios.md`
 
@@ -723,7 +726,7 @@ Requires pending notes from Scenario 2 or 7.
 - [ ] Browser opens automatically to `http://localhost:<port>` with the approval UI
 - [ ] Review a note: inspect title and content
 - [ ] Edit the title or content of one note via the UI
-- [ ] Approve that note to local KB: click Approve — verify `~/.multi-kb/local/default/<uid>.md` is created with `status: active`
+- [ ] Approve that note to local KB: click Approve — verify `~/.multi-kb/local/default/<uid>.md` is created with `status: pending` (the dream cycle later transitions it to `active`)
 - [ ] Reject a note: click Reject for another note — verify the pending file for that note is either deleted or the rejected target is removed from it
 - [ ] When all targets on a pending entry are resolved: verify the `.json` file in `~/.multi-kb/pending/` is deleted
 - [ ] Server shuts down after all notes are resolved (or wait for idle timeout — default from config)
@@ -737,12 +740,12 @@ Requires at least one approved `status: pending` note in a local KB from Scenari
 
 - [ ] Confirm a pending note exists in the local KB: `grep -r "status: pending" ~/.multi-kb/local/`
 - [ ] Run: `./bin/multi-kb dream-cycle`
-- [ ] Phase 1: stdout shows `dream cycle: phase 1 — find pending notes` with `pending=N, batches=N`
-- [ ] Phase 2: related notes found for each batch (may be 0 for a fresh KB — that's valid)
-- [ ] Phase 3: LLM consolidation runs — stdout shows `dream cycle: batch consolidated` with action counts
+- [ ] Phase 1: pending notes found, singleton batches created (errors appear on stderr as `dream-cycle: phase 1 error for KB "...": ...`)
+- [ ] Phase 2: related active notes found via git grep for each batch (may be 0 for a fresh KB — that's valid)
+- [ ] Phase 3: LLM consolidation + action application — actions are keep/merge/split/consolidate (errors appear on stderr as `dream-cycle: phase 3 error for batch: ...`)
 - [ ] Verify: the pending note is now `status: active` — `grep -r "status: active" ~/.multi-kb/local/`
 - [ ] Verify: git commit created in the local KB repo — `git -C ~/.multi-kb/local/default log --oneline -1` shows a commit by `multi-kb <multi-kb@local>`
-- [ ] Verify: run log has a `dream_cycle` entry — `cat ~/.multi-kb/logs/runs.jsonl | tail -1 | jq '.type'` returns `"dream_cycle"`
+- [ ] Verify: run log has a `dream_cycle` entry — `cat ~/.multi-kb/logs/runs.jsonl | tail -1 | jq .` shows `type: "dream_cycle"`, `batches_processed`, and `actions` map with keep/merge/split/consolidate counts
 - [ ] Check off Scenario 9 in `cli/test/e2e/scenarios.md`
 
 ---
