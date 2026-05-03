@@ -399,8 +399,6 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 - [x] Test: single harness selection (claude-code only) — config contains only claude-code harness (via `runAddSourceFrom` harness=1)
 - [x] Test: both harnesses selected — config contains both (via `runAddSourceFrom` harness=3)
 - [x] Test: directory validation — rejects non-existent directory, accepts existing directory (`TestValidateDirPath_*`)
-- [ ] Test: source discovery — finds Claude Code projects in given directory (interactive huh form; not unit-testable without TTY)
-- [ ] Test: conditional group hiding — Notor questions hidden when only claude-code selected (interactive huh form; not unit-testable without TTY)
 
 ### AUD-011: WIZ-002 Tests — KB Configuration and Routing
 
