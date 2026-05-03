@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/zmueller/multi-kb/internal/bedrock"
 	"github.com/zmueller/multi-kb/internal/dreamcycle/prompts"
 )
+
+// llmInvoker is satisfied by *bedrock.Client and any test double.
+type llmInvoker interface {
+	InvokeModel(ctx context.Context, systemPrompt, userMessage string) (string, error)
+}
 
 // consolidationOutput is the expected LLM response structure.
 type consolidationOutput struct {
@@ -40,7 +44,7 @@ type newNoteSpec struct {
 
 // ConsolidateBatch sends a batch to the LLM, parses the response, and applies actions.
 // Returns a map of action type → count, or an error.
-func ConsolidateBatch(ctx context.Context, client *bedrock.Client, store NoteStore, batch Batch) (map[string]int, error) {
+func ConsolidateBatch(ctx context.Context, client llmInvoker, store NoteStore, batch Batch) (map[string]int, error) {
 	userMessage := buildConsolidationMessage(batch)
 
 	response, err := client.InvokeModel(ctx, prompts.ConsolidationSystemPrompt, userMessage)

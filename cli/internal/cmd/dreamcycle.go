@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -17,24 +18,25 @@ func newDreamCycleCmd() *cobra.Command {
 		Short: "Run the dream cycle to consolidate pending notes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfgPath, _ := cmd.Root().PersistentFlags().GetString("config")
-
-			cfg, errs := config.Load(cfgPath)
-			if len(errs) > 0 {
-				return fmt.Errorf("dream-cycle: load config: %w", errs[0])
-			}
-
-			lockPath := lock.DefaultLockPath()
-			logsDir := logging.DefaultLogsDir()
-
-			err := dreamcycle.RunDreamCycle(cmd.Context(), cfg, lockPath, logsDir, "manual")
-			if err != nil {
-				if errors.Is(err, lock.ErrLockHeld) {
-					fmt.Println("Another multi-kb process is running. Skipping dream cycle.")
-					return nil
-				}
-				return err
-			}
-			return nil
+			return execDreamCycle(cmd.Context(), cfgPath, lock.DefaultLockPath(), logging.DefaultLogsDir())
 		},
 	}
+}
+
+// execDreamCycle is the testable core of the dream-cycle command.
+func execDreamCycle(ctx context.Context, cfgPath, lockPath, logsDir string) error {
+	cfg, errs := config.Load(cfgPath)
+	if len(errs) > 0 {
+		return fmt.Errorf("dream-cycle: load config: %w", errs[0])
+	}
+
+	err := dreamcycle.RunDreamCycle(ctx, cfg, lockPath, logsDir, "manual")
+	if err != nil {
+		if errors.Is(err, lock.ErrLockHeld) {
+			fmt.Println("Another multi-kb process is running. Skipping dream cycle.")
+			return nil
+		}
+		return err
+	}
+	return nil
 }

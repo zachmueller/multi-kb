@@ -13,6 +13,10 @@ import (
 	"github.com/zmueller/multi-kb/internal/logging"
 )
 
+// storeFactory creates a NoteStore for a given KB directory.
+// Injected in tests to avoid filesystem operations.
+type storeFactory func(kbDir string) NoteStore
+
 // RunDreamCycle executes the full dream cycle (phases 0-4) for all local KBs.
 // Phase 0: no-op for local mode.
 // Phase 1: find pending notes, create singleton batches.
@@ -20,14 +24,6 @@ import (
 // Phase 3: LLM consolidation + action application.
 // Phase 4: no-op for local mode.
 func RunDreamCycle(ctx context.Context, cfg *config.Config, lockPath, logsDir string, trigger string) error {
-	start := time.Now()
-
-	l, err := lock.Acquire(lockPath, "dream_cycle")
-	if err != nil {
-		return fmt.Errorf("dream-cycle: %w", err)
-	}
-	defer l.Release()
-
 	bedrockClient, err := bedrock.NewClient(ctx,
 		cfg.Extraction.AWSProfile,
 		cfg.Extraction.AWSRegion,
@@ -36,6 +32,20 @@ func RunDreamCycle(ctx context.Context, cfg *config.Config, lockPath, logsDir st
 	if err != nil {
 		return fmt.Errorf("dream-cycle: create Bedrock client: %w", err)
 	}
+
+	sf := func(kbDir string) NoteStore { return &localNoteStore{kbDir: kbDir} }
+	return runDreamCycle(ctx, cfg, lockPath, logsDir, trigger, bedrockClient, sf)
+}
+
+// runDreamCycle is the testable core: it accepts injectable client and store factory.
+func runDreamCycle(ctx context.Context, cfg *config.Config, lockPath, logsDir string, trigger string, client llmInvoker, sf storeFactory) error {
+	start := time.Now()
+
+	l, err := lock.Acquire(lockPath, "dream_cycle")
+	if err != nil {
+		return fmt.Errorf("dream-cycle: %w", err)
+	}
+	defer l.Release()
 
 	var (
 		batchesProcessed int
@@ -59,7 +69,7 @@ func RunDreamCycle(ctx context.Context, cfg *config.Config, lockPath, logsDir st
 				continue
 			}
 
-			store := &localNoteStore{kbDir: kbDir}
+			store := sf(kbDir)
 
 			// Phase 1: find pending notes and create singleton batches
 			batches, err := CreateBatches(kbDir)
@@ -86,7 +96,7 @@ func RunDreamCycle(ctx context.Context, cfg *config.Config, lockPath, logsDir st
 			// Phase 3: LLM consolidation + action application per batch
 			for _, batch := range batches {
 				batchesProcessed++
-				batchActions, err := ConsolidateBatch(ctx, bedrockClient, store, batch)
+				batchActions, err := ConsolidateBatch(ctx, client, store, batch)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "dream-cycle: phase 3 error for batch: %v\n", err)
 					errorCount++

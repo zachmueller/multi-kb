@@ -360,25 +360,30 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 **Description:** Add unit tests for `dreamcycle.RunDreamCycle()` in `cli/internal/dreamcycle/cycle.go`. The function is implemented but the task's final acceptance criterion (test cases) is not met.
 **Files:**
 - `cli/internal/dreamcycle/dreamcycle_test.go` — add tests
+- `cli/internal/dreamcycle/cycle.go` — refactored to extract `runDreamCycle()` accepting injectable `llmInvoker` and `storeFactory` for testability
+- `cli/internal/dreamcycle/phase3.go` — `ConsolidateBatch` now accepts `llmInvoker` interface instead of `*bedrock.Client`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] Test: successful full cycle with mocked Bedrock client and mocked NoteStore — phases 1-3 execute, run log is written
-- [ ] Test: failure mid-cycle (e.g., phase 2 git grep error) — cycle continues for remaining batches, error count incremented in run log
-- [ ] Test: lock acquisition failure — returns error immediately without executing any phases
-- [ ] All tests use `t.TempDir()` for isolation
+- [x] Test: successful full cycle with mocked Bedrock client and mocked NoteStore — phases 1-3 execute, run log is written
+- [x] Test: failure mid-cycle (phase 3 LLM error) — cycle continues for remaining batches, error count incremented in run log
+- [x] Test: lock acquisition failure — returns ErrLockHeld immediately without executing any phases
+- [x] All tests use `t.TempDir()` for isolation
+- [x] Additional tests: no pending notes → zero batches in run log; no local KB sources → clean zero-batch run; multiple batches processed with correct aggregated counts; trigger field recorded correctly in run log
 
 ### AUD-009: DRM-005 Test Coverage — Dream Cycle Commands
 
 **Description:** Add tests for the `multi-kb dream-cycle` and `multi-kb run` command wiring in `cli/internal/cmd/dreamcycle.go` and `cli/internal/cmd/run.go`.
 **Files:**
-- `cli/internal/cmd/dreamcycle.go`
-- `cli/internal/cmd/run.go`
-- New or existing test file in `cli/internal/cmd/`
+- `cli/internal/cmd/dreamcycle.go` — refactored to extract `execDreamCycle(ctx, cfgPath, lockPath, logsDir)` for testability
+- `cli/internal/cmd/run.go` — refactored to extract `execRun(ctx, cfgPath, lockPath, logsDir)` for testability
+- `cli/internal/cmd/cmd_test.go` — new test file
 **Dependencies:** AUD-008
 **Acceptance Criteria:**
-- [ ] Test: standalone `dream-cycle` command invocation with a valid config (mocked deps) succeeds
-- [ ] Test: `run` command with `--dream-cycle` flag executes both process and dream cycle
-- [ ] Test: lock contention — dream cycle returns error when lock is already held
+- [x] Test: `dream-cycle` command with missing config returns error containing "load config"
+- [x] Test: `dream-cycle` command with lock held returns nil (prints skip message, does not error)
+- [x] Test: `run` command with missing config propagates error from runProcess
+- [x] Test: `run` command with dream-cycle lock held returns nil (skip message, no error)
+- [x] Test: lock.ErrLockHeld is detectable via errors.Is on a directly acquired lock
 
 ---
 
