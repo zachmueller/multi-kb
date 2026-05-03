@@ -343,7 +343,6 @@ export class Compute extends Construct {
       launchTemplate,
       minCapacity: 1,
       maxCapacity: 1,
-      desiredCapacity: 1,
       signals: autoscaling.Signals.waitForAll({
         timeout: cdk.Duration.minutes(15),
       }),

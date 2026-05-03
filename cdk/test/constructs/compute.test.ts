@@ -277,7 +277,7 @@ describe("Compute Construct", () => {
     });
   });
 
-  test("ASG has min=max=desired=1", () => {
+  test("ASG has min=max=1 with no explicit desiredCapacity", () => {
     const { stack, vpc, subnet, sg } = createTestStack();
     new Compute(stack, "Compute", defaultComputeProps(stack, vpc, subnet, sg));
     const template = Template.fromStack(stack);
@@ -285,8 +285,11 @@ describe("Compute Construct", () => {
     template.hasResourceProperties("AWS::AutoScaling::AutoScalingGroup", {
       MinSize: "1",
       MaxSize: "1",
-      DesiredCapacity: "1",
     });
+
+    template.hasResourceProperties("AWS::AutoScaling::AutoScalingGroup",
+      Match.not(Match.objectLike({ DesiredCapacity: Match.anyValue() })),
+    );
   });
 
   test("ASG has CreationPolicy with 15-minute timeout", () => {

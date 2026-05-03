@@ -344,9 +344,9 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 - `cdk/test/__snapshots__/multi-kb-stack.test.ts.snap` — snapshot will change (needs `npx jest -u`)
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `desiredCapacity` property removed from ASG construct
-- [ ] `cdk synth` no longer emits the `@aws-cdk/aws-autoscaling:desiredCapacitySet` warning
-- [ ] All CDK tests pass (update snapshot if needed)
+- [x] `desiredCapacity` property removed from ASG construct
+- [x] `cdk synth` no longer emits the `@aws-cdk/aws-autoscaling:desiredCapacitySet` warning
+- [x] All CDK tests pass (update snapshot if needed)
 
 ---
 

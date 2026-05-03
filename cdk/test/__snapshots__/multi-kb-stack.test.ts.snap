@@ -494,7 +494,6 @@ exports[`MultiKbStack - synthesis snapshot 1`] = `
         },
       },
       "Properties": {
-        "DesiredCapacity": "1",
         "LaunchTemplate": {
           "LaunchTemplateId": {
             "Ref": "ComputeLaunchTemplate63F783B2",
@@ -1663,7 +1662,7 @@ systemctl enable --now multi-kb",
         ],
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c2a0eb57b4ba074aaed61ebd78d9be3bf1494f8bd7f1da9f0a4f9ed2d24ce519.zip",
+          "S3Key": "3173d659c37aa10e0937b83735a5916a4e2244c48fbdfeddd62c7462dcfb1a05.zip",
         },
         "Environment": {
           "Variables": {
