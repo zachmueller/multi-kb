@@ -127,8 +127,19 @@ export const handler = async (
   }
 
   if (event.RequestType === "Update") {
-    // Index schema is immutable — no-op
-    return { ...base, Status: "SUCCESS" };
+    // Verify index still exists; recreate if missing (e.g. after collection rebuild)
+    try {
+      const url = `${collectionEndpoint}/${indexName}`;
+      const check = await signedRequest("GET", url, "");
+      if (check.statusCode === 200) {
+        console.log("Index exists on Update — no-op");
+        return { ...base, Status: "SUCCESS" };
+      }
+      console.log(`Index missing on Update (HTTP ${check.statusCode}), recreating`);
+    } catch (err) {
+      console.log("Index check failed on Update, attempting recreation:", err);
+    }
+    // Fall through to Create logic below
   }
 
   // Create
