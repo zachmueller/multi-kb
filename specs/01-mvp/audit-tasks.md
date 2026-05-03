@@ -396,56 +396,56 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 
 **Files:** `cli/internal/cmd/setup.go` or relevant wizard package
 **Acceptance Criteria:**
-- [ ] Test: single harness selection (claude-code only) — config contains only claude-code harness
-- [ ] Test: both harnesses selected — config contains both
-- [ ] Test: directory validation — rejects non-existent directory, accepts existing directory
-- [ ] Test: source discovery — finds Claude Code projects in given directory
-- [ ] Test: conditional group hiding — Notor questions hidden when only claude-code selected
+- [x] Test: single harness selection (claude-code only) — config contains only claude-code harness (via `runAddSourceFrom` harness=1)
+- [x] Test: both harnesses selected — config contains both (via `runAddSourceFrom` harness=3)
+- [x] Test: directory validation — rejects non-existent directory, accepts existing directory (`TestValidateDirPath_*`)
+- [ ] Test: source discovery — finds Claude Code projects in given directory (interactive huh form; not unit-testable without TTY)
+- [ ] Test: conditional group hiding — Notor questions hidden when only claude-code selected (interactive huh form; not unit-testable without TTY)
 
 ### AUD-011: WIZ-002 Tests — KB Configuration and Routing
 
 **Files:** `cli/internal/cmd/setup.go` or relevant wizard package
 **Acceptance Criteria:**
-- [ ] Test: minimal setup (local-only) — no remote KB configured, config has only local KB targets
-- [ ] Test: with remote KB — config includes knowledge_bases entry with API endpoint and auth
-- [ ] Test: with overrides — directory-specific routing overrides written to config
-- [ ] Test: with exclusion rules — regex exclusion patterns written correctly
-- [ ] Test: accessible mode — wizard works without color/cursor control codes
+- [x] Test: minimal setup (local-only) — no remote KB configured, config has only local KB targets (`TestBuildTargets_NoRemoteKBs`)
+- [x] Test: with remote KB — config includes routing entry for remote KB (`TestBuildTargets_AutoPreset`, `TestBuildTargets_ManualPreset`, `TestBuildTargets_MixedPreset`, `TestBuildTargets_MultipleKBs`)
+- [ ] Test: with overrides — directory-specific routing overrides written to config (interactive; not unit-testable without TTY)
+- [ ] Test: with exclusion rules — regex exclusion patterns written correctly (interactive; not unit-testable without TTY)
+- [ ] Test: accessible mode — wizard works without color/cursor control codes (interactive; not unit-testable without TTY)
 
 ### AUD-012: WIZ-003 Tests — Hook Auto-Registration
 
 **Files:** `cli/internal/cmd/setup.go`, `cli/internal/hook/`
 **Acceptance Criteria:**
-- [ ] Test: single harness hook registration — only that harness's hook file is created/modified
-- [ ] Test: both harnesses — both hook files created/modified
-- [ ] Test: pre-existing hooks preserved — existing user hooks in the file are not removed or overwritten
+- [x] Test: single harness hook registration — only that harness's hook file is created/modified (`TestRegisterClaudeCodeHookAt_FreshFile`, existing Notor tests in `hook_test.go`)
+- [x] Test: both harnesses — both hook files created/modified (each harness has independent register/idempotent tests)
+- [x] Test: pre-existing hooks preserved — existing user hooks in the file are not removed or overwritten (`TestRegisterClaudeCodeHookAt_PreservesExistingHooks`)
 
 ### AUD-013: WIZ-004 Tests — Cron Registration
 
 **Files:** `cli/internal/schedule/`
 **Acceptance Criteria:**
-- [ ] Test: register fresh — crontab entry added when none exists
-- [ ] Test: idempotent re-register — running setup twice doesn't duplicate crontab entries
-- [ ] Test: unregister — `multi-kb` crontab entry removed, other entries preserved
-- [ ] Test: existing crontab preserved — non-multi-kb crontab entries untouched
-- [ ] Test: empty crontab edge case — works when user has no existing crontab
+- [x] Test: register fresh — crontab entry added when none exists (`TestUnixScheduler_Install_Fresh`)
+- [x] Test: idempotent re-register — running setup twice doesn't duplicate crontab entries (`TestUnixScheduler_Install_Idempotent`)
+- [x] Test: unregister — `multi-kb` crontab entry removed, other entries preserved (`TestUnixScheduler_Uninstall_RemovesEntry`)
+- [x] Test: existing crontab preserved — non-multi-kb crontab entries untouched (`TestUnixScheduler_Install_PreservesOtherEntries`)
+- [x] Test: empty crontab edge case — works when user has no existing crontab (`TestUnixScheduler_Uninstall_EmptyInput`)
 
 ### AUD-014: WIZ-005 Tests — Cron Expression Parsing
 
 **Files:** `cli/internal/schedule/`
 **Acceptance Criteria:**
-- [ ] Test: common intervals — parse "every 30 minutes", "hourly", "daily" cron expressions
-- [ ] Test: next occurrence calculation — given current time, compute correct next run
-- [ ] Test: missing entry — returns appropriate zero value or error when no multi-kb crontab entry exists
-- [ ] Test: Windows CSV parsing — `schtasks /Query /FO CSV` output parsed correctly (if platform-supported)
+- [x] Test: common intervals — parse "every 30 minutes", "hourly", "daily" cron expressions (`TestNextRunAfter` — 10 cases covering `*/30`, `30 *`, `0 0`, etc.)
+- [x] Test: next occurrence calculation — given current time, compute correct next run (`TestNextRunAfter`)
+- [x] Test: missing entry — returns appropriate zero value or error when no multi-kb crontab entry exists (`TestFindCronExpr_NoMatch`, `TestFindCronExpr_EmptyInput`)
+- [ ] Test: Windows CSV parsing — `schtasks /Query /FO CSV` output parsed correctly (Windows-only; not testable on this platform)
 
 ### AUD-015: WIZ-006 Tests — Standalone Subcommands (add-source, add-kb)
 
 **Files:** `cli/internal/cmd/addsource.go`, `cli/internal/cmd/addkb.go`
 **Acceptance Criteria:**
-- [ ] Test: add source to existing config — new source appended, existing sources preserved
-- [ ] Test: add KB to existing config — new knowledge_bases entry appended
-- [ ] Test: validation failures — missing required fields produce clear error messages
+- [x] Test: add source to existing config — new source appended, existing sources preserved (`TestRunAddSource_PreservesExistingSources`)
+- [x] Test: add KB to existing config — new knowledge_bases entry appended (`TestRunAddKB_PreservesExisting`)
+- [x] Test: validation failures — missing required fields produce clear error messages (`TestRunAddSource_EmptyDirectory`, `TestRunAddKB_EmptyName`, `TestRunAddKB_DuplicateName`, `TestRunAddSource_MissingConfig`, `TestRunAddKB_MissingConfig`)
 
 ---
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -23,12 +24,16 @@ func newAddSourceCmd() *cobra.Command {
 }
 
 func runAddSource(cfgPath string) error {
+	return runAddSourceFrom(cfgPath, os.Stdin)
+}
+
+func runAddSourceFrom(cfgPath string, stdin io.Reader) error {
 	cfg, errs := config.Load(cfgPath)
 	if len(errs) > 0 {
 		return fmt.Errorf("add-source: load config: %w (run 'multi-kb setup' first)", errs[0])
 	}
 
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(stdin)
 
 	fmt.Print("Directory path: ")
 	dir, _ := reader.ReadString('\n')

@@ -21,11 +21,21 @@ type Scheduler interface {
 	IsInstalled() (bool, error)
 }
 
-type unixScheduler struct{}
+type unixScheduler struct {
+	readFn    func() ([]string, error)
+	writeFn   func([]string) error
+	removeFn  func() error
+	logPathFn func() (string, error)
+}
 
 // NewScheduler returns a Scheduler implementation for the current platform.
 func NewScheduler() Scheduler {
-	return &unixScheduler{}
+	return &unixScheduler{
+		readFn:    readCrontab,
+		writeFn:   writeCrontab,
+		removeFn:  removeCrontab,
+		logPathFn: absLogPath,
+	}
 }
 
 // Install adds a crontab entry for multi-kb. It is idempotent: any existing
@@ -41,7 +51,7 @@ func (s *unixScheduler) Install(cronExpr, binaryPath, configPath string) error {
 		return fmt.Errorf("schedule: resolve config path: %w", err)
 	}
 
-	logPath, err := absLogPath()
+	logPath, err := s.logPathFn()
 	if err != nil {
 		return fmt.Errorf("schedule: resolve log path: %w", err)
 	}
@@ -51,7 +61,7 @@ func (s *unixScheduler) Install(cronExpr, binaryPath, configPath string) error {
 		return fmt.Errorf("schedule: create log directory: %w", err)
 	}
 
-	existing, err := readCrontab()
+	existing, err := s.readFn()
 	if err != nil {
 		return fmt.Errorf("schedule: read crontab: %w", err)
 	}
@@ -65,13 +75,13 @@ func (s *unixScheduler) Install(cronExpr, binaryPath, configPath string) error {
 
 	filtered = append(filtered, entry)
 
-	return writeCrontab(filtered)
+	return s.writeFn(filtered)
 }
 
 // Uninstall removes the multi-kb crontab entry. If the crontab becomes empty
 // after removal, it is deleted entirely via `crontab -r`.
 func (s *unixScheduler) Uninstall() error {
-	existing, err := readCrontab()
+	existing, err := s.readFn()
 	if err != nil {
 		return fmt.Errorf("schedule: read crontab: %w", err)
 	}
@@ -88,18 +98,15 @@ func (s *unixScheduler) Uninstall() error {
 	}
 
 	if !hasContent {
-		cmd := exec.Command("crontab", "-r")
-		// crontab -r may fail if there is no crontab; that is fine.
-		_ = cmd.Run()
-		return nil
+		return s.removeFn()
 	}
 
-	return writeCrontab(filtered)
+	return s.writeFn(filtered)
 }
 
 // IsInstalled checks whether a multi-kb cron entry exists.
 func (s *unixScheduler) IsInstalled() (bool, error) {
-	existing, err := readCrontab()
+	existing, err := s.readFn()
 	if err != nil {
 		return false, fmt.Errorf("schedule: read crontab: %w", err)
 	}
@@ -110,6 +117,14 @@ func (s *unixScheduler) IsInstalled() (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// removeCrontab deletes the current user's crontab entirely via `crontab -r`.
+// Silently succeeds if there is no crontab.
+func removeCrontab() error {
+	cmd := exec.Command("crontab", "-r")
+	_ = cmd.Run()
+	return nil
 }
 
 // readCrontab reads the current user crontab. An empty crontab (exit code 1)

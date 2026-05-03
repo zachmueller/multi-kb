@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -23,12 +24,16 @@ func newAddKbCmd() *cobra.Command {
 }
 
 func runAddKB(cfgPath string) error {
+	return runAddKBFrom(cfgPath, os.Stdin)
+}
+
+func runAddKBFrom(cfgPath string, stdin io.Reader) error {
 	cfg, errs := config.Load(cfgPath)
 	if len(errs) > 0 {
 		return fmt.Errorf("add-kb: load config: %w (run 'multi-kb setup' first)", errs[0])
 	}
 
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(stdin)
 
 	fmt.Print("KB name: ")
 	name, _ := reader.ReadString('\n')

@@ -29,7 +29,11 @@ func RegisterClaudeCodeHook() error {
 	if err != nil {
 		return err
 	}
+	return registerClaudeCodeHookAt(settingsPath)
+}
 
+// registerClaudeCodeHookAt is the path-injectable implementation used by tests.
+func registerClaudeCodeHookAt(settingsPath string) error {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
 		return fmt.Errorf("hook: read claude settings: %w", err)
@@ -63,7 +67,11 @@ func UnregisterClaudeCodeHook() error {
 	if err != nil {
 		return err
 	}
+	return unregisterClaudeCodeHookAt(settingsPath)
+}
 
+// unregisterClaudeCodeHookAt is the path-injectable implementation used by tests.
+func unregisterClaudeCodeHookAt(settingsPath string) error {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
 		return fmt.Errorf("hook: read claude settings: %w", err)

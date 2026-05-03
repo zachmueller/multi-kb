@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -202,5 +203,147 @@ func TestGetPromptSubmitHooks(t *testing.T) {
 	result2 := getPromptSubmitHooks(empty)
 	if result2 != nil {
 		t.Errorf("expected nil for missing key, got %v", result2)
+	}
+}
+
+// --- registerClaudeCodeHookAt tests (AUD-012: WIZ-003) ---
+
+func TestRegisterClaudeCodeHookAt_FreshFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := registerClaudeCodeHookAt(path); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing hooks section")
+	}
+	entries, ok := hooks["UserPromptSubmit"].([]interface{})
+	if !ok || len(entries) == 0 {
+		t.Fatal("expected at least one UserPromptSubmit entry")
+	}
+	if !isMultiKBEntry(entries[0]) {
+		t.Error("expected multi-kb entry to be present")
+	}
+}
+
+func TestRegisterClaudeCodeHookAt_Idempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := registerClaudeCodeHookAt(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := registerClaudeCodeHookAt(path); err != nil {
+		t.Fatal(err)
+	}
+
+	data, _ := os.ReadFile(path)
+	var settings map[string]interface{}
+	json.Unmarshal(data, &settings) //nolint
+	hooks := settings["hooks"].(map[string]interface{})
+	entries := hooks["UserPromptSubmit"].([]interface{})
+	count := 0
+	for _, e := range entries {
+		if isMultiKBEntry(e) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 multi-kb entry after re-register, got %d", count)
+	}
+}
+
+func TestRegisterClaudeCodeHookAt_PreservesExistingHooks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	existing := `{
+		"hooks": {
+			"UserPromptSubmit": [
+				{"matcher": "*", "hooks": [{"type": "command", "command": "other-tool --flag"}]}
+			]
+		}
+	}`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := registerClaudeCodeHookAt(path); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	var settings map[string]interface{}
+	json.Unmarshal(data, &settings) //nolint
+	hooks := settings["hooks"].(map[string]interface{})
+	entries := hooks["UserPromptSubmit"].([]interface{})
+
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries (1 existing + 1 multi-kb), got %d", len(entries))
+	}
+
+	foundOther := false
+	for _, e := range entries {
+		m, ok := e.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		hs, ok := m["hooks"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, h := range hs {
+			hm, ok := h.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if cmd, ok := hm["command"].(string); ok && strings.Contains(cmd, "other-tool") {
+				foundOther = true
+			}
+		}
+	}
+	if !foundOther {
+		t.Error("expected pre-existing other-tool hook to be preserved")
+	}
+}
+
+func TestUnregisterClaudeCodeHookAt_RemovesEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := registerClaudeCodeHookAt(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := unregisterClaudeCodeHookAt(path); err != nil {
+		t.Fatalf("unregister: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	var settings map[string]interface{}
+	json.Unmarshal(data, &settings) //nolint
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	entries, _ := hooks["UserPromptSubmit"].([]interface{})
+	for _, e := range entries {
+		if isMultiKBEntry(e) {
+			t.Error("expected multi-kb entry to be removed after unregister")
+		}
+	}
+}
+
+func TestUnregisterClaudeCodeHookAt_NonExistent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nonexistent.json")
+	if err := unregisterClaudeCodeHookAt(path); err != nil {
+		t.Fatalf("unregister of non-existent file should not error: %v", err)
 	}
 }
