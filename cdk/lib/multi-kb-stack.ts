@@ -90,6 +90,7 @@ export class MultiKbStack extends cdk.Stack {
       vpc: networking.vpc,
       subnet: networking.subnet,
       endpointSecurityGroup: networking.endpointSecurityGroup,
+      ec2SecurityGroup: networking.ec2SecurityGroup,
     });
 
     // --- Phase 3: Knowledge Base ---

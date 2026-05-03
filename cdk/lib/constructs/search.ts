@@ -14,6 +14,7 @@ export interface SearchProps {
   readonly vpc: ec2.IVpc;
   readonly subnet: ec2.ISubnet;
   readonly endpointSecurityGroup: ec2.SecurityGroup;
+  readonly ec2SecurityGroup: ec2.SecurityGroup;
 }
 
 export class Search extends Construct {
@@ -148,7 +149,7 @@ export class Search extends Construct {
         role: this.indexCreationLambdaRole,
         vpc: props.vpc,
         vpcSubnets: { subnets: [props.subnet] },
-        securityGroups: [props.endpointSecurityGroup],
+        securityGroups: [props.ec2SecurityGroup],
         environment: {
           COLLECTION_ENDPOINT: this.collectionEndpoint,
           INDEX_NAME: this.indexName,

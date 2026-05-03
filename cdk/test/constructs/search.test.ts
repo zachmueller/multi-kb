@@ -8,6 +8,7 @@ function createTestStack(): {
   vpc: ec2.Vpc;
   subnet: ec2.ISubnet;
   endpointSg: ec2.SecurityGroup;
+  ec2Sg: ec2.SecurityGroup;
 } {
   const app = new cdk.App();
   const stack = new cdk.Stack(app, "TestStack", {
@@ -28,17 +29,22 @@ function createTestStack(): {
     vpc,
     allowAllOutbound: false,
   });
-  return { stack, vpc, subnet: vpc.isolatedSubnets[0], endpointSg };
+  const ec2Sg = new ec2.SecurityGroup(stack, "Ec2Sg", {
+    vpc,
+    allowAllOutbound: false,
+  });
+  return { stack, vpc, subnet: vpc.isolatedSubnets[0], endpointSg, ec2Sg };
 }
 
 function createTemplate(): Template {
-  const { stack, vpc, subnet, endpointSg } = createTestStack();
+  const { stack, vpc, subnet, endpointSg, ec2Sg } = createTestStack();
   new Search(stack, "Search", {
     collectionName: "multi-kb",
     aossVpcEndpointId: "vpce-0123456789abcdef0",
     vpc,
     subnet,
     endpointSecurityGroup: endpointSg,
+    ec2SecurityGroup: ec2Sg,
   });
   return Template.fromStack(stack);
 }

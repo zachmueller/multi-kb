@@ -1793,7 +1793,7 @@ systemctl enable --now multi-kb",
           "SecurityGroupIds": [
             {
               "Fn::GetAtt": [
-                "NetworkingEndpointSecurityGroupDAD4F22F",
+                "NetworkingEc2SecurityGroup8078F069",
                 "GroupId",
               ],
             },
