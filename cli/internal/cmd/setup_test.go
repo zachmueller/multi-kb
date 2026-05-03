@@ -10,6 +10,48 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// --- parseExclusionLines tests (AUD-011: exclusion rules) ---
+
+func TestParseExclusionLines_Basic(t *testing.T) {
+	got := parseExclusionLines("^node_modules/\n\\.pyc$\n.DS_Store")
+	want := []string{"^node_modules/", "\\.pyc$", ".DS_Store"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] expected %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
+func TestParseExclusionLines_Empty(t *testing.T) {
+	if got := parseExclusionLines(""); len(got) != 0 {
+		t.Errorf("expected empty slice, got %v", got)
+	}
+}
+
+func TestParseExclusionLines_BlankLinesSkipped(t *testing.T) {
+	got := parseExclusionLines("\n\nrule1\n\nrule2\n\n")
+	if len(got) != 2 || got[0] != "rule1" || got[1] != "rule2" {
+		t.Errorf("expected [rule1 rule2], got %v", got)
+	}
+}
+
+func TestParseExclusionLines_WhitespaceTrimmed(t *testing.T) {
+	got := parseExclusionLines("  rule1  \n  rule2  ")
+	if len(got) != 2 || got[0] != "rule1" || got[1] != "rule2" {
+		t.Errorf("expected trimmed rules, got %v", got)
+	}
+}
+
+func TestParseExclusionLines_SingleRule(t *testing.T) {
+	got := parseExclusionLines("^secret/")
+	if len(got) != 1 || got[0] != "^secret/" {
+		t.Errorf("expected [^secret/], got %v", got)
+	}
+}
+
 // --- validateDirPath tests (AUD-010: directory validation) ---
 
 func TestValidateDirPath_Exists(t *testing.T) {

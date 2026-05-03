@@ -407,7 +407,7 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 - [x] Test: minimal setup (local-only) — no remote KB configured, config has only local KB targets (`TestBuildTargets_NoRemoteKBs`)
 - [x] Test: with remote KB — config includes routing entry for remote KB (`TestBuildTargets_AutoPreset`, `TestBuildTargets_ManualPreset`, `TestBuildTargets_MixedPreset`, `TestBuildTargets_MultipleKBs`)
 - [ ] Test: with overrides — directory-specific routing overrides written to config (interactive; not unit-testable without TTY)
-- [ ] Test: with exclusion rules — regex exclusion patterns written correctly (interactive; not unit-testable without TTY)
+- [x] Test: with exclusion rules — regex exclusion patterns written correctly (`TestParseExclusionLines_*`)
 - [ ] Test: accessible mode — wizard works without color/cursor control codes (interactive; not unit-testable without TTY)
 
 ### AUD-012: WIZ-003 Tests — Hook Auto-Registration
@@ -435,7 +435,7 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 - [x] Test: common intervals — parse "every 30 minutes", "hourly", "daily" cron expressions (`TestNextRunAfter` — 10 cases covering `*/30`, `30 *`, `0 0`, etc.)
 - [x] Test: next occurrence calculation — given current time, compute correct next run (`TestNextRunAfter`)
 - [x] Test: missing entry — returns appropriate zero value or error when no multi-kb crontab entry exists (`TestFindCronExpr_NoMatch`, `TestFindCronExpr_EmptyInput`)
-- [ ] Test: Windows CSV parsing — `schtasks /Query /FO CSV` output parsed correctly (Windows-only; not testable on this platform)
+- [x] Test: Windows CSV parsing — `schtasks /Query /FO CSV` output parsed correctly (`TestParseCSVLine_*`, `TestExtractMinuteInterval_*`, `TestParseWindowsDateFormats`)
 
 ### AUD-015: WIZ-006 Tests — Standalone Subcommands (add-source, add-kb)
 

@@ -8,8 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 )
 
 const marker = "# multi-kb scheduled run"
@@ -100,38 +98,6 @@ func (s *windowsScheduler) IsInstalled() (bool, error) {
 		return false, nil
 	}
 	return true, nil
-}
-
-// extractMinuteInterval parses a 5-field cron expression and returns the
-// minute interval. It supports `*/N` in the minute field. For simple `*` it
-// defaults to 1 minute. Other complex expressions return an error.
-func extractMinuteInterval(cronExpr string) (int, error) {
-	fields := strings.Fields(cronExpr)
-	if len(fields) != 5 {
-		return 0, fmt.Errorf("expected 5-field cron expression, got %d fields", len(fields))
-	}
-
-	minuteField := fields[0]
-
-	if minuteField == "*" {
-		return 1, nil
-	}
-
-	if strings.HasPrefix(minuteField, "*/") {
-		n, err := strconv.Atoi(minuteField[2:])
-		if err != nil || n <= 0 {
-			return 0, fmt.Errorf("invalid step value in %q", minuteField)
-		}
-		return n, nil
-	}
-
-	// Single numeric value — run once per hour at that minute. Map to 60 min interval.
-	_, err := strconv.Atoi(minuteField)
-	if err == nil {
-		return 60, nil
-	}
-
-	return 0, fmt.Errorf("unsupported minute field %q for Windows scheduler", minuteField)
 }
 
 // resolveAbsPath resolves a binary path to an absolute path, following symlinks.

@@ -246,14 +246,7 @@ func runSetup() error {
 		return nil
 	}
 
-	// Parse exclusion rules
-	var exclusionRules []string
-	for _, line := range strings.Split(exclusionText, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			exclusionRules = append(exclusionRules, line)
-		}
-	}
+	exclusionRules := parseExclusionLines(exclusionText)
 
 	// Build sources with routing targets
 	var sources []config.Source
@@ -430,6 +423,17 @@ func buildTargets(kbs []config.KnowledgeBase, routingPreset string) []config.Tar
 		})
 	}
 	return targets
+}
+
+func parseExclusionLines(text string) []string {
+	var rules []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			rules = append(rules, line)
+		}
+	}
+	return rules
 }
 
 func validateDirPath(s string) error {

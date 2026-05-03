@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -59,24 +58,3 @@ func ParseNextRun() (*time.Time, error) {
 	return nil, fmt.Errorf("schedule: cannot parse next run time %q", nextRunStr)
 }
 
-// parseCSVLine splits a single CSV line, handling quoted fields.
-func parseCSVLine(line string) []string {
-	var fields []string
-	var current strings.Builder
-	inQuotes := false
-
-	for i := 0; i < len(line); i++ {
-		ch := line[i]
-		switch {
-		case ch == '"':
-			inQuotes = !inQuotes
-		case ch == ',' && !inQuotes:
-			fields = append(fields, current.String())
-			current.Reset()
-		default:
-			current.WriteByte(ch)
-		}
-	}
-	fields = append(fields, current.String())
-	return fields
-}
