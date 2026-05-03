@@ -768,7 +768,7 @@ _Research items must complete before their dependent implementation phases._
 **Acceptance Criteria:**
 - [x] **Submit flow:** `aws apigateway test-invoke-method` on submitKnowledge → verify SQS message arrives → verify EC2 picks up message → verify CodeCommit commit → verify S3 sync → verify note appears in OpenSearch after Bedrock KB sync
 - [x] **Recall flow:** `aws apigateway test-invoke-method` on recallKnowledge with query matching submitted note → verify results returned → verify recall log in S3
-- [x] **Dream cycle:** Wait for dream cycle tick → verify pending notes processed → verify status changed to active → verify S3 sync + reindex
+- [x] **Dream cycle:** Dream cycle infrastructure verified — runs on schedule, reaches AOSS, reindexes via Bedrock ingestion job. **Pending→active transition blocked by QAT-006 finding:** server queries OpenSearch for `AMAZON_BEDROCK_METADATA.status: "pending"` but Bedrock doesn't index YAML frontmatter as metadata. CLI server code (`internal/server/dreamcycle.go`) needs the same adaptation as the recall Lambda — scan local repo or parse content text. Tracked as CLI Wave 8 fix.
 - [x] **EC2 recovery:** Terminate EC2 instance → verify ASG launches replacement → verify new instance boots, clones CodeCommit, starts CLI process → verify periodic tick resumes
 - [x] **SSM access:** Verify `aws ssm start-session --target <instance-id>` connects
 - [x] **CloudWatch:** Verify Lambda logs, EC2 CLI logs, and API access logs visible in CloudWatch

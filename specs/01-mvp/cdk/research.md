@@ -253,6 +253,8 @@ Same as R-1: CDK tokens resolve all forward references. The creation order is:
 
 **Impact:** The Bedrock metadata filter (`filter: { equals: { key: "status", value: "active" } }`) does NOT work for YAML frontmatter fields. The `excludePending` filtering must be done client-side after retrieval by parsing the `status` field from frontmatter in `content.text`. This means Bedrock returns all results regardless of status, and the Lambda filters post-retrieval.
 
+**Server dream cycle impact:** The server's dream cycle (`internal/server/dreamcycle.go`) queries OpenSearch for `AMAZON_BEDROCK_METADATA.status: "pending"` — this always returns zero results for the same reason. The server needs to be updated to find pending notes by scanning the local git repo or parsing content text. This is tracked as a CLI Wave 8 fix.
+
 ---
 
 ## R-3: EC2 User Data Script Best Practices
