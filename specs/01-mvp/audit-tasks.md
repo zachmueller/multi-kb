@@ -305,14 +305,14 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 - `cli/internal/config/config_test.go` — add test cases to `TestLoad_ServerModeMissingRequiredFields`
 **Dependencies:** None
 **Acceptance Criteria:**
-- [ ] `dream_cycle.model_id` validated as non-empty when `mode == "server"`
-- [ ] `sqs.batch_size` validated as a positive integer (1-10) when `mode == "server"`
-- [ ] `codecommit.region` validated as non-empty when `mode == "server"`
-- [ ] `s3.region` validated as non-empty when `mode == "server"`
-- [ ] `opensearch.region` validated as non-empty when `mode == "server"`
-- [ ] Test: config missing each field individually produces the expected error message
-- [ ] Test: valid config with all fields still passes
-- [ ] Existing tests unaffected (the existing `minimalValidServerConfig()` helper already includes all fields)
+- [x] `dream_cycle.model_id` validated as non-empty when `mode == "server"`
+- [x] `sqs.batch_size` validated as a positive integer (1-10) when `mode == "server"`
+- [x] `codecommit.region` validated as non-empty when `mode == "server"`
+- [x] `s3.region` validated as non-empty when `mode == "server"`
+- [x] `opensearch.region` validated as non-empty when `mode == "server"`
+- [x] Test: config missing each field individually produces the expected error message
+- [x] Test: valid config with all fields still passes
+- [x] Existing tests unaffected (the existing `minimalValidServerConfig()` helper already includes all fields)
 
 ### AUD-006: Validate `sqs.batch_size` Range in Server Mode
 
@@ -323,10 +323,10 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 - `cli/internal/config/config_test.go` — test batch_size edge cases
 **Dependencies:** AUD-005
 **Acceptance Criteria:**
-- [ ] `batch_size` of 0 or negative in server mode produces a validation error OR is defaulted to 10
-- [ ] `batch_size` > 10 produces a validation error (SQS max is 10)
-- [ ] Test: `batch_size: 0` triggers error or gets defaulted
-- [ ] Test: `batch_size: 11` triggers error
+- [x] `batch_size` of 0 or negative in server mode produces a validation error OR is defaulted to 10
+- [x] `batch_size` > 10 produces a validation error (SQS max is 10)
+- [x] Test: `batch_size: 0` triggers error or gets defaulted
+- [x] Test: `batch_size: 11` triggers error
 
 ---
 

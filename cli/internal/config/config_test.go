@@ -456,12 +456,19 @@ func TestLoad_ServerModeMissingRequiredFields(t *testing.T) {
 
 	expectedFields := []string{
 		"sqs.queue_url",
+		"sqs.batch_size",
 		"codecommit.repo_name",
+		"codecommit.region",
 		"s3.bucket",
+		"s3.region",
 		"opensearch.endpoint",
+		"opensearch.region",
 		"bedrock_kb",
 		"tick_interval",
 		"dream_cycle.interval",
+		// dream_cycle.model_id is NOT expected here — Load() applies a default
+		// before validation, so omitting it never triggers an error. The
+		// server-mode validation catches whitespace-only values (tested separately).
 		"recall_log.schedule",
 	}
 	errText := ""
@@ -520,6 +527,144 @@ func TestLoad_ServerModeInvalidRecallSchedule(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected recall_log.schedule error, got: %v", errs)
+	}
+}
+
+func TestLoad_ServerModeMissingIndividualFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		mutate    func(map[string]interface{})
+		wantField string
+	}{
+		{
+			name: "whitespace dream_cycle.model_id",
+			mutate: func(raw map[string]interface{}) {
+				dc := raw["dream_cycle"].(map[string]interface{})
+				dc["model_id"] = "   "
+			},
+			wantField: "dream_cycle.model_id",
+		},
+		{
+			name: "missing codecommit.region",
+			mutate: func(raw map[string]interface{}) {
+				cc := raw["codecommit"].(map[string]interface{})
+				delete(cc, "region")
+			},
+			wantField: "codecommit.region",
+		},
+		{
+			name: "missing s3.region",
+			mutate: func(raw map[string]interface{}) {
+				s3 := raw["s3"].(map[string]interface{})
+				delete(s3, "region")
+			},
+			wantField: "s3.region",
+		},
+		{
+			name: "missing opensearch.region",
+			mutate: func(raw map[string]interface{}) {
+				os := raw["opensearch"].(map[string]interface{})
+				delete(os, "region")
+			},
+			wantField: "opensearch.region",
+		},
+		{
+			name: "missing sqs.batch_size (zero value)",
+			mutate: func(raw map[string]interface{}) {
+				sqs := raw["sqs"].(map[string]interface{})
+				delete(sqs, "batch_size")
+			},
+			wantField: "sqs.batch_size",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := minimalValidServerConfig()
+			tc.mutate(raw)
+			path := writeTempConfig(t, raw)
+
+			cfg, errs := Load(path)
+			if cfg != nil {
+				t.Error("expected nil config")
+			}
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), tc.wantField) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected error about %q, got: %v", tc.wantField, errs)
+			}
+		})
+	}
+}
+
+func TestLoad_ServerModeBatchSizeRange(t *testing.T) {
+	tests := []struct {
+		name      string
+		batchSize int
+		wantErr   bool
+	}{
+		{"batch_size 0 (zero value)", 0, true},
+		{"batch_size -1 (negative)", -1, true},
+		{"batch_size 1 (min valid)", 1, false},
+		{"batch_size 10 (max valid)", 10, false},
+		{"batch_size 11 (exceeds SQS max)", 11, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := minimalValidServerConfig()
+			sqs := raw["sqs"].(map[string]interface{})
+			sqs["batch_size"] = tc.batchSize
+			path := writeTempConfig(t, raw)
+
+			cfg, errs := Load(path)
+			errText := ""
+			for _, e := range errs {
+				errText += e.Error() + "\n"
+			}
+			hasBatchErr := strings.Contains(errText, "sqs.batch_size")
+
+			if tc.wantErr && !hasBatchErr {
+				t.Errorf("expected sqs.batch_size error for value %d, got: %v", tc.batchSize, errs)
+			}
+			if !tc.wantErr && hasBatchErr {
+				t.Errorf("unexpected sqs.batch_size error for value %d: %s", tc.batchSize, errText)
+			}
+			if !tc.wantErr && cfg == nil {
+				t.Errorf("expected valid config for batch_size %d", tc.batchSize)
+			}
+		})
+	}
+}
+
+func TestLoad_ServerModeValidConfigStillPasses(t *testing.T) {
+	path := writeTempConfig(t, minimalValidServerConfig())
+
+	cfg, errs := Load(path)
+	if len(errs) > 0 {
+		t.Fatalf("expected no errors for full valid server config, got: %v", errs)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if cfg.SQS.BatchSize != 10 {
+		t.Errorf("sqs.batch_size = %d, want 10", cfg.SQS.BatchSize)
+	}
+	if cfg.CodeCommit.Region != "us-east-1" {
+		t.Errorf("codecommit.region = %q, want %q", cfg.CodeCommit.Region, "us-east-1")
+	}
+	if cfg.S3.Region != "us-east-1" {
+		t.Errorf("s3.region = %q, want %q", cfg.S3.Region, "us-east-1")
+	}
+	if cfg.OpenSearch.Region != "us-east-1" {
+		t.Errorf("opensearch.region = %q, want %q", cfg.OpenSearch.Region, "us-east-1")
+	}
+	if cfg.DreamCycle.ModelID == "" {
+		t.Error("dream_cycle.model_id should be non-empty")
 	}
 }
 

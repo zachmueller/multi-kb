@@ -105,20 +105,52 @@ func Validate(cfg *Config) []error {
 func validateServerMode(cfg *Config) []error {
 	var errs []error
 
-	if cfg.SQS == nil || strings.TrimSpace(cfg.SQS.QueueURL) == "" {
+	if cfg.SQS == nil {
 		errs = append(errs, fmt.Errorf("sqs.queue_url: required in server mode"))
+		errs = append(errs, fmt.Errorf("sqs.batch_size: required in server mode (must be 1-10)"))
+	} else {
+		if strings.TrimSpace(cfg.SQS.QueueURL) == "" {
+			errs = append(errs, fmt.Errorf("sqs.queue_url: required in server mode"))
+		}
+		if cfg.SQS.BatchSize < 1 || cfg.SQS.BatchSize > 10 {
+			errs = append(errs, fmt.Errorf("sqs.batch_size: must be between 1 and 10, got %d", cfg.SQS.BatchSize))
+		}
 	}
 
-	if cfg.CodeCommit == nil || strings.TrimSpace(cfg.CodeCommit.RepoName) == "" {
+	if cfg.CodeCommit == nil {
 		errs = append(errs, fmt.Errorf("codecommit.repo_name: required in server mode"))
+		errs = append(errs, fmt.Errorf("codecommit.region: required in server mode"))
+	} else {
+		if strings.TrimSpace(cfg.CodeCommit.RepoName) == "" {
+			errs = append(errs, fmt.Errorf("codecommit.repo_name: required in server mode"))
+		}
+		if strings.TrimSpace(cfg.CodeCommit.Region) == "" {
+			errs = append(errs, fmt.Errorf("codecommit.region: required in server mode"))
+		}
 	}
 
-	if cfg.S3 == nil || strings.TrimSpace(cfg.S3.Bucket) == "" {
+	if cfg.S3 == nil {
 		errs = append(errs, fmt.Errorf("s3.bucket: required in server mode"))
+		errs = append(errs, fmt.Errorf("s3.region: required in server mode"))
+	} else {
+		if strings.TrimSpace(cfg.S3.Bucket) == "" {
+			errs = append(errs, fmt.Errorf("s3.bucket: required in server mode"))
+		}
+		if strings.TrimSpace(cfg.S3.Region) == "" {
+			errs = append(errs, fmt.Errorf("s3.region: required in server mode"))
+		}
 	}
 
-	if cfg.OpenSearch == nil || strings.TrimSpace(cfg.OpenSearch.Endpoint) == "" {
+	if cfg.OpenSearch == nil {
 		errs = append(errs, fmt.Errorf("opensearch.endpoint: required in server mode"))
+		errs = append(errs, fmt.Errorf("opensearch.region: required in server mode"))
+	} else {
+		if strings.TrimSpace(cfg.OpenSearch.Endpoint) == "" {
+			errs = append(errs, fmt.Errorf("opensearch.endpoint: required in server mode"))
+		}
+		if strings.TrimSpace(cfg.OpenSearch.Region) == "" {
+			errs = append(errs, fmt.Errorf("opensearch.region: required in server mode"))
+		}
 	}
 
 	if cfg.BedrockKB == nil {
@@ -138,6 +170,10 @@ func validateServerMode(cfg *Config) []error {
 
 	if strings.TrimSpace(cfg.DreamCycle.Interval) == "" {
 		errs = append(errs, fmt.Errorf("dream_cycle.interval: required in server mode"))
+	}
+
+	if strings.TrimSpace(cfg.DreamCycle.ModelID) == "" {
+		errs = append(errs, fmt.Errorf("dream_cycle.model_id: required in server mode"))
 	}
 
 	if cfg.RecallLog == nil || strings.TrimSpace(cfg.RecallLog.Schedule) == "" {
