@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-04
 **Source:** AUD-023 E2E scenario execution against deployed stack (us-east-1, account 639628476385)
-**Status:** Open
+**Status:** All Fixed
 
 ## Summary
 
@@ -10,7 +10,7 @@
 |-----|----------|-----------|--------|
 | E2E-001: Bedrock model ID defaults use on-demand IDs that Bedrock rejects | High | CLI + CDK | **Fixed** |
 | E2E-002: Dream cycle consolidation fails to parse LLM preamble text | Medium | CLI | **Fixed** |
-| E2E-003: Local KB directory not auto-created on first note submission | Medium | CLI | Open |
+| E2E-003: Local KB directory not auto-created on first note submission | Medium | CLI | **Fixed** |
 
 ---
 
@@ -249,6 +249,7 @@ Add test cases for:
 
 **Severity:** Medium — first `multi-kb run` with auto-approve to a local KB fails for every note
 **Component:** CLI (`cli/internal/cmd/process.go`)
+**Status:** Fixed (2026-05-04)
 
 ### Problem
 
@@ -313,11 +314,11 @@ Add to `cli/internal/cmd/` test file (or create a new integration-style test):
 - Test: `submitNote()` with local KB and then read back the note file — frontmatter correct
 
 **Acceptance Criteria:**
-- [ ] `multi-kb run` with auto-approve to a fresh local KB (no pre-existing directory) writes notes successfully
-- [ ] `git.InitRepo()` is called before `submit.WriteNote()` on the local KB path
-- [ ] The local KB directory is created as a git repo on first use
-- [ ] Subsequent runs with the same local KB target are unaffected (idempotent)
-- [ ] Existing tests pass
+- [x] `multi-kb run` with auto-approve to a fresh local KB (no pre-existing directory) writes notes successfully
+- [x] `git.InitRepo()` is called before `submit.WriteNote()` on the local KB path
+- [x] The local KB directory is created as a git repo on first use
+- [x] Subsequent runs with the same local KB target are unaffected (idempotent)
+- [x] Existing tests pass (34/34 in cmd package, including 3 new tests)
 
 ---
 

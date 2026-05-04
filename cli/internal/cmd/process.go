@@ -14,6 +14,7 @@ import (
 	"github.com/zmueller/multi-kb/internal/bedrock"
 	"github.com/zmueller/multi-kb/internal/config"
 	"github.com/zmueller/multi-kb/internal/extract"
+	"github.com/zmueller/multi-kb/internal/git"
 	"github.com/zmueller/multi-kb/internal/lock"
 	"github.com/zmueller/multi-kb/internal/logging"
 	"github.com/zmueller/multi-kb/internal/route"
@@ -305,6 +306,11 @@ func submitNote(
 	if strings.HasPrefix(target.KB, "local/") {
 		kbName := target.KB[6:]
 		kbDir := filepath.Join(homeDir(), ".multi-kb", "local", kbName)
+
+		if err := git.InitRepo(kbDir); err != nil {
+			return fmt.Errorf("submit: cannot init local KB %q: %w", kbName, err)
+		}
+
 		_, err := submit.WriteNote(kbDir, submit.NoteFields{
 			Title:   note.Title,
 			Content: note.Content,

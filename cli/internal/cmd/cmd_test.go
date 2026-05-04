@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/zmueller/multi-kb/internal/config"
+	"github.com/zmueller/multi-kb/internal/extract"
+	"github.com/zmueller/multi-kb/internal/git"
 	"github.com/zmueller/multi-kb/internal/lock"
+	"github.com/zmueller/multi-kb/internal/route"
 )
 
 // writeTempCmdConfig writes a minimal valid client-mode config to a temp file.
@@ -220,4 +223,110 @@ func contains(s, sub string) bool {
 			}
 			return false
 		}())
+}
+
+// --- submitNote local KB auto-create tests ---
+
+func TestSubmitNote_LocalKB_CreatesDirectory(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	target := route.ResolvedTarget{
+		KB:           "local/fresh-kb",
+		ApprovalMode: "auto-approve",
+	}
+	note := extract.Note{
+		Title:   "Test Note",
+		Content: "Knowledge worth keeping.",
+	}
+	cfg := &config.Config{Author: "tester"}
+
+	err := submitNote(context.Background(), cfg, target, note, nil, nil)
+	if err != nil {
+		t.Fatalf("submitNote failed: %v", err)
+	}
+
+	kbDir := filepath.Join(fakeHome, ".multi-kb", "local", "fresh-kb")
+	if !git.IsRepo(kbDir) {
+		t.Fatalf("expected %s to be a git repo", kbDir)
+	}
+
+	entries, err := os.ReadDir(kbDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var mdFiles []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".md") && e.Name() != ".gitkeep" {
+			mdFiles = append(mdFiles, e.Name())
+		}
+	}
+	if len(mdFiles) != 1 {
+		t.Fatalf("expected 1 .md note file, got %d: %v", len(mdFiles), mdFiles)
+	}
+}
+
+func TestSubmitNote_LocalKB_Idempotent(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	kbDir := filepath.Join(fakeHome, ".multi-kb", "local", "existing-kb")
+	if err := git.InitRepo(kbDir); err != nil {
+		t.Fatalf("InitRepo: %v", err)
+	}
+
+	target := route.ResolvedTarget{
+		KB:           "local/existing-kb",
+		ApprovalMode: "auto-approve",
+	}
+	note := extract.Note{
+		Title:   "Second Note",
+		Content: "More knowledge.",
+	}
+	cfg := &config.Config{Author: "tester"}
+
+	err := submitNote(context.Background(), cfg, target, note, nil, nil)
+	if err != nil {
+		t.Fatalf("submitNote on existing repo failed: %v", err)
+	}
+}
+
+func TestSubmitNote_LocalKB_NoteContent(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	target := route.ResolvedTarget{
+		KB:           "local/verify-kb",
+		ApprovalMode: "auto-approve",
+	}
+	note := extract.Note{
+		Title:   "Verifiable Note",
+		Content: "Content to verify in frontmatter.",
+	}
+	cfg := &config.Config{Author: "alice"}
+
+	err := submitNote(context.Background(), cfg, target, note, nil, nil)
+	if err != nil {
+		t.Fatalf("submitNote failed: %v", err)
+	}
+
+	kbDir := filepath.Join(fakeHome, ".multi-kb", "local", "verify-kb")
+	entries, _ := os.ReadDir(kbDir)
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".md") || e.Name() == ".gitkeep" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(kbDir, e.Name()))
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		content := string(data)
+		for _, want := range []string{"title: Verifiable Note", "author: alice", "Content to verify in frontmatter."} {
+			if !strings.Contains(content, want) {
+				t.Errorf("note missing %q\nfull:\n%s", want, content)
+			}
+		}
+		return
+	}
+	t.Fatal("no .md note file found")
 }
