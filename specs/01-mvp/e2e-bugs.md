@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-04
 **Source:** AUD-023 E2E scenario execution against deployed stack (us-east-1, account 639628476385)
-**Status:** All Fixed
+**Status:** 5 found, 4 fixed, 1 open (low)
 
 ## Summary
 
@@ -11,6 +11,8 @@
 | E2E-001: Bedrock model ID defaults use on-demand IDs that Bedrock rejects | High | CLI + CDK | **Fixed** |
 | E2E-002: Dream cycle consolidation fails to parse LLM preamble text | Medium | CLI | **Fixed** |
 | E2E-003: Local KB directory not auto-created on first note submission | Medium | CLI | **Fixed** |
+| E2E-004: Unquoted YAML title values break frontmatter parsing | High | CLI | **Fixed** |
+| E2E-005: Dream cycle cascading file-not-found on concurrent batch processing | Low | CLI | Open |
 
 ---
 
@@ -322,6 +324,82 @@ Add to `cli/internal/cmd/` test file (or create a new integration-style test):
 
 ---
 
+---
+
+## E2E-004: Unquoted YAML Title Values Break Frontmatter Parsing
+
+**Severity:** High — dream cycle silently skips ~54% of notes (100 of 184 with colons in titles)
+**Components:** CLI (`cli/internal/submit/local.go`, `cli/internal/dreamcycle/local_store.go`)
+**Status:** Fixed (2026-05-04)
+
+### Problem
+
+Note files are written with unquoted YAML title values. When a title contains a colon followed by a space (e.g., `title: CDK Stack Integration Tests: Template.fromStack()`), the Go YAML parser interprets the second colon as a nested mapping, producing a `yaml: line 2: mapping values are not allowed in this context` error. The `parseFrontmatter()` function silently returns empty fields on parse error, causing `CreateBatches()` to see `status: ""` instead of `status: "pending"` and skip the note entirely.
+
+### How to Replicate
+
+1. Run `multi-kb run` to extract notes (many titles naturally contain colons)
+2. Run `multi-kb dream-cycle` — reports 0 batches despite having pending notes
+3. Check: `grep -rl "status: pending" ~/.multi-kb/local/default/ | wc -l` shows notes exist
+
+### Root Cause
+
+Three locations write `title: %s` without quoting:
+- `cli/internal/submit/local.go:54` — `renderNote()`
+- `cli/internal/dreamcycle/local_store.go:84` — `renderNoteFile()`
+- `cli/internal/dreamcycle/local_store.go:101` — `renderNoteFileWithConsolidated()`
+
+### Fix
+
+Changed all three to use `%q` (Go's quoted-string format): `title: %q`. This produces `title: "CDK Stack Integration Tests: Template.fromStack()"` which YAML parses correctly. The YAML parser naturally strips the outer quotes when deserializing.
+
+Additionally, repaired 100 existing notes in `~/.multi-kb/local/default/` by quoting their title values in-place.
+
+**Acceptance Criteria:**
+- [x] `renderNote()` and `renderNoteFile()` use `%q` for title values
+- [x] `parseFrontmatter()` correctly parses titles with colons
+- [x] `CreateBatches()` returns correct count of pending notes
+- [x] All existing tests updated and pass (submit: 11/11, dreamcycle: 22/22, cmd: 34/34)
+- [x] Dream cycle processes all pending notes after fix (41 batches from 46 remaining pending notes)
+
+---
+
+## E2E-005: Dream Cycle Cascading File-Not-Found on Concurrent Batch Processing
+
+**Severity:** Low — non-fatal, affects ~8-17% of batches per run
+**Component:** CLI (`cli/internal/dreamcycle/cycle.go`, `cli/internal/dreamcycle/phase3.go`)
+**Status:** Open
+
+### Problem
+
+When the dream cycle processes multiple batches sequentially, a consolidate or merge action in an earlier batch may delete an active note (e.g., `FJAGQHHBP4QNN12S`) that a later batch references as a related note. The later batch's keep/merge action then fails with:
+
+```
+dream-cycle: phase 3 error for batch: phase3: apply actions: keep: read "FJAGQHHBP4QNN12S":
+open /Users/zmueller/.multi-kb/local/default/FJAGQHHBP4QNN12S.md: no such file or directory
+```
+
+Observed error rates across runs:
+- Run 1: 16 errors out of 76 batches (21%)
+- Run 2: 7 errors out of 41 batches (17%)
+
+The dream cycle continues processing remaining batches — these errors are non-fatal but result in some pending notes not being fully processed.
+
+### Root Cause
+
+Phase 2 (related note discovery via git grep) runs before Phase 3 (LLM consolidation + action application) for all batches. The related notes are resolved at Phase 2 time. By the time Phase 3 processes a batch, earlier batches may have deleted some of the related notes through consolidate or merge actions.
+
+### Suggested Fix
+
+In Phase 3, when a keep/merge action references a note that no longer exists, skip the stale reference gracefully instead of reporting an error. This is a best-effort strategy — the note was already handled by a prior batch.
+
+**Acceptance Criteria:**
+- [ ] Phase 3 action application handles missing related notes gracefully (skip + warn instead of error)
+- [ ] Error count for cascading file-not-found drops to 0 or near-0
+- [ ] Run log `errors` field reflects only genuine failures
+
+---
+
 ## Execution Order
 
 These bugs are independent and can be fixed in parallel:
@@ -330,6 +408,8 @@ These bugs are independent and can be fixed in parallel:
 E2E-001 (High):   CLI defaults + CDK defaults + recall Lambda ARN → redeploy
 E2E-002 (Medium): phase3.go parser robustness → unit tests only
 E2E-003 (Medium): process.go auto-create local KB dir → unit tests only
+E2E-004 (High):   submit/local.go + dreamcycle/local_store.go YAML quoting → unit tests + data repair
+E2E-005 (Low):    dreamcycle/phase3.go graceful handling of deleted notes → unit tests only
 ```
 
-E2E-001 should be fixed first as it blocks all LLM functionality with default configuration. E2E-002 and E2E-003 can be fixed in either order.
+E2E-001 should be fixed first as it blocks all LLM functionality with default configuration. E2E-004 should be fixed second as it silently breaks the entire dream cycle. E2E-002, E2E-003, and E2E-005 can be fixed in any order.

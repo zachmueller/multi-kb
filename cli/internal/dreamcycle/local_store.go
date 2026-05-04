@@ -81,7 +81,7 @@ func renderNoteFile(note Note) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("uid: %s\n", note.UID))
-	sb.WriteString(fmt.Sprintf("title: %s\n", note.Title))
+	sb.WriteString(fmt.Sprintf("title: %q\n", note.Title))
 	sb.WriteString(fmt.Sprintf("status: %s\n", note.Status))
 	sb.WriteString(fmt.Sprintf("author: %s\n", note.Author))
 	sb.WriteString(fmt.Sprintf("last-updated: %s\n", now))
@@ -98,7 +98,7 @@ func renderNoteFileWithConsolidated(note Note, consolidatedFrom []string) string
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("uid: %s\n", note.UID))
-	sb.WriteString(fmt.Sprintf("title: %s\n", note.Title))
+	sb.WriteString(fmt.Sprintf("title: %q\n", note.Title))
 	sb.WriteString(fmt.Sprintf("status: %s\n", note.Status))
 	sb.WriteString(fmt.Sprintf("author: %s\n", note.Author))
 	sb.WriteString(fmt.Sprintf("last-updated: %s\n", now))

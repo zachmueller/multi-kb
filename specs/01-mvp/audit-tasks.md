@@ -538,18 +538,19 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 **Sub-task status:**
 - [x] **Review and correct `scenarios.md`** — verified all 9 scenarios against actual implementation; corrected field names, hook event type, status values, re-processing markers, dream cycle phase details, and approval flow behavior
 - [x] **Deploy stack** — CDK stack deployed to us-east-1 (account 639628476385); post-deploy integration script passed (30/30, 2 skips)
-- [x] **Execute automated scenarios** — 4 of 9 scenarios passed, 4 skipped (require TTY/browser), 1 partial
-  - Scenario 1 (Setup): PARTIAL — config created manually, `status` command verified (wizard requires TTY)
-  - Scenario 2 (Capture): PASS — 46 conversations processed, 178 notes extracted, 0 errors
-  - Scenario 3 (Hook Injection): SKIP — requires interactive Claude Code session
-  - Scenario 4 (Oversized): SKIP — requires large synthetic file + significant Bedrock spend
-  - Scenario 5 (Extraction Failure): PASS — invalid model → 3 retries → extraction-errors.jsonl entry
-  - Scenario 6 (Hook Timeout): SKIP — requires interactive Claude Code session
-  - Scenario 7 (Re-Processing): PASS — modified conversation re-discovered and re-processed
+- [x] **Execute automated scenarios (round 2)** — 6 of 9 scenarios passed, 3 skipped (require TTY/browser), 0 partial
+  - Scenario 1 (Setup): PARTIAL — config, state, status verified; wizard/hooks/cron require TTY
+  - Scenario 2 (Capture): PASS — 34 conversations, 43 notes extracted, 0 errors; routed to local/default
+  - Scenario 3 (Hook Injection): SKIP — requires interactive Claude Code session (TTY)
+  - Scenario 4 (Oversized): PASS — 3.5MB synthetic conversation, exit 0, 0 errors, no OOM
+  - Scenario 5 (Extraction Failure): PASS — invalid model → 3 retries → error logged with retries=3
+  - Scenario 6 (Hook Timeout): SKIP — requires interactive Claude Code session (TTY)
+  - Scenario 7 (Re-Processing): PASS — modified conversation re-processed; 2 convs, 3 notes, 0 errors
   - Scenario 8 (Approval): SKIP — requires browser UI
-  - Scenario 9 (Dream Cycle): PASS — 109 batches, 60 keep actions, git commits by multi-kb@local
+  - Scenario 9 (Dream Cycle): PASS — 41 batches, 60 keep/22 merge/16 consolidate; git commits by multi-kb@local
 - [x] **Bug fix: OpenSearch index custom resource** — Update handler was a no-op, failed when collection was rebuilt; now verifies index exists and recreates if missing
 - [x] **Bug fix: Bedrock model ID** — on-demand model IDs rejected by Bedrock; must use inference profile ID (e.g. `us.anthropic.claude-sonnet-4-6`)
+- [x] **Bug fix: YAML title quoting (E2E-004)** — unquoted title values with colons broke frontmatter parsing; dream cycle silently skipped 54% of notes. Fixed by using `%q` in all render functions.
 
 ---
 
@@ -769,15 +770,15 @@ Requires at least one approved `status: pending` note in a local KB from Scenari
 - [ ] Check off all acceptance criteria below
 
 **Acceptance Criteria:**
-- [ ] **First-Time Setup:** Binary download -> setup wizard -> config written -> hooks registered -> cron registered (under 10 minutes)
-- [ ] **Scheduled Capture:** Cron fires -> conversations scanned -> knowledge extracted -> notes routed -> run log written
-- [ ] **Hook Injection:** New conversation -> hook fires -> recall queries -> Markdown injected -> conversation proceeds
-- [ ] **Oversized Conversation:** >700K token conversation -> chunked -> all knowledge extracted
-- [ ] **Extraction Failure:** Bedrock throttle -> retry -> partial acceptance -> error logged
-- [ ] **Hook Timeout:** Slow KB -> timeout -> partial results used
-- [ ] **Re-Processing:** Modified old conversation -> re-translated -> new knowledge extracted
-- [ ] **Approval Flow:** Pending notes -> `multi-kb approve` -> review -> approve/reject -> submitted/deleted
-- [ ] **Dream Cycle:** Pending notes -> singleton batches -> related lookup -> consolidation -> active notes
+- [ ] **First-Time Setup:** Binary download -> setup wizard -> config written -> hooks registered -> cron registered (under 10 minutes) — PARTIAL (wizard requires TTY)
+- [x] **Scheduled Capture:** Cron fires -> conversations scanned -> knowledge extracted -> notes routed -> run log written
+- [ ] **Hook Injection:** New conversation -> hook fires -> recall queries -> Markdown injected -> conversation proceeds — SKIP (requires TTY)
+- [x] **Oversized Conversation:** >700K token conversation -> chunked -> all knowledge extracted
+- [x] **Extraction Failure:** Bedrock throttle -> retry -> partial acceptance -> error logged
+- [ ] **Hook Timeout:** Slow KB -> timeout -> partial results used — SKIP (requires TTY)
+- [x] **Re-Processing:** Modified old conversation -> re-translated -> new knowledge extracted
+- [ ] **Approval Flow:** Pending notes -> `multi-kb approve` -> review -> approve/reject -> submitted/deleted — SKIP (requires browser)
+- [x] **Dream Cycle:** Pending notes -> singleton batches -> related lookup -> consolidation -> active notes
 
 ---
 

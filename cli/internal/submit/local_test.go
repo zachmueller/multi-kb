@@ -61,7 +61,7 @@ func TestWriteNote_frontmatter(t *testing.T) {
 		substr  string
 	}{
 		{"uid", "uid: " + uid},
-		{"title", "title: Frontmatter Check"},
+		{"title", `title: "Frontmatter Check"`},
 		{"status", "status: pending"},
 		{"author", "author: alice"},
 		{"last-linked-to null", "last-linked-to:"},

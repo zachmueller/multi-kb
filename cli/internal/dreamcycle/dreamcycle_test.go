@@ -296,7 +296,7 @@ func TestNoteToMarkdown(t *testing.T) {
 	if !strings.Contains(md, "uid: TEST0001") {
 		t.Error("expected UID in markdown")
 	}
-	if !strings.Contains(md, "title: Test Note") {
+	if !strings.Contains(md, `title: "Test Note"`) {
 		t.Error("expected title in markdown")
 	}
 	if !strings.Contains(md, "status: active") {

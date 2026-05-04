@@ -51,7 +51,7 @@ func renderNote(uid string, fields NoteFields, now string) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("uid: %s\n", uid))
-	sb.WriteString(fmt.Sprintf("title: %s\n", fields.Title))
+	sb.WriteString(fmt.Sprintf("title: %q\n", fields.Title))
 	sb.WriteString("status: pending\n")
 	sb.WriteString(fmt.Sprintf("author: %s\n", fields.Author))
 	sb.WriteString(fmt.Sprintf("last-updated: %s\n", now))

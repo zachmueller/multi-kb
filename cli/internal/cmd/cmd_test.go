@@ -321,7 +321,7 @@ func TestSubmitNote_LocalKB_NoteContent(t *testing.T) {
 			t.Fatalf("ReadFile: %v", err)
 		}
 		content := string(data)
-		for _, want := range []string{"title: Verifiable Note", "author: alice", "Content to verify in frontmatter."} {
+		for _, want := range []string{`title: "Verifiable Note"`, "author: alice", "Content to verify in frontmatter."} {
 			if !strings.Contains(content, want) {
 				t.Errorf("note missing %q\nfull:\n%s", want, content)
 			}
