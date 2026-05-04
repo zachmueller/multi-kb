@@ -116,19 +116,30 @@ export class Compute extends Construct {
     );
 
     // Bedrock: invoke consolidation model
+    // Cross-region inference profiles require permission on both the
+    // inference-profile ARN and the underlying foundation-model ARN.
+    const consolidationResources = [consolidationModelArn];
+    const profilePrefix = props.consolidationModelId.match(/^([a-z]{2})\./);
+    if (profilePrefix) {
+      const baseModelId = props.consolidationModelId.slice(profilePrefix[0].length);
+      consolidationResources.push(
+        `arn:aws:bedrock:*::foundation-model/${baseModelId}`,
+      );
+    }
     this.role.addToPolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:InvokeModel"],
-        resources: [consolidationModelArn],
+        resources: consolidationResources,
       }),
     );
 
-    // Bedrock Agent: start/get ingestion jobs scoped to KB
+    // Bedrock Agent: start/get ingestion jobs + retrieve, scoped to KB
     this.role.addToPolicy(
       new iam.PolicyStatement({
         actions: [
           "bedrock:StartIngestionJob",
           "bedrock:GetIngestionJob",
+          "bedrock:Retrieve",
         ],
         resources: [props.knowledgeBaseArn],
       }),

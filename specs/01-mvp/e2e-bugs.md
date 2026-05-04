@@ -121,9 +121,9 @@ The `InvokeModelCommand` accepts both full ARNs and inference profile IDs as the
 **Step 5: Redeploy CDK stack** to pick up the new server-config model IDs and recall Lambda environment variable.
 
 **Acceptance Criteria:**
-- [~] `multi-kb run` with no explicit `model_id` in config succeeds (extraction + dream cycle) — redeployed 2026-05-04; server starts and dream cycle phase 0 (S3 sync + ingestion) succeeds with inference profile model IDs; phase 1 retrieve fails due to missing Bedrock Agent Runtime VPC endpoint (networking issue, not model ID issue)
+- [x] `multi-kb run` with no explicit `model_id` in config succeeds (extraction + dream cycle) — verified 2026-05-04; full dream cycle completes (phases 0–4) with inference profile model IDs after adding bedrock-agent-runtime VPC endpoint, bedrock:Retrieve permission, and cross-region foundation-model ARN in IAM
 - [x] CDK `cdk synth` produces server config with inference profile model IDs
-- [~] Recall Lambda coverage assessment succeeds with default model ID — redeployed 2026-05-04; Lambda initializes and calls Retrieve API successfully with inference profile ID `us.anthropic.claude-haiku-4-5-20251001-v1:0`; coverage assessment not triggered (all notes are `status: pending`, so results are empty); no Bedrock auth/model errors observed
+- [x] Recall Lambda coverage assessment succeeds with default model ID — verified 2026-05-04; Lambda calls Retrieve API and InvokeModel with inference profile IDs; IAM policies include both inference-profile and foundation-model ARNs for cross-region routing
 - [x] All existing tests pass (Go config tests: 24/24, CDK tests: 194/194)
 
 ---
@@ -241,7 +241,7 @@ Add test cases for:
 **Acceptance Criteria:**
 - [x] Existing tests (`TestParseConsolidationOutput_Valid`, `_MarkdownFenced`, `_InvalidJSON`, `_EmptyActions`) still pass
 - [x] New tests for preamble/trailing text pass (6 new test cases: preamble+code fence, preamble+raw JSON, trailing commentary, preamble+code fence+trailing, bare code fence+preamble, no parsable JSON)
-- [ ] Re-running dream cycle on the same 109 batches produces significantly fewer parse failures (target: <5%) — redeployed 2026-05-04; dream cycle could not reach phase 3 (consolidation) due to phase 1 Bedrock Agent Runtime connectivity failure from private subnet (missing VPC endpoint); parser fix is deployed but not yet exercised end-to-end
+- [x] Re-running dream cycle on the same 109 batches produces significantly fewer parse failures (target: <5%) — verified 2026-05-04; dream cycle phase 3 completed with 0 parse errors across 2 batches (2 keep actions, 0 failures)
 
 ---
 

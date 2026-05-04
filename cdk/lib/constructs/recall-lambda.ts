@@ -61,10 +61,18 @@ export class RecallLambda extends Construct {
       }),
     );
 
+    const coverageResources = [coverageModelArn];
+    const coverageProfilePrefix = props.coverageModelId.match(/^([a-z]{2})\./);
+    if (coverageProfilePrefix) {
+      const baseModelId = props.coverageModelId.slice(coverageProfilePrefix[0].length);
+      coverageResources.push(
+        `arn:aws:bedrock:*::foundation-model/${baseModelId}`,
+      );
+    }
     this.fn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["bedrock:InvokeModel"],
-        resources: [coverageModelArn],
+        resources: coverageResources,
       }),
     );
 

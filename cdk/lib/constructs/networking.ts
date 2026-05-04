@@ -134,6 +134,12 @@ export class Networking extends Construct {
         ),
       },
       {
+        id: "BedrockAgentRuntimeEndpoint",
+        service: new ec2.InterfaceVpcEndpointService(
+          `com.amazonaws.${cdk.Stack.of(this).region}.bedrock-agent-runtime`,
+        ),
+      },
+      {
         id: "SsmEndpoint",
         service: new ec2.InterfaceVpcEndpointService(
           `com.amazonaws.${cdk.Stack.of(this).region}.ssm`,
