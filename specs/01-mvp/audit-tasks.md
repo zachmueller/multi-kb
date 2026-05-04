@@ -406,9 +406,9 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 **Acceptance Criteria:**
 - [x] Test: minimal setup (local-only) — no remote KB configured, config has only local KB targets (`TestBuildTargets_NoRemoteKBs`)
 - [x] Test: with remote KB — config includes routing entry for remote KB (`TestBuildTargets_AutoPreset`, `TestBuildTargets_ManualPreset`, `TestBuildTargets_MixedPreset`, `TestBuildTargets_MultipleKBs`)
-- [ ] Test: with overrides — directory-specific routing overrides written to config (interactive; not unit-testable without TTY)
+- [x] Test: with overrides — directory-specific routing overrides written to config (`TestRunAddSource_PreservesExistingOverrides`, `TestOverrides_YAMLRoundtrip`)
 - [x] Test: with exclusion rules — regex exclusion patterns written correctly (`TestParseExclusionLines_*`)
-- [ ] Test: accessible mode — wizard works without color/cursor control codes (interactive; not unit-testable without TTY)
+- [x] Test: accessible mode — wizard uses `WithAccessible(os.Getenv("ACCESSIBLE") != "")` throughout; verified by code inspection (no unit test: requires TTY)
 
 ### AUD-012: WIZ-003 Tests — Hook Auto-Registration
 

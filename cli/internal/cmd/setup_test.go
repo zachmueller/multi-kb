@@ -377,6 +377,109 @@ func TestRunAddKB_MissingConfig(t *testing.T) {
 	}
 }
 
+// --- overrides roundtrip tests (AUD-011: directory-specific routing overrides) ---
+
+func TestRunAddSource_PreservesExistingOverrides(t *testing.T) {
+	dir := t.TempDir()
+	srcDir1 := t.TempDir()
+	cfg := config.Config{
+		Mode:   "client",
+		Author: "tester",
+		Extraction: config.ExtractionConfig{
+			ModelID: "anthropic.claude-sonnet-4-20250514",
+		},
+		Hook:       config.HookConfig{Timeout: "8s"},
+		DreamCycle: config.DreamCycleConfig{ModelID: "anthropic.claude-sonnet-4-20250514"},
+		KnowledgeBases: []config.KnowledgeBase{
+			{Name: "remote-sec", Endpoint: "https://sec.example.com", Auth: "iam", AWSProfile: "default"},
+		},
+		Sources: []config.Source{
+			{
+				Directory: srcDir1,
+				Harnesses: []string{"claude-code"},
+				Targets:   []config.Target{{KB: "local/default", Routing: "always", Approval: "auto-approve"}},
+				Overrides: []config.Override{
+					{
+						Harness: "claude-code",
+						Persona: "security",
+						Targets: []config.Target{
+							{KB: "remote-sec", Routing: "always", Approval: "require-manual-approval"},
+						},
+					},
+				},
+			},
+		},
+	}
+	cfgPath := filepath.Join(dir, "config.yaml")
+	data, _ := yaml.Marshal(cfg)
+	os.WriteFile(cfgPath, data, 0o600)
+
+	srcDir2 := t.TempDir()
+	stdin := strings.NewReader(srcDir2 + "\n1\n")
+	if err := runAddSourceFrom(cfgPath, stdin); err != nil {
+		t.Fatalf("runAddSourceFrom: %v", err)
+	}
+
+	data, _ = os.ReadFile(cfgPath)
+	var result config.Config
+	yaml.Unmarshal(data, &result) //nolint
+	if len(result.Sources) != 2 {
+		t.Fatalf("expected 2 sources, got %d", len(result.Sources))
+	}
+	if len(result.Sources[0].Overrides) != 1 {
+		t.Fatalf("expected 1 override on first source, got %d", len(result.Sources[0].Overrides))
+	}
+	ov := result.Sources[0].Overrides[0]
+	if ov.Harness != "claude-code" || ov.Persona != "security" {
+		t.Errorf("override mutated: harness=%q persona=%q", ov.Harness, ov.Persona)
+	}
+	if len(ov.Targets) != 1 || ov.Targets[0].KB != "remote-sec" {
+		t.Errorf("override targets mutated: %v", ov.Targets)
+	}
+}
+
+func TestOverrides_YAMLRoundtrip(t *testing.T) {
+	src := config.Source{
+		Directory: "/test/project",
+		Harnesses: []string{"claude-code", "notor"},
+		Targets:   []config.Target{{KB: "local/default", Routing: "always", Approval: "auto-approve"}},
+		Overrides: []config.Override{
+			{
+				Harness: "claude-code",
+				Targets: []config.Target{{KB: "team-kb", Routing: "consider", Approval: "auto-approve"}},
+			},
+			{
+				Harness: "notor",
+				Persona: "research",
+				Targets: []config.Target{{KB: "research-kb", Routing: "always", Approval: "require-manual-approval"}},
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(src)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got config.Source
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if len(got.Overrides) != 2 {
+		t.Fatalf("expected 2 overrides, got %d", len(got.Overrides))
+	}
+	if got.Overrides[0].Harness != "claude-code" {
+		t.Errorf("expected harness=claude-code, got %q", got.Overrides[0].Harness)
+	}
+	if got.Overrides[1].Persona != "research" {
+		t.Errorf("expected persona=research, got %q", got.Overrides[1].Persona)
+	}
+	if got.Overrides[1].Targets[0].KB != "research-kb" {
+		t.Errorf("expected KB=research-kb, got %q", got.Overrides[1].Targets[0].KB)
+	}
+}
+
 func TestRunAddKB_FederateAuthNoProfile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writeMinimalConfig(t, dir)
