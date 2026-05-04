@@ -537,7 +537,19 @@ The `create-index.ts` schema stays as-is. The `opensearch.endpoint` config field
 **Files:** `cli/test/e2e/scenarios.md` — checklist file to mark complete (reviewed and corrected against implementation)
 **Sub-task status:**
 - [x] **Review and correct `scenarios.md`** — verified all 9 scenarios against actual implementation; corrected field names, hook event type, status values, re-processing markers, dream cycle phase details, and approval flow behavior
-- [ ] **Deploy stack and execute scenarios** — requires deployed CDK stack (blocked on deployment)
+- [x] **Deploy stack** — CDK stack deployed to us-east-1 (account 639628476385); post-deploy integration script passed (30/30, 2 skips)
+- [x] **Execute automated scenarios** — 4 of 9 scenarios passed, 4 skipped (require TTY/browser), 1 partial
+  - Scenario 1 (Setup): PARTIAL — config created manually, `status` command verified (wizard requires TTY)
+  - Scenario 2 (Capture): PASS — 46 conversations processed, 178 notes extracted, 0 errors
+  - Scenario 3 (Hook Injection): SKIP — requires interactive Claude Code session
+  - Scenario 4 (Oversized): SKIP — requires large synthetic file + significant Bedrock spend
+  - Scenario 5 (Extraction Failure): PASS — invalid model → 3 retries → extraction-errors.jsonl entry
+  - Scenario 6 (Hook Timeout): SKIP — requires interactive Claude Code session
+  - Scenario 7 (Re-Processing): PASS — modified conversation re-discovered and re-processed
+  - Scenario 8 (Approval): SKIP — requires browser UI
+  - Scenario 9 (Dream Cycle): PASS — 109 batches, 60 keep actions, git commits by multi-kb@local
+- [x] **Bug fix: OpenSearch index custom resource** — Update handler was a no-op, failed when collection was rebuilt; now verifies index exists and recreates if missing
+- [x] **Bug fix: Bedrock model ID** — on-demand model IDs rejected by Bedrock; must use inference profile ID (e.g. `us.anthropic.claude-sonnet-4-6`)
 
 ---
 

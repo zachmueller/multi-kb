@@ -143,14 +143,14 @@ Requires at least one `status: pending` note in a local KB (from Scenario 8 appr
 
 | Scenario | Status | Notes |
 |----------|--------|-------|
-| 1. First-Time Setup | | |
-| 2. Scheduled Capture | | |
-| 3. Hook Injection | | |
-| 4. Oversized Conversation | | |
-| 5. Extraction Failure + Retry | | |
-| 6. Hook Timeout | | |
-| 7. Re-Processing | | |
-| 8. Approval Flow | | |
-| 9. Dream Cycle | | |
+| 1. First-Time Setup | PARTIAL | Config created manually (wizard requires TTY); status command verified |
+| 2. Scheduled Capture | PASS | 46 conversations, 178 notes extracted, 0 errors, routed to local/default |
+| 3. Hook Injection | SKIP | Requires interactive Claude Code session (TTY) |
+| 4. Oversized Conversation | SKIP | Requires generating large synthetic file + significant Bedrock spend |
+| 5. Extraction Failure + Retry | PASS | Invalid model → 3 retries → error logged with retries=3 |
+| 6. Hook Timeout | SKIP | Requires interactive Claude Code session (TTY) |
+| 7. Re-Processing | PASS | Modified conversation picked up, re-processed with 0 errors |
+| 8. Approval Flow | SKIP | Requires browser UI interaction |
+| 9. Dream Cycle | PASS | 109 batches, 60 keep actions, git commits by multi-kb <multi-kb@local> |
 
-**Tester:** _______________  **Date:** _______________
+**Tester:** Claude (automated)  **Date:** 2026-05-04
