@@ -14,7 +14,7 @@ function createTemplate(): Template {
     knowledgeBaseArn:
       "arn:aws:bedrock:us-east-1:123456789012:knowledge-base/KB-12345",
     bucket,
-    coverageModelId: "anthropic.claude-haiku-4-5-20251001",
+    coverageModelId: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     coverageScoreThreshold: 0.3,
     excludePendingFromRecall: true,
   });
@@ -57,7 +57,7 @@ describe("RecallLambda Construct", () => {
         Variables: {
           KNOWLEDGE_BASE_ID: Match.anyValue(),
           BUCKET_NAME: Match.anyValue(),
-          COVERAGE_MODEL_ID: "anthropic.claude-haiku-4-5-20251001",
+          COVERAGE_MODEL_ID: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
           COVERAGE_SCORE_THRESHOLD: "0.3",
           EXCLUDE_PENDING: "true",
         },
@@ -88,7 +88,7 @@ describe("RecallLambda Construct", () => {
           Match.objectLike({
             Action: "bedrock:InvokeModel",
             Resource:
-              "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001",
+              "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
           }),
         ]),
       }),

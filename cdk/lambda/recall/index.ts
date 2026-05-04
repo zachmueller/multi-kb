@@ -83,8 +83,6 @@ async function assessCoverage(
   results: RecallResult[],
 ): Promise<CoverageResponse> {
   const coverageModelId = process.env.COVERAGE_MODEL_ID!;
-  const region = process.env.AWS_REGION ?? "us-east-1";
-  const modelArn = `arn:aws:bedrock:${region}::foundation-model/${coverageModelId}`;
 
   const resultSummaries = results
     .slice(0, 5)
@@ -98,7 +96,7 @@ async function assessCoverage(
 
   const response = await bedrockRuntime.send(
     new InvokeModelCommand({
-      modelId: modelArn,
+      modelId: coverageModelId,
       contentType: "application/json",
       body: JSON.stringify({
         anthropic_version: "bedrock-2023-05-31",

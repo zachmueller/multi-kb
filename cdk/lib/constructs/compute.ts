@@ -4,6 +4,13 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
 
+function bedrockModelArn(region: string, account: string, modelId: string): string {
+  if (/^[a-z]{2}\./.test(modelId)) {
+    return `arn:aws:bedrock:${region}:${account}:inference-profile/${modelId}`;
+  }
+  return `arn:aws:bedrock:${region}::foundation-model/${modelId}`;
+}
+
 export interface ComputeProps {
   readonly vpc: ec2.IVpc;
   readonly subnet: ec2.ISubnet;
@@ -42,7 +49,7 @@ export class Compute extends Construct {
 
     const stack = cdk.Stack.of(this);
     const region = stack.region;
-    const consolidationModelArn = `arn:aws:bedrock:${region}::foundation-model/${props.consolidationModelId}`;
+    const consolidationModelArn = bedrockModelArn(region, stack.account, props.consolidationModelId);
 
     // Parse S3 bucket and key from cliBinaryS3Uri for scoped IAM
     // Format: s3://bucket-name/path/to/binary

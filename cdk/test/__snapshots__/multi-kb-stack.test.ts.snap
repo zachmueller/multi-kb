@@ -618,7 +618,7 @@ exports[`MultiKbStack - synthesis snapshot 1`] = `
             {
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
-              "Resource": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514",
+              "Resource": "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6",
             },
             {
               "Action": [
@@ -845,7 +845,7 @@ tick_interval: "5m"
 
 dream_cycle:
   interval: "3h"
-  model_id: "anthropic.claude-sonnet-4-20250514"
+  model_id: "us.anthropic.claude-sonnet-4-6"
 
 recall_log:
   schedule: "02:00"
@@ -1662,14 +1662,14 @@ systemctl enable --now multi-kb",
         ],
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "3173d659c37aa10e0937b83735a5916a4e2244c48fbdfeddd62c7462dcfb1a05.zip",
+          "S3Key": "8e67b628e4f5739d7c21c67b40cd3a26fd6d6d3ff55a078a2bbe6bb4494b1ecb.zip",
         },
         "Environment": {
           "Variables": {
             "BUCKET_NAME": {
               "Ref": "StorageBucket5CB7C8EA",
             },
-            "COVERAGE_MODEL_ID": "anthropic.claude-haiku-4-5-20251001",
+            "COVERAGE_MODEL_ID": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
             "COVERAGE_SCORE_THRESHOLD": "0.3",
             "EXCLUDE_PENDING": "true",
             "KNOWLEDGE_BASE_ID": {
@@ -1741,7 +1741,7 @@ systemctl enable --now multi-kb",
             {
               "Action": "bedrock:InvokeModel",
               "Effect": "Allow",
-              "Resource": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001",
+              "Resource": "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
             },
             {
               "Action": "s3:PutObject",

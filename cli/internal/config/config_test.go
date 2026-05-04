@@ -331,8 +331,14 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 	if cfg.Hook.Timeout != "8s" {
 		t.Errorf("hook.timeout = %q, want %q", cfg.Hook.Timeout, "8s")
 	}
-	if cfg.Extraction.ModelID == "" {
-		t.Error("extraction.model_id should have a default value")
+	if cfg.Extraction.ModelID != "us.anthropic.claude-sonnet-4-6" {
+		t.Errorf("extraction.model_id = %q, want %q", cfg.Extraction.ModelID, "us.anthropic.claude-sonnet-4-6")
+	}
+	if cfg.DreamCycle.ModelID != "us.anthropic.claude-sonnet-4-6" {
+		t.Errorf("dream_cycle.model_id = %q, want %q", cfg.DreamCycle.ModelID, "us.anthropic.claude-sonnet-4-6")
+	}
+	if cfg.Translation.SummarizationModelID != "us.anthropic.claude-haiku-4-5-20251001-v1:0" {
+		t.Errorf("translation.summarization_model_id = %q, want %q", cfg.Translation.SummarizationModelID, "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 	}
 }
 

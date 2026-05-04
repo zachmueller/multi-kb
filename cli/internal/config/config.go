@@ -148,13 +148,13 @@ func Load(path string) (*Config, []error) {
 		cfg.Hook.Timeout = "8s"
 	}
 	if cfg.Extraction.ModelID == "" {
-		cfg.Extraction.ModelID = "anthropic.claude-sonnet-4-20250514"
+		cfg.Extraction.ModelID = "us.anthropic.claude-sonnet-4-6"
 	}
 	if cfg.DreamCycle.ModelID == "" {
-		cfg.DreamCycle.ModelID = "anthropic.claude-sonnet-4-20250514"
+		cfg.DreamCycle.ModelID = "us.anthropic.claude-sonnet-4-6"
 	}
 	if cfg.Translation.SummarizationModelID == "" {
-		cfg.Translation.SummarizationModelID = "anthropic.claude-haiku-4-5-20251001"
+		cfg.Translation.SummarizationModelID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 	}
 
 	errs := Validate(&cfg)

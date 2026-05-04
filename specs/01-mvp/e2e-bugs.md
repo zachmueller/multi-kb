@@ -8,7 +8,7 @@
 
 | Bug | Severity | Component | Status |
 |-----|----------|-----------|--------|
-| E2E-001: Bedrock model ID defaults use on-demand IDs that Bedrock rejects | High | CLI + CDK | Open |
+| E2E-001: Bedrock model ID defaults use on-demand IDs that Bedrock rejects | High | CLI + CDK | **Fixed** |
 | E2E-002: Dream cycle consolidation fails to parse LLM preamble text | Medium | CLI | Open |
 | E2E-003: Local KB directory not auto-created on first note submission | Medium | CLI | Open |
 
@@ -18,6 +18,7 @@
 
 **Severity:** High — all LLM invocations fail out of the box with default configuration
 **Components:** CLI (`cli/internal/config/config.go`), CDK (`cdk/lib/multi-kb-stack.ts`, `cdk/lambda/recall/index.ts`)
+**Status:** Fixed (2026-05-04)
 
 ### Problem
 
@@ -120,10 +121,10 @@ The `InvokeModelCommand` accepts both full ARNs and inference profile IDs as the
 **Step 5: Redeploy CDK stack** to pick up the new server-config model IDs and recall Lambda environment variable.
 
 **Acceptance Criteria:**
-- [ ] `multi-kb run` with no explicit `model_id` in config succeeds (extraction + dream cycle)
-- [ ] CDK `cdk synth` produces server config with inference profile model IDs
-- [ ] Recall Lambda coverage assessment succeeds with default model ID
-- [ ] All existing tests pass
+- [ ] `multi-kb run` with no explicit `model_id` in config succeeds (extraction + dream cycle) — requires redeployment
+- [x] CDK `cdk synth` produces server config with inference profile model IDs
+- [ ] Recall Lambda coverage assessment succeeds with default model ID — requires redeployment
+- [x] All existing tests pass (Go config tests: 24/24, CDK tests: 194/194)
 
 ---
 

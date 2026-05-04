@@ -49,7 +49,7 @@ function defaultComputeProps(
     ec2SecurityGroup: sg,
     ec2InstanceType: "t4g.micro",
     cliBinaryS3Uri: "s3://my-bucket/multi-kb/cli-linux-arm64",
-    consolidationModelId: "anthropic.claude-sonnet-4-20250514",
+    consolidationModelId: "us.anthropic.claude-sonnet-4-6",
     tickInterval: "5m",
     dreamCycleInterval: "3h",
     repoName: "multi-kb",
@@ -188,7 +188,7 @@ describe("Compute Construct", () => {
           Match.objectLike({
             Action: "bedrock:InvokeModel",
             Resource:
-              "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514",
+              "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6",
           }),
         ]),
       }),

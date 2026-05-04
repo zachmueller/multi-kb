@@ -44,10 +44,10 @@ export function resolveProps(app: cdk.App): MultiKbStackProps {
       "amazon.titan-embed-text-v2:0",
     consolidationModelId:
       app.node.tryGetContext("consolidationModelId") ??
-      "anthropic.claude-sonnet-4-20250514",
+      "us.anthropic.claude-sonnet-4-6",
     coverageModelId:
       app.node.tryGetContext("coverageModelId") ??
-      "anthropic.claude-haiku-4-5-20251001",
+      "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     tickInterval: app.node.tryGetContext("tickInterval") ?? "5m",
     dreamCycleInterval:
       app.node.tryGetContext("dreamCycleInterval") ?? "3h",

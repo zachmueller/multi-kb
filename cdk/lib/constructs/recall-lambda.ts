@@ -15,6 +15,13 @@ export interface RecallLambdaProps {
   readonly excludePendingFromRecall: boolean;
 }
 
+function bedrockModelArn(region: string, account: string, modelId: string): string {
+  if (/^[a-z]{2}\./.test(modelId)) {
+    return `arn:aws:bedrock:${region}:${account}:inference-profile/${modelId}`;
+  }
+  return `arn:aws:bedrock:${region}::foundation-model/${modelId}`;
+}
+
 export class RecallLambda extends Construct {
   readonly fn: lambda.Function;
 
@@ -22,8 +29,7 @@ export class RecallLambda extends Construct {
     super(scope, id);
 
     const stack = cdk.Stack.of(this);
-    // Foundation model ARN uses empty account ID (AWS-owned)
-    const coverageModelArn = `arn:aws:bedrock:${stack.region}::foundation-model/${props.coverageModelId}`;
+    const coverageModelArn = bedrockModelArn(stack.region, stack.account, props.coverageModelId);
 
     this.fn = new NodejsFunction(this, "Function", {
       runtime: lambda.Runtime.NODEJS_22_X,

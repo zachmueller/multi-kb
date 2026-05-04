@@ -109,7 +109,7 @@ describe("recallKnowledge handler", () => {
     jest.clearAllMocks();
     process.env.KNOWLEDGE_BASE_ID = "KB-12345";
     process.env.BUCKET_NAME = "test-bucket";
-    process.env.COVERAGE_MODEL_ID = "anthropic.claude-haiku-4-5-20251001";
+    process.env.COVERAGE_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
     process.env.COVERAGE_SCORE_THRESHOLD = "0.3";
     process.env.EXCLUDE_PENDING = "true";
     process.env.AWS_REGION = "us-east-1";
