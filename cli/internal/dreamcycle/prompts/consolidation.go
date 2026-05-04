@@ -95,4 +95,6 @@ Return a JSON object with an "actions" array:
 5. Prefer "keep" when uncertain — it is always safe
 6. Preserve ALL information — never silently discard content
 7. Titles must be 255 characters or fewer
-8. Provide a clear "reason" for every action`
+8. Provide a clear "reason" for every action
+
+## CRITICAL: Output ONLY the JSON object. No preamble, no commentary, no markdown headings before or after the JSON.`

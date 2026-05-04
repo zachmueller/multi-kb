@@ -124,26 +124,45 @@ func formatNote(note Note) string {
 func parseConsolidationOutput(response string) (*consolidationOutput, error) {
 	response = strings.TrimSpace(response)
 
-	// Strip markdown code fences if present
-	if strings.HasPrefix(response, "```") {
-		lines := strings.SplitN(response, "\n", 2)
-		if len(lines) == 2 {
-			response = lines[1]
-		}
-		response = strings.TrimSuffix(strings.TrimSpace(response), "```")
-		response = strings.TrimSpace(response)
-	}
-
 	var output consolidationOutput
-	if err := json.Unmarshal([]byte(response), &output); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+
+	// Strategy 1: entire response is valid JSON
+	if err := json.Unmarshal([]byte(response), &output); err == nil && len(output.Actions) > 0 {
+		return &output, nil
 	}
 
-	if len(output.Actions) == 0 {
-		return nil, fmt.Errorf("no actions in response")
+	// Strategy 2: extract JSON from markdown code fence anywhere in the response
+	for _, fence := range []string{"```json", "```\n"} {
+		if idx := strings.Index(response, fence); idx >= 0 {
+			inner := response[idx+len(fence):]
+			if end := strings.Index(inner, "```"); end >= 0 {
+				inner = strings.TrimSpace(inner[:end])
+				if err := json.Unmarshal([]byte(inner), &output); err == nil && len(output.Actions) > 0 {
+					return &output, nil
+				}
+			}
+		}
 	}
 
-	return &output, nil
+	// Strategy 3: find outermost JSON object via first '{' and last '}'
+	start := strings.Index(response, "{")
+	end := strings.LastIndex(response, "}")
+	if start >= 0 && end > start {
+		candidate := response[start : end+1]
+		if err := json.Unmarshal([]byte(candidate), &output); err == nil && len(output.Actions) > 0 {
+			return &output, nil
+		}
+	}
+
+	return nil, fmt.Errorf("invalid JSON: could not extract actions from response (len=%d, first 200 chars: %s)",
+		len(response), truncateStr(response, 200))
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func formatCommitMessage(actionCounts map[string]int) string {

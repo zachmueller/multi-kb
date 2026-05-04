@@ -346,6 +346,72 @@ func TestParseConsolidationOutput_EmptyActions(t *testing.T) {
 	}
 }
 
+func TestParseConsolidationOutput_PreambleBeforeCodeFence(t *testing.T) {
+	input := "I'll analyze this pending note against the active notes.\n\n```json\n{\"actions\":[{\"type\":\"keep\",\"source_uid\":\"P001\",\"reason\":\"novel\"}]}\n```"
+	output, err := parseConsolidationOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(output.Actions) != 1 || output.Actions[0].Type != "keep" {
+		t.Errorf("unexpected actions: %+v", output.Actions)
+	}
+}
+
+func TestParseConsolidationOutput_PreambleBeforeRawJSON(t *testing.T) {
+	input := "Here is my analysis:\n\n{\"actions\":[{\"type\":\"keep\",\"source_uid\":\"P001\",\"reason\":\"novel\"}]}"
+	output, err := parseConsolidationOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(output.Actions) != 1 || output.Actions[0].Type != "keep" {
+		t.Errorf("unexpected actions: %+v", output.Actions)
+	}
+}
+
+func TestParseConsolidationOutput_TrailingCommentary(t *testing.T) {
+	input := "{\"actions\":[{\"type\":\"keep\",\"source_uid\":\"P001\",\"reason\":\"novel\"}]}\n\nThis note covers a new topic."
+	output, err := parseConsolidationOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(output.Actions) != 1 || output.Actions[0].Type != "keep" {
+		t.Errorf("unexpected actions: %+v", output.Actions)
+	}
+}
+
+func TestParseConsolidationOutput_PreambleAndTrailingWithCodeFence(t *testing.T) {
+	input := "## Analysis\n\n```json\n{\"actions\":[{\"type\":\"merge\",\"source_uid\":\"P001\",\"target_uid\":\"A001\",\"merged_title\":\"T\",\"merged_content\":\"C\",\"reason\":\"dup\"}]}\n```\n\nDone."
+	output, err := parseConsolidationOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(output.Actions) != 1 || output.Actions[0].Type != "merge" {
+		t.Errorf("unexpected actions: %+v", output.Actions)
+	}
+}
+
+func TestParseConsolidationOutput_BareCodeFenceWithPreamble(t *testing.T) {
+	input := "Let me evaluate this note.\n\n```\n{\"actions\":[{\"type\":\"keep\",\"source_uid\":\"P001\",\"reason\":\"novel\"}]}\n```"
+	output, err := parseConsolidationOutput(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(output.Actions) != 1 || output.Actions[0].Type != "keep" {
+		t.Errorf("unexpected actions: %+v", output.Actions)
+	}
+}
+
+func TestParseConsolidationOutput_NoParsableJSON(t *testing.T) {
+	input := "I don't think any actions are needed here. The notes look fine."
+	_, err := parseConsolidationOutput(input)
+	if err == nil {
+		t.Fatal("expected error for response with no JSON")
+	}
+	if !strings.Contains(err.Error(), "could not extract actions") {
+		t.Errorf("expected extraction error message, got: %v", err)
+	}
+}
+
 func TestFormatCommitMessage(t *testing.T) {
 	counts := map[string]int{"keep": 2, "merge": 1, "split": 0, "consolidate": 0}
 	msg := formatCommitMessage(counts)

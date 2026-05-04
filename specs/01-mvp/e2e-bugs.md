@@ -9,7 +9,7 @@
 | Bug | Severity | Component | Status |
 |-----|----------|-----------|--------|
 | E2E-001: Bedrock model ID defaults use on-demand IDs that Bedrock rejects | High | CLI + CDK | **Fixed** |
-| E2E-002: Dream cycle consolidation fails to parse LLM preamble text | Medium | CLI | Open |
+| E2E-002: Dream cycle consolidation fails to parse LLM preamble text | Medium | CLI | **Fixed** |
 | E2E-003: Local KB directory not auto-created on first note submission | Medium | CLI | Open |
 
 ---
@@ -132,6 +132,7 @@ The `InvokeModelCommand` accepts both full ARNs and inference profile IDs as the
 
 **Severity:** Medium — 49 of 109 dream cycle batches failed (45% failure rate)
 **Component:** CLI (`cli/internal/dreamcycle/phase3.go`)
+**Status:** Fixed (2026-05-04)
 
 ### Problem
 
@@ -238,9 +239,9 @@ Add test cases for:
 - Mixed preamble + code fence + trailing: `"Analysis:\n\n```json\n{\"actions\":[...]}\n```\n\nDone."`
 
 **Acceptance Criteria:**
-- [ ] Existing tests (`TestParseConsolidationOutput_Valid`, `_MarkdownFenced`, `_InvalidJSON`, `_EmptyActions`) still pass
-- [ ] New tests for preamble/trailing text pass
-- [ ] Re-running dream cycle on the same 109 batches produces significantly fewer parse failures (target: <5%)
+- [x] Existing tests (`TestParseConsolidationOutput_Valid`, `_MarkdownFenced`, `_InvalidJSON`, `_EmptyActions`) still pass
+- [x] New tests for preamble/trailing text pass (6 new test cases: preamble+code fence, preamble+raw JSON, trailing commentary, preamble+code fence+trailing, bare code fence+preamble, no parsable JSON)
+- [ ] Re-running dream cycle on the same 109 batches produces significantly fewer parse failures (target: <5%) — requires redeployment
 
 ---
 
