@@ -1,12 +1,21 @@
 package dreamcycle
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/zmueller/multi-kb/internal/submit"
 )
+
+func isNotExist(err error) bool {
+	return errors.Is(err, os.ErrNotExist)
+}
+
+// errSkipped signals that an action was a no-op because its target was already
+// handled by an earlier batch.
+var errSkipped = errors.New("skipped")
 
 // ApplyActions applies parsed consolidation actions to the note store.
 // Returns a map of action type → count.
@@ -24,12 +33,18 @@ func ApplyActions(store NoteStore, actions []consolidationAction, batch Batch) (
 		switch action.Type {
 		case "keep":
 			if err := applyKeep(store, action); err != nil {
+				if errors.Is(err, errSkipped) {
+					continue
+				}
 				return counts, err
 			}
 			counts["keep"]++
 
 		case "merge":
 			if err := applyMerge(store, action, knownNotes); err != nil {
+				if errors.Is(err, errSkipped) {
+					continue
+				}
 				return counts, err
 			}
 			counts["merge"]++
@@ -57,6 +72,10 @@ func ApplyActions(store NoteStore, actions []consolidationAction, batch Batch) (
 func applyKeep(store NoteStore, action consolidationAction) error {
 	note, err := store.ReadNote(action.SourceUID)
 	if err != nil {
+		if isNotExist(err) {
+			fmt.Fprintf(os.Stderr, "dream-cycle: keep: note %q already removed by earlier batch, skipping\n", action.SourceUID)
+			return errSkipped
+		}
 		return fmt.Errorf("keep: read %q: %w", action.SourceUID, err)
 	}
 
@@ -68,6 +87,10 @@ func applyMerge(store NoteStore, action consolidationAction, known map[string]No
 	// Read the target active note
 	target, err := store.ReadNote(action.TargetUID)
 	if err != nil {
+		if isNotExist(err) {
+			fmt.Fprintf(os.Stderr, "dream-cycle: merge: target %q already removed by earlier batch, skipping\n", action.TargetUID)
+			return errSkipped
+		}
 		return fmt.Errorf("merge: read target %q: %w", action.TargetUID, err)
 	}
 
@@ -164,14 +187,14 @@ func applyConsolidate(store NoteStore, action consolidationAction, known map[str
 		return fmt.Errorf("consolidate: write new note: %w", err)
 	}
 
-	// Delete all source notes
+	// Delete all source notes (skip any already removed by earlier batches)
 	var deletedUIDs []string
 	for _, uid := range action.SourceUIDs {
 		if n, ok := known[uid]; ok && n.Status == "active" {
 			deletedUIDs = append(deletedUIDs, uid)
 		}
 		if err := store.DeleteNote(uid); err != nil {
-			return fmt.Errorf("consolidate: delete %q: %w", uid, err)
+			fmt.Fprintf(os.Stderr, "dream-cycle: consolidate: note %q already removed, skipping delete\n", uid)
 		}
 	}
 

@@ -34,7 +34,7 @@ func newMockStore(notes ...Note) *mockNoteStore {
 func (m *mockNoteStore) ReadNote(uid string) (*Note, error) {
 	n, ok := m.notes[uid]
 	if !ok {
-		return nil, fmt.Errorf("note %q not found", uid)
+		return nil, &os.PathError{Op: "open", Path: uid + ".md", Err: os.ErrNotExist}
 	}
 	return &n, nil
 }
@@ -185,6 +185,80 @@ func TestApplyActions_UnknownType(t *testing.T) {
 	_, err := ApplyActions(store, actions, batch)
 	if err == nil {
 		t.Fatal("expected error for unknown action type")
+	}
+}
+
+func TestApplyActions_KeepMissingNote(t *testing.T) {
+	store := newMockStore() // no notes in store
+	batch := Batch{PendingNote: Note{UID: "GONE0001", Title: "Deleted", Content: "body", Status: "pending"}}
+
+	actions := []consolidationAction{
+		{Type: "keep", SourceUID: "GONE0001", Reason: "already handled"},
+	}
+
+	counts, err := ApplyActions(store, actions, batch)
+	if err != nil {
+		t.Fatalf("expected graceful skip, got error: %v", err)
+	}
+	if counts["keep"] != 0 {
+		t.Errorf("expected 0 keep (skipped), got %d", counts["keep"])
+	}
+}
+
+func TestApplyActions_MergeMissingTarget(t *testing.T) {
+	pending := Note{UID: "PEND0002", Title: "New", Content: "new body", Status: "pending"}
+	store := newMockStore(pending) // target ACTV0002 not in store
+
+	batch := Batch{
+		PendingNote:  pending,
+		RelatedNotes: []Note{{UID: "ACTV0002", Title: "Gone", Content: "old", Status: "active"}},
+	}
+
+	actions := []consolidationAction{
+		{
+			Type:          "merge",
+			SourceUID:     "PEND0002",
+			TargetUID:     "ACTV0002",
+			MergedTitle:   "Combined",
+			MergedContent: "merged body",
+			Reason:        "target removed by earlier batch",
+		},
+	}
+
+	counts, err := ApplyActions(store, actions, batch)
+	if err != nil {
+		t.Fatalf("expected graceful skip, got error: %v", err)
+	}
+	if counts["merge"] != 0 {
+		t.Errorf("expected 0 merge (skipped), got %d", counts["merge"])
+	}
+}
+
+func TestApplyActions_ConsolidateDeleteMissing(t *testing.T) {
+	pending := Note{UID: "PEND0003", Title: "P", Content: "body", Status: "pending"}
+	active := Note{UID: "GONE0003", Title: "G", Content: "old", Status: "active"}
+	store := newMockStore(pending) // GONE0003 not in store — simulates earlier deletion
+
+	batch := Batch{PendingNote: pending, RelatedNotes: []Note{active}}
+
+	actions := []consolidationAction{
+		{
+			Type:       "consolidate",
+			SourceUIDs: []string{"PEND0003", "GONE0003"},
+			ConsolidatedNote: &newNoteSpec{
+				Title:   "Consolidated",
+				Content: "combined content",
+			},
+			Reason: "merge topics",
+		},
+	}
+
+	counts, err := ApplyActions(store, actions, batch)
+	if err != nil {
+		t.Fatalf("expected graceful skip on delete, got error: %v", err)
+	}
+	if counts["consolidate"] != 1 {
+		t.Errorf("expected 1 consolidate, got %d", counts["consolidate"])
 	}
 }
 

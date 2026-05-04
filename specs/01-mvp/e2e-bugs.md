@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-04
 **Source:** AUD-023 E2E scenario execution against deployed stack (us-east-1, account 639628476385)
-**Status:** 5 found, 4 fixed, 1 open (low)
+**Status:** All Fixed
 
 ## Summary
 
@@ -12,7 +12,7 @@
 | E2E-002: Dream cycle consolidation fails to parse LLM preamble text | Medium | CLI | **Fixed** |
 | E2E-003: Local KB directory not auto-created on first note submission | Medium | CLI | **Fixed** |
 | E2E-004: Unquoted YAML title values break frontmatter parsing | High | CLI | **Fixed** |
-| E2E-005: Dream cycle cascading file-not-found on concurrent batch processing | Low | CLI | Open |
+| E2E-005: Dream cycle cascading file-not-found on concurrent batch processing | Low | CLI | **Fixed** |
 
 ---
 
@@ -367,8 +367,8 @@ Additionally, repaired 100 existing notes in `~/.multi-kb/local/default/` by quo
 ## E2E-005: Dream Cycle Cascading File-Not-Found on Concurrent Batch Processing
 
 **Severity:** Low — non-fatal, affects ~8-17% of batches per run
-**Component:** CLI (`cli/internal/dreamcycle/cycle.go`, `cli/internal/dreamcycle/phase3.go`)
-**Status:** Open
+**Component:** CLI (`cli/internal/dreamcycle/actions.go`)
+**Status:** Fixed (2026-05-04)
 
 ### Problem
 
@@ -389,14 +389,26 @@ The dream cycle continues processing remaining batches — these errors are non-
 
 Phase 2 (related note discovery via git grep) runs before Phase 3 (LLM consolidation + action application) for all batches. The related notes are resolved at Phase 2 time. By the time Phase 3 processes a batch, earlier batches may have deleted some of the related notes through consolidate or merge actions.
 
-### Suggested Fix
+### Fix
 
-In Phase 3, when a keep/merge action references a note that no longer exists, skip the stale reference gracefully instead of reporting an error. This is a best-effort strategy — the note was already handled by a prior batch.
+**File:** `cli/internal/dreamcycle/actions.go`
+
+Three changes to handle missing notes gracefully:
+
+1. **`applyKeep()`**: When `store.ReadNote()` returns `os.ErrNotExist`, log a warning and return `errSkipped` sentinel instead of a real error. The caller (`ApplyActions`) checks for `errSkipped` and `continue`s without incrementing the action count.
+
+2. **`applyMerge()`**: Same pattern — when the merge target no longer exists, return `errSkipped`. The pending note is left as-is for a future dream cycle run.
+
+3. **`applyConsolidate()`**: When `store.DeleteNote()` fails for a source UID, log a warning and continue (the note was already deleted by an earlier batch's consolidate action). `DeleteNote` on `localNoteStore` already handles `os.IsNotExist` gracefully, so this is defense-in-depth.
 
 **Acceptance Criteria:**
-- [ ] Phase 3 action application handles missing related notes gracefully (skip + warn instead of error)
-- [ ] Error count for cascading file-not-found drops to 0 or near-0
-- [ ] Run log `errors` field reflects only genuine failures
+- [x] Phase 3 action application handles missing related notes gracefully (skip + warn instead of error)
+- [x] Error count for cascading file-not-found drops to 0 or near-0
+- [x] Run log `errors` field reflects only genuine failures
+- [x] Test: `TestApplyActions_KeepMissingNote` — keep on deleted note skips gracefully, count stays 0
+- [x] Test: `TestApplyActions_MergeMissingTarget` — merge with deleted target skips, count stays 0
+- [x] Test: `TestApplyActions_ConsolidateDeleteMissing` — consolidate succeeds when source already deleted
+- [x] All existing tests pass (dreamcycle: 25/25, full suite: all pass)
 
 ---
 
